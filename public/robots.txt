@@ -1,0 +1,8 @@
+# Malaysia SMEs ESG e-Reporting System
+#
+# Every page behind /auth is a signed-in application surface holding company
+# ESG data. None of it should be indexed. Served from /public so it is
+# reachable by a crawler WITHOUT a session — see the note in server.js about
+# why this file cannot live behind the auth guard.
+User-agent: *
+Disallow: /

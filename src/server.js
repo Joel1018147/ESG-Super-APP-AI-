@@ -159,6 +159,18 @@ app.get('/health', async (req, res) => {
 // Every browser asks for this on every navigation.
 app.get('/favicon.ico', (req, res) => res.redirect(301, '/favicon.svg'));
 
+// robots.txt is served by express.static from /public, which is mounted above
+// the auth guard — deliberately. A crawler has no session, so a robots.txt
+// sitting behind requireAuth answers 302-to-login, which a crawler treats as
+// "no robots.txt exists" and proceeds to index whatever it can reach. The
+// Railway HTTP log showed exactly that: GET /robots.txt -> 302.
+//
+// This route exists only to make the guarantee explicit and testable; without
+// the file present, static would miss and the request would fall through to
+// the guard again.
+app.get('/robots.txt', (req, res) =>
+  res.sendFile(path.join(__dirname, '../public/robots.txt')));
+
 app.get('/', (req, res) => res.redirect(req.isAuthenticated && req.isAuthenticated() ? '/dashboard' : '/auth/login'));
 app.use('/auth', require('./routes/auth'));
 app.use('/api',  requireAuth, denyWritesForReadOnly, require('./routes/api'));
@@ -202,7 +214,7 @@ async function start() {
     await enqueue(verra.JOB_TYPE, { country: 'Malaysia' });
   }
   app.listen(PORT, () => {
-    console.log(`✅ Modus ESG listening on ${PORT} (${IS_PROD ? 'production' : 'development'})`);
+    console.log(`✅ Malaysia SMEs ESG e-Reporting System listening on ${PORT} (${IS_PROD ? 'production' : 'development'})`);
   });
 }
 

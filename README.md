@@ -43,7 +43,7 @@ $env:DATABASE_URL="postgres://..."; node test/smoke-test.js   # full end-to-end 
 
 Auth · company profile · 40-indicator assessment · **deterministic scoring
 engine** with E/S/G/overall, bands and provenance stamps · radar dashboard ·
-Scope 1/2 carbon with stamped emission factors · Verra reference mirror · AI
+Scope 1/2 carbon with stamped emission factors · carbon-registry reference mirror · AI
 recommendations with offline fallback · full JSON API · Postgres job queue.
 
 ## Known gaps — deliberate and visible
@@ -54,10 +54,30 @@ recommendations with offline fallback · full JSON API · Postgres job queue.
 | Diesel and petrol emission factors are DEFRA placeholders, not Malaysian. | `verification_status = 'unverified'`; every entry using them is stamped `is_provisional` and badged in the UI. |
 | Evidence upload not built. `esg_documents` exists with no writer. | `/documents` says so rather than showing a broken button. |
 | Report generation (PDF/DOCX/XLSX) not built. | `/reports` says so. |
-| Verra ingest off until `VERRA_API_BASE` is set. | `/verra` reports **uninstrumented**, not "empty". |
+| Registry ingest off until `VERRA_API_BASE` is set. | `/governance` reports **uninstrumented**, not "empty". |
 
 A table with no writer answers nothing. Every one of the above is reported as
 *not switched on* rather than as *zero*.
+
+## Naming
+
+The user-facing page is **Governance & Recognition** at `/governance`. The
+registry brand appears nowhere in the navigation, page titles or body copy —
+that was a product decision.
+
+It DOES remain in three places, deliberately:
+
+- a one-line source caption under mirrored records, because provenance of
+  third-party data is a licensing matter, not branding
+- the `VERRA_API_BASE` / `VERRA_INGEST_ENABLED` env vars, `verraService.js`,
+  the `/api/verra/*` endpoints and the `esg_verra_*` tables — configuration and
+  schema identifiers, renaming which would be a migration for no user-visible gain
+- `docs/VERRA_BENCHMARK.md`, which is the record of why the registry is not the
+  scoring benchmark and must keep naming what it is about
+
+There is no redirect from the old `/verra` path. Adding one would reintroduce
+the name into the URL space the rename was meant to clear, to serve a bookmark
+that does not exist.
 
 ## Documentation
 

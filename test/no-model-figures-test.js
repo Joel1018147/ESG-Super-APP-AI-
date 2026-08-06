@@ -209,4 +209,27 @@ test('every page shell carries the official system name', () => {
   assert.ok(layout('Sign in', '', null, '').includes(NAME), 'signed-out shell');
 });
 
+test('robots.txt and the favicon are reachable without a session', () => {
+  // Both are mounted above the auth guard. Railway's HTTP log caught
+  // GET /robots.txt -> 302: a crawler reads that as "no robots.txt" and
+  // indexes what it can reach, which for this app is the login page of a
+  // system holding company ESG data.
+  const src = readRaw(path.join(SRC, 'server.js'));
+  const guardAt = src.indexOf("app.use('/api'");
+  for (const route of ["app.get('/favicon.ico'", "app.get('/robots.txt'"]) {
+    const at = src.indexOf(route);
+    assert.ok(at !== -1, `${route} is missing`);
+    assert.ok(at < guardAt, `${route} is mounted behind the auth guard`);
+  }
+  const robots = fs.readFileSync(path.join(SRC, '../public/robots.txt'), 'utf8');
+  assert.ok(/Disallow:\s*\/\s*$/m.test(robots), 'robots.txt does not disallow indexing');
+});
+
+test('the boot banner names the system, not the old working title', () => {
+  const src = readRaw(path.join(SRC, 'server.js'));
+  assert.ok(/listening on/.test(src), 'no startup log');
+  assert.ok(!/Modus ESG listening/.test(src),
+    'the boot banner still says "Modus ESG" — this is the line a stakeholder reads in the deploy log');
+});
+
 console.log(`no-model-figures-test: ${passed} passed`);
