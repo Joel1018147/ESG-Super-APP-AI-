@@ -33,8 +33,19 @@ pointed at production. Use the scratch database in the separate Railway project
 **ESG AI+ Staging** (`6d7eab4d-f45a-42f0-8e88-ba6b769dc567`), which exists for
 exactly this and holds nothing else.
 
-Railway's Postgres template does NOT publish a `DATABASE_PUBLIC_URL` variable
-even with the TCP proxy enabled — assuming it does has cost time twice now.
+Two separate facts about Railway Postgres, which are easy to collapse into one
+wrong rule:
+
+1. **The template never publishes `DATABASE_PUBLIC_URL`** — not even with the
+   TCP proxy switched on. Its absence tells you nothing about reachability.
+2. **`RAILWAY_TCP_PROXY_DOMAIN` / `RAILWAY_TCP_PROXY_PORT` are the signal.**
+   Present means public networking is on; absent means the database is reachable
+   only from inside Railway, and no amount of URL-building will change that.
+
+Production (`Postgres-Lo_D`) has neither — deliberately. It is private and stays
+private. Staging has the proxy vars and no `DATABASE_PUBLIC_URL`, which is the
+normal, correct state for a reachable database.
+
 Build the URL from the service's own variables:
 
 ```
