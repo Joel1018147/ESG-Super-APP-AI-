@@ -1,0 +1,34 @@
+{
+  "name": "modus-esg-super-app",
+  "version": "0.1.0",
+  "description": "Modus AI Ecosystem \u2014 Malaysia SME ESG e-Reporting System",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node test/run-all.js",
+    "test:scoring": "node test/scoring-engine-test.js",
+    "test:guards": "node test/no-model-figures-test.js",
+    "test:schema": "node test/schema-idempotency-test.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "connect-pg-simple": "^10.0.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
+    "express": "^4.18.2",
+    "express-session": "^1.18.0",
+    "helmet": "^8.2.0",
+    "morgan": "^1.10.0",
+    "multer": "^2.0.1",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
+    "pg": "^8.13.0",
+    "passport-local": "^1.0.0"
+  }
+}
