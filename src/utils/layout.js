@@ -24,7 +24,7 @@ const MODULES = [
   { key: 'assessment', icon: '📋', label: 'ESG Assessment',  path: '/assessment' },
   { key: 'carbon',     icon: '🌱', label: 'Carbon',          path: '/carbon' },
   { key: 'documents',  icon: '📁', label: 'Evidence',        path: '/documents' },
-  { key: 'verra',      icon: '🔎', label: 'Verra Registry',  path: '/verra' },
+  { key: 'governance', icon: '🔎', label: 'Governance & Recognition', path: '/governance' },
   { key: 'reports',    icon: '📄', label: 'Reports',         path: '/reports' },
 ];
 
@@ -42,21 +42,22 @@ function bareLayout(title, content) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(title)} · Modus ESG</title>
+<title>${esc(title)} · Malaysia SMEs ESG e-Reporting System</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>${MODUS_CSS}</style>
 <style>
 body{background:var(--bg)}
 .bare-wrap{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px}
-.bare-brand{display:flex;align-items:center;gap:10px;font-weight:700;margin-bottom:20px;color:var(--text)}
+.bare-brand{display:flex;align-items:center;gap:10px;font-weight:700;margin-bottom:20px;color:var(--text);text-align:center;justify-content:center;font-size:15px}
 .bare-dot{width:10px;height:10px;border-radius:50%;background:var(--accent)}
 .bare-content{width:100%;max-width:460px}
 </style>
 </head>
 <body>
 <div class="bare-wrap">
-  <div class="bare-brand"><span class="bare-dot"></span> Modus ESG</div>
+  <div class="bare-brand"><span class="bare-dot"></span> Malaysia SMEs ESG e-Reporting System</div>
   <div class="bare-content">${content}</div>
 </div>
 <script>
@@ -101,7 +102,8 @@ function layout(title, content, user, activePath = '') {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(title)} · Modus ESG</title>
+<title>${esc(title)} · Malaysia SMEs ESG e-Reporting System</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>${MODUS_CSS}</style>
@@ -118,6 +120,8 @@ function layout(title, content, user, activePath = '') {
 .topbar{height:var(--topbar-h);display:flex;align-items:center;justify-content:space-between;padding:0 24px;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:5}
 .avatar{width:32px;height:32px;border-radius:50%;background:var(--accent);color:var(--accent-contrast);display:grid;place-items:center;font-weight:600;font-size:13px}
 .content{padding:24px;max-width:1200px;width:100%}
+.topbar-system{font-size:11px;color:var(--muted);line-height:1.2;margin-top:1px}
+@media (max-width:768px){.topbar-system{display:none}}
 .bottom-nav{display:none}
 @media (max-width:768px){
   .sidebar{display:none}
@@ -141,7 +145,10 @@ function layout(title, content, user, activePath = '') {
   </aside>
   <div class="main">
     <header class="topbar">
-      <strong>${esc(title)}</strong>
+      <div>
+        <strong>${esc(title)}</strong>
+        <div class="topbar-system">Malaysia SMEs ESG e-Reporting System</div>
+      </div>
       <div style="display:flex;align-items:center;gap:12px">
         <button class="btn btn-ghost" id="themeBtn" type="button" aria-label="Toggle theme">◐</button>
         <div class="avatar" title="${esc(user?.email || '')}">${esc(initials)}</div>

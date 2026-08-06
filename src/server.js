@@ -152,6 +152,13 @@ app.get('/health', async (req, res) => {
   }
 });
 
+// Mounted BEFORE the auth guards, because a favicon request is not a page
+// request. Left behind the guards it 302s an anonymous visitor to the login
+// page, and once signed in it fell through to the HTML 404 — which rendered
+// the whole shell, 97 KB of inlined CSS, to say "not found" about a 1 KB icon.
+// Every browser asks for this on every navigation.
+app.get('/favicon.ico', (req, res) => res.redirect(301, '/favicon.svg'));
+
 app.get('/', (req, res) => res.redirect(req.isAuthenticated && req.isAuthenticated() ? '/dashboard' : '/auth/login'));
 app.use('/auth', require('./routes/auth'));
 app.use('/api',  requireAuth, denyWritesForReadOnly, require('./routes/api'));
@@ -160,6 +167,10 @@ app.use('/',     requireAuth, denyWritesForReadOnly, require('./routes/pages'));
 // 404
 app.use((req, res) => {
   if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found' });
+  // A request with a file extension is an asset, not a page. Answering it with
+  // a rendered HTML shell wastes ~97 KB and, worse, returns Content-Type
+  // text/html for something the browser asked for as an image or a script.
+  if (/\.[a-z0-9]{2,5}$/i.test(req.path)) return res.status(404).type('txt').send('Not found');
   const { layout } = require('./utils/layout');
   res.status(404).send(layout('Not found',
     '<div class="empty-state"><div class="es-icon">🔍</div><h3>Page not found</h3></div>',

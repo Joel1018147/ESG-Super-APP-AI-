@@ -153,7 +153,13 @@ const json = (method, o) => ({ method, headers: { 'Content-Type': 'application/j
     assert.strictEqual(b.is_provisional, true, 'an unverified factor must never look verified');
   });
 
-  await check('the Verra mirror reports uninstrumented rather than empty', async () => {
+  await check('the governance page carries no registry brand but keeps data attribution', async () => {
+    const html = await (await A('/governance')).text();
+    assert.ok(!/Verra Registry/i.test(html), 'the old menu label survived');
+    assert.ok(/Governance &amp; Recognition|Governance & Recognition/.test(html), 'page title not renamed');
+  });
+
+  await check('the registry mirror reports uninstrumented rather than empty', async () => {
     const b = await (await A('/api/verra/status', { headers: { Accept: 'application/json' } })).json();
     assert.strictEqual(b.state, 'uninstrumented');
     assert.strictEqual(b.ingest_enabled, false);
@@ -164,6 +170,7 @@ const json = (method, o) => ({ method, headers: { 'Content-Type': 'application/j
     const html = await r.text();
     assert.strictEqual(r.status, 200);
     assert.ok(html.includes('data-platform="esg"'), 'wrong platform accent');
+    assert.ok(html.includes('Malaysia SMEs ESG e-Reporting System'), 'system name missing from the shell');
     assert.ok(html.includes('85'), 'the score is not on the page');
     assert.ok(!html.includes('undefined'), 'a template hole rendered as "undefined"');
   });

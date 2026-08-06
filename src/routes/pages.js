@@ -425,7 +425,7 @@ router.post('/carbon', async (req, res, next) => {
 });
 
 // ── Verra ──────────────────────────────────────────────────────────────────
-router.get('/verra', async (req, res, next) => {
+router.get('/governance', async (req, res, next) => {
   try {
     const status = await mirrorStatus();
     const q = String(req.query.q || '').trim();
@@ -445,26 +445,28 @@ router.get('/verra', async (req, res, next) => {
          ${q ? (results.length ? `<table class="table"><thead><tr><th>ID</th><th>Name</th><th>Country</th><th>Methodology</th><th>Status</th></tr></thead><tbody>
             ${results.map((r) => `<tr><td>${esc(r.verra_project_id)}</td><td>${esc(r.name)}</td>
               <td>${esc(r.country)}</td><td>${esc(r.methodology_code)}</td><td>${esc(r.status)}</td></tr>`).join('')}
-            </tbody></table>` : emptyState('zero', { title: 'No matches', body: `Nothing in the mirror matches "${q}".` })) : ''}`
+            </tbody></table>
+            <small class="muted">Records mirrored from the Verra public registry (verra.org). Metadata and links only.</small>`
+          : emptyState('zero', { title: 'No matches', body: `Nothing in the mirror matches "${q}".` })) : ''}`
       : emptyState(status.state, {
-          title: status.state === 'uninstrumented' ? 'Verra mirror is not switched on' : 'Verra mirror is empty',
+          title: status.state === 'uninstrumented' ? 'Registry mirror is not switched on' : 'Registry mirror is empty',
           body: status.state === 'uninstrumented'
-            ? 'Set VERRA_API_BASE and VERRA_INGEST_ENABLED=true, then run the sync job. Nothing writes to this table until then.'
+            ? 'Registry ingest has not been configured, so nothing writes to this table yet. See the deployment notes for the environment variables it needs.'
             : 'Ingest is configured and working — the sync has not run yet or returned no records.' });
 
-    res.send(layout('Verra Registry', `
+    res.send(layout('Governance & Recognition', `
       <div class="ai-insight" style="margin-bottom:16px">
-        <strong>What this is.</strong> A local mirror of Verra's public registry, for carbon-credit
-        lookup. Verra certifies carbon <em>projects</em> and issues VCUs — it does not rate companies
-        on E, S and G, so nothing here feeds your ESG score. The scoring engine refuses to score
-        against it by design.
+        <strong>What this is.</strong> A local mirror of a public carbon-crediting registry, for
+        carbon-credit lookup. That registry certifies individual carbon <em>projects</em> and issues
+        tradable carbon units — it does not rate companies on E, S and G, so nothing here feeds your
+        ESG score. The scoring engine refuses to score against it by design.
       </div>
       <div class="grid grid-3" style="margin-bottom:16px">
         <div class="stat-card"><div class="sc-label">Projects mirrored</div><div class="sc-value">${esc(status.projects)}</div></div>
         <div class="stat-card"><div class="sc-label">Methodologies</div><div class="sc-value">${esc(status.methodologies)}</div></div>
         <div class="stat-card"><div class="sc-label">Last fetch</div><div class="sc-value" style="font-size:16px">${status.last_fetch ? esc(new Date(status.last_fetch).toISOString().slice(0, 10)) : '—'}</div></div>
       </div>
-      ${body}`, req.user, '/verra'));
+      ${body}`, req.user, '/governance'));
   } catch (err) { next(err); }
 });
 

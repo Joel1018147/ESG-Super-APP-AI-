@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Modus ESG">
+  <rect width="32" height="32" rx="7" fill="#4D7C0F"/>
+  <path d="M22.5 8.5c0 7.2-4.2 11.5-9.6 11.5-1.2 0-2.3-.2-3.2-.6C10.9 13.2 15.6 9.2 22.5 8.5Z"
+        fill="#E4EFD1"/>
+  <path d="M9 24c0-4.6 3.4-9.6 9.6-12.4" stroke="#E4EFD1" stroke-width="2"
+        stroke-linecap="round" fill="none"/>
+</svg>

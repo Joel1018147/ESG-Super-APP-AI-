@@ -178,4 +178,35 @@ test('a signed-out page renders no navigation and no sign-out link', () => {
   assert.ok(/class="nav-item/.test(signedIn), 'signed-in page lost its sidebar');
 });
 
+test('an asset 404 does not render the HTML shell', () => {
+  // Regression. /favicon.ico was answered with a 99,170-byte HTML page —
+  // the full design system inlined, to say "not found" about an icon.
+  const src = readRaw(path.join(SRC, 'server.js'));
+  assert.ok(/app\.get\('\/favicon\.ico'/.test(src), 'no /favicon.ico route');
+  assert.ok(src.indexOf("app.get('/favicon.ico'") < src.indexOf("app.use('/api'"),
+    '/favicon.ico must be mounted before the auth guards or it 302s anonymous visitors');
+  assert.ok(/\[a-z0-9\]\{2,5\}\$\/i\.test\(req\.path\)/.test(src),
+    'the 404 handler must short-circuit paths with a file extension');
+});
+
+test('no third-party registry brand appears in the navigation', () => {
+  // The menu item and page title are branding and are Joel's call. Source
+  // attribution on the mirrored RECORDS is not branding — it is provenance and
+  // a term of the registry's public licence — so that line stays and is
+  // asserted separately in smoke-test.js.
+  const { MODULES } = require('../src/utils/layout');
+  for (const m of MODULES) {
+    assert.ok(!/verra/i.test(m.label), `nav label still names the registry: ${m.label}`);
+    assert.ok(!/verra/i.test(m.path),  `nav path still names the registry: ${m.path}`);
+  }
+  assert.ok(MODULES.some((m) => m.path === '/governance'), 'no /governance entry');
+});
+
+test('every page shell carries the official system name', () => {
+  const { layout } = require('../src/utils/layout');
+  const NAME = 'Malaysia SMEs ESG e-Reporting System';
+  assert.ok(layout('Dashboard', '', { name: 'J' }, '/dashboard').includes(NAME), 'signed-in shell');
+  assert.ok(layout('Sign in', '', null, '').includes(NAME), 'signed-out shell');
+});
+
 console.log(`no-model-figures-test: ${passed} passed`);

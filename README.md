@@ -1,6 +1,6 @@
 # Modus ESG Super App
 
-Malaysia SME ESG e-Reporting System. Part of the Modus AI Ecosystem — same
+Malaysia SMEs ESG e-Reporting System. Part of the Modus AI Ecosystem — same
 stack, same design system, same auth pattern as the other nine platforms.
 
 Platform accent: `data-platform="esg"` → moss green `#4D7C0F`.
