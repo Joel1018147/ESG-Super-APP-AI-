@@ -232,4 +232,33 @@ test('the boot banner names the system, not the old working title', () => {
     'the boot banner still says "Modus ESG" — this is the line a stakeholder reads in the deploy log');
 });
 
+test('every design token layout.js uses actually exists in the stylesheet', () => {
+  // This repo's copy of the design system is SYNCED FROM MASTER by a separate
+  // ecosystem-wide process (see commit 08dac9b). A sync can rename or drop a
+  // token at any time, and the failure is silent: CSS never warns, nothing
+  // throws, the element just renders transparent or inherits. This test is the
+  // only thing that turns that into a red build.
+  const css = fs.readFileSync(path.join(SRC, '../public/css/modus-design-system.css'), 'utf8');
+  const layoutSrc = readRaw(path.join(SRC, 'utils/layout.js'));
+
+  const used = new Set();
+  for (const m of layoutSrc.matchAll(/var\((--[a-z0-9-]+)\)/gi)) used.add(m[1]);
+  assert.ok(used.size >= 10, `expected layout.js to consume the design system, found ${used.size} tokens`);
+
+  const defined = new Set();
+  for (const m of css.matchAll(/^\s*(--[a-z0-9-]+)\s*:/gim)) defined.add(m[1]);
+
+  const missing = [...used].filter((t) => !defined.has(t));
+  assert.deepStrictEqual(missing, [],
+    `layout.js uses tokens the stylesheet does not define: ${missing.join(', ')}`);
+});
+
+test('the ESG accent survives a design-system sync, in both themes', () => {
+  const css = fs.readFileSync(path.join(SRC, '../public/css/modus-design-system.css'), 'utf8');
+  assert.ok(/\[data-platform="esg"\]/.test(css), 'the esg accent block is gone');
+  assert.ok(/#4D7C0F/i.test(css), 'the esg accent value changed from the canonical #4D7C0F');
+  assert.ok(/\[data-theme="dark"\]\[data-platform="esg"\]/.test(css),
+    'the esg dark-mode block is gone — dark mode would fall back to the default accent silently');
+});
+
 console.log(`no-model-figures-test: ${passed} passed`);
