@@ -34,7 +34,54 @@ function esc(s) {
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+/** Chrome-free shell for signed-out pages: login, register, 404 and the error
+ *  page. Same tokens, same theme toggle, no navigation. */
+function bareLayout(title, content) {
+  return `<!DOCTYPE html>
+<html lang="en" data-platform="esg" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(title)} · Modus ESG</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>${MODUS_CSS}</style>
+<style>
+body{background:var(--bg)}
+.bare-wrap{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px}
+.bare-brand{display:flex;align-items:center;gap:10px;font-weight:700;margin-bottom:20px;color:var(--text)}
+.bare-dot{width:10px;height:10px;border-radius:50%;background:var(--accent)}
+.bare-content{width:100%;max-width:460px}
+</style>
+</head>
+<body>
+<div class="bare-wrap">
+  <div class="bare-brand"><span class="bare-dot"></span> Modus ESG</div>
+  <div class="bare-content">${content}</div>
+</div>
+<script>
+(function(){
+  var KEY='modus-theme', saved=null;
+  try{saved=localStorage.getItem(KEY);}catch(e){}
+  if(saved)document.documentElement.setAttribute('data-theme',saved);
+})();
+</script>
+</body></html>`;
+}
+
 function layout(title, content, user, activePath = '') {
+  // SIGNED OUT MEANS NO CHROME.
+  //
+  // This used to render the sidebar and a "Sign out" button unconditionally,
+  // so the login page offered an anonymous visitor seven links to pages that
+  // immediately bounce them, and invited them to sign out of a session they do
+  // not have. Every one of those links reads as broken, and a first-time SME
+  // owner meets the product by clicking one and being refused.
+  //
+  // Keyed on `user` being absent, which is exactly the condition the auth
+  // pages already pass in — no new flag to keep in sync.
+  if (!user) return bareLayout(title, content);
+
   const initials = (user?.name?.[0] || user?.email?.[0] || 'U').toUpperCase();
 
   const nav = MODULES.map((m) => {
@@ -148,4 +195,4 @@ function emptyState(state, opts = {}) {
     <h3>${esc(s.title)}</h3><p>${esc(s.body)}</p></div>`;
 }
 
-module.exports = { layout, esc, emptyState, MODULES };
+module.exports = { layout, bareLayout, esc, emptyState, MODULES };

@@ -145,4 +145,37 @@ test('every esg_ table in the schema has created_at and updated_at', () => {
   }
 });
 
+test('SSL is decided by the connection target, not by NODE_ENV', () => {
+  // Regression. The old code keyed SSL off NODE_ENV, which forced anyone
+  // connecting a laptop to the hosted database into NODE_ENV=production — and
+  // that also turns on secure session cookies, which http://localhost never
+  // sends. Login would fail silently.
+  const { sslConfig } = require('../src/db');
+  assert.strictEqual(sslConfig('postgresql://u:p@localhost:5432/db'), false);
+  assert.strictEqual(sslConfig('postgresql://u:p@127.0.0.1:5432/db'), false);
+  assert.strictEqual(sslConfig('postgresql://u:p@postgres.railway.internal:5432/db'), false);
+  assert.deepStrictEqual(sslConfig('postgresql://u:p@shuttle.proxy.rlwy.net:1234/db'),
+                         { rejectUnauthorized: false });
+  const prev = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'production';
+  assert.strictEqual(sslConfig('postgresql://u:p@localhost:5432/db'), false,
+    'NODE_ENV must have no influence on the SSL decision');
+  process.env.NODE_ENV = prev;
+});
+
+test('a signed-out page renders no navigation and no sign-out link', () => {
+  // Regression. The login page shipped with the full sidebar and a "Sign out"
+  // button: seven links that bounce an anonymous visitor, and an invitation to
+  // end a session they never had.
+  const { layout } = require('../src/utils/layout');
+  const out = layout('Sign in', '<form></form>', null, '');
+  assert.ok(!/Sign out/i.test(out), 'signed-out page offers a sign-out link');
+  assert.ok(!/class="nav-item/.test(out), 'signed-out page renders the sidebar');
+  assert.ok(!/class="bottom-nav/.test(out), 'signed-out page renders the bottom nav');
+  assert.ok(/data-platform="esg"/.test(out), 'signed-out page lost the platform accent');
+
+  const signedIn = layout('Dashboard', '<div></div>', { name: 'Joel', role: 'company_admin' }, '/dashboard');
+  assert.ok(/class="nav-item/.test(signedIn), 'signed-in page lost its sidebar');
+});
+
 console.log(`no-model-figures-test: ${passed} passed`);

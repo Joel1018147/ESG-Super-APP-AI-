@@ -1,5 +1,9 @@
 'use strict';
-require('dotenv').config();
+// quiet: dotenv v17 prints a sponsor tip with a third-party URL on every boot.
+// Harmless, but this log is going to be read by people auditing a government-
+// facing platform, and an unexplained external domain in the startup banner is
+// a question nobody needs to answer.
+require('dotenv').config({ quiet: true });
 
 const path         = require('path');
 const express      = require('express');

@@ -10,7 +10,7 @@ const router = express.Router();
 
 function authPage(title, body, error) {
   return layout(title, `
-    <div class="card" style="max-width:420px;margin:8vh auto">
+    <div class="card">
       <h2 style="margin-bottom:4px">${esc(title)}</h2>
       <p class="muted" style="margin-bottom:20px">Malaysia SME ESG e-Reporting System</p>
       ${error ? `<div class="badge badge-danger" style="display:block;margin-bottom:16px">${esc(error)}</div>` : ''}

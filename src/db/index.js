@@ -15,9 +15,34 @@ if (types && typeof types.setTypeParser === 'function') {
   types.setTypeParser(20, (v) => (v === null ? null : parseInt(v, 10))); // int8
 }
 
+// SSL is decided by WHERE WE ARE CONNECTING, not by NODE_ENV.
+//
+// Keying it off NODE_ENV looks tidy and is a trap. A developer pointing their
+// laptop at the Railway database has to set NODE_ENV=production to get SSL —
+// and that ALSO flips session cookies to `secure`, which a browser never sends
+// over http://localhost. The result is a login form that accepts the password,
+// redirects, and lands you back on the login page, with nothing in any log.
+// Half an hour, minimum, and the clue is nowhere near the cause.
+//
+// A local socket needs no SSL; anything else does. PGSSLMODE=disable overrides,
+// for the case of a self-hosted Postgres on a private network.
+function sslConfig(url) {
+  if (String(process.env.PGSSLMODE).toLowerCase() === 'disable') return false;
+  if (!url) return false;
+  let host = '';
+  try { host = new URL(url).hostname; } catch { return false; }
+  const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '';
+  // Railway's internal *.railway.internal hostnames are inside the private
+  // network and the managed Postgres does not present a public certificate
+  // there; the public proxy does. rejectUnauthorized stays false either way
+  // because Railway terminates with its own chain.
+  if (isLocal || host.endsWith('.railway.internal')) return false;
+  return { rejectUnauthorized: false };
+}
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+  ssl: sslConfig(process.env.DATABASE_URL),
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
@@ -83,4 +108,4 @@ async function initDb() {
   }
 }
 
-module.exports = { pool, query, getClient, withTransaction, initDb };
+module.exports = { pool, query, getClient, withTransaction, initDb, sslConfig };
