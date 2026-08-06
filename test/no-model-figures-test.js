@@ -261,4 +261,32 @@ test('the ESG accent survives a design-system sync, in both themes', () => {
     'the esg dark-mode block is gone — dark mode would fall back to the default accent silently');
 });
 
+test('the stylesheet is linked, not inlined, and cache-busted by content', () => {
+  const { layout, bareLayout, CSS_HREF, CSS_VERSION } = require('../src/utils/layout');
+  for (const [name, html] of [['signed-in', layout('D', '', { name: 'J' }, '/dashboard')],
+                              ['signed-out', bareLayout('Sign in', '')]]) {
+    assert.ok(html.includes(`<link rel="stylesheet" href="${CSS_HREF}">`), `${name}: sheet not linked`);
+    // A rule from deep in the file. If this appears, the whole sheet is being
+    // inlined again and the ~97 KB per response is back.
+    assert.ok(!html.includes('.table-wrap'), `${name}: full stylesheet is inlined`);
+    assert.ok(html.length < 20000, `${name}: page is ${html.length} bytes, expected well under 20 KB`);
+  }
+  // Content-derived, because express.static caches for 7 days and the sheet is
+  // synced from master by a separate process. A fixed version string would
+  // leave returning users on a stale sheet for a week after every sync.
+  assert.ok(/^[0-9a-f]{8}$/.test(CSS_VERSION), `CSS_VERSION is not a content hash: ${CSS_VERSION}`);
+});
+
+test('the inlined floor carries every token block it claims to', () => {
+  // The floor exists for one situation: the stylesheet fails to load. A floor
+  // missing a block fails ONLY in that situation, which is why this is asserted
+  // rather than eyeballed — a double-escaped selector list once reduced it to
+  // :root alone and dev looked perfect, because the linked sheet covered it.
+  const { TOKENS_CSS } = require('../src/utils/layout');
+  assert.ok(/--accent:/.test(TOKENS_CSS), 'no :root tokens');
+  assert.ok(/#4D7C0F/i.test(TOKENS_CSS), 'no esg accent — pages would fall back to the default blue');
+  assert.ok(/\[data-theme="dark"\]/.test(TOKENS_CSS), 'no dark-mode tokens');
+  assert.ok(TOKENS_CSS.length < 8000, `floor is ${TOKENS_CSS.length} bytes; it should be tokens only`);
+});
+
 console.log(`no-model-figures-test: ${passed} passed`);

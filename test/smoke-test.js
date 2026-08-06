@@ -175,6 +175,17 @@ const json = (method, o) => ({ method, headers: { 'Content-Type': 'application/j
     assert.ok(!html.includes('undefined'), 'a template hole rendered as "undefined"');
   });
 
+  await check('the stylesheet is served, cached and reachable while signed out', async () => {
+    const page = await (await A('/dashboard')).text();
+    const href = (page.match(/href="(\/css\/modus-design-system\.css\?v=[0-9a-f]+)"/) || [])[1];
+    assert.ok(href, 'no versioned stylesheet link on the page');
+    // Anonymous, because a browser fetches the sheet on the login page too.
+    const res = await anon(href);
+    assert.strictEqual(res.status, 200, `stylesheet returned ${res.status} to an anonymous request`);
+    assert.ok((res.headers.get('content-type') || '').includes('css'), 'wrong content-type');
+    assert.ok(page.length < 20000, `dashboard is ${page.length} bytes; the sheet is being inlined again`);
+  });
+
   await check('one company cannot read another company\'s assessment', async () => {
     const B = jarFetch({});
     await B('/auth/register', form({

@@ -59,6 +59,30 @@ recommendations with offline fallback · full JSON API · Postgres job queue.
 A table with no writer answers nothing. Every one of the above is reported as
 *not switched on* rather than as *zero*.
 
+## Design system delivery — a deliberate divergence
+
+This repo **links** `modus-design-system.css` and inlines only the custom-property
+blocks (~2.8 KB). The other nine platforms inline the whole sheet (~87 KB) into
+every response.
+
+The inherited comment justifying the inline approach claimed it "serves the same
+bytes as a cached static file". It does not: an inline `<style>` is re-sent on
+every navigation; a linked sheet is fetched once. Measured here, a signed-in page
+went from ~99 KB to ~8 KB.
+
+Inlining did buy one real thing — the shell could never render unstyled. Linking
+alone would trade a bandwidth problem for a silent-failure one. Inlining the token
+blocks keeps that guarantee: if the stylesheet fails to load, the page is unstyled
+but every colour still resolves, so nothing renders transparent.
+
+The link carries `?v=<content hash>`. `express.static` caches for 7 days and the
+stylesheet is synced from master by a separate ecosystem process, so a fixed
+version string would leave returning users on a stale sheet for a week after
+every sync.
+
+**This is ESG-only until proven.** If it holds up, it belongs in the Modus UI
+Contract as a fan-out to all ten repos, not as ten independent edits.
+
 ## Naming
 
 The user-facing page is **Governance & Recognition** at `/governance`. The
