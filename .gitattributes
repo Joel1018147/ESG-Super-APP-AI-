@@ -1,0 +1,21 @@
+# Normalise every text file to LF in the repository.
+#
+# Windows checkout, Linux runtime. Without this, git stores whatever the
+# working tree had, and a CRLF blob reaching Railway breaks things that a
+# Windows editor never shows you: a heredoc terminator with a trailing \r
+# never matches, and a shebang line becomes "/usr/bin/env node\r".
+#
+# eol=lf forces LF in the WORKING TREE too, not just in the blob. That is
+# deliberate — test/*.js compare multi-line strings, and a harness that passes
+# on Linux and fails on Windows because of an invisible \r costs an afternoon
+# to find.
+* text=auto eol=lf
+
+# Binary — never touch these.
+*.png  binary
+*.jpg  binary
+*.pdf  binary
+*.xlsx binary
+*.docx binary
+*.pptx binary
+*.ico  binary
