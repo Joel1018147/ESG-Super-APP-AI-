@@ -297,4 +297,39 @@ test('the inlined floor carries every token block it claims to', () => {
   assert.ok(TOKENS_CSS.length < 8000, `floor is ${TOKENS_CSS.length} bytes; it should be tokens only`);
 });
 
+test('data-platform is never set without the stylesheet that gives it meaning', () => {
+  // `data-platform="esg"` on its own does NOTHING. It selects a block inside
+  // modus-design-system.css; without that sheet the attribute is inert and the
+  // page renders in whatever palette it happens to have, with no warning.
+  //
+  // Found across the ecosystem on four M-EasyMember pages, which set the
+  // attribute and never load the sheet. This repo has no static HTML today —
+  // every page goes through layout.js — so the check covers BOTH: the rendered
+  // shells (real coverage now) and any .html later dropped into public/ (the
+  // regression being prevented).
+  const { layout, bareLayout } = require('../src/utils/layout');
+  const check = (name, html) => {
+    const hasAttr  = /data-platform="[^"]+"/.test(html);
+    const hasSheet = /modus-design-system\.css/.test(html);
+    if (hasAttr) {
+      assert.ok(hasSheet, `${name}: sets data-platform but never loads the stylesheet — the attribute is inert`);
+    }
+  };
+  check('signed-in shell',  layout('D', '', { name: 'J' }, '/dashboard'));
+  check('signed-out shell', bareLayout('Sign in', ''));
+
+  const pubDir = path.join(SRC, '../public');
+  const walkHtml = (dir, out = []) => {
+    for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
+      const fp = path.join(dir, f.name);
+      if (f.isDirectory()) walkHtml(fp, out);
+      else if (fp.endsWith('.html')) out.push(fp);
+    }
+    return out;
+  };
+  for (const f of walkHtml(pubDir)) {
+    check(path.relative(pubDir, f), fs.readFileSync(f, 'utf8'));
+  }
+});
+
 console.log(`no-model-figures-test: ${passed} passed`);
