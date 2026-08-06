@@ -28,7 +28,26 @@ anything in `src/services/`.
 
 ## Before every deploy
 
-```powershell
-npm test
-$env:DATABASE_URL="<staging>"; node test/smoke-test.js
+`smoke-test.js` REGISTERS COMPANIES AND NEVER CLEANS UP. It must never be
+pointed at production. Use the scratch database in the separate Railway project
+**ESG AI+ Staging** (`6d7eab4d-f45a-42f0-8e88-ba6b769dc567`), which exists for
+exactly this and holds nothing else.
+
+Railway's Postgres template does NOT publish a `DATABASE_PUBLIC_URL` variable
+even with the TCP proxy enabled — assuming it does has cost time twice now.
+Build the URL from the service's own variables:
+
 ```
+postgresql://<PGUSER>:<PGPASSWORD>@<RAILWAY_TCP_PROXY_DOMAIN>:<RAILWAY_TCP_PROXY_PORT>/<PGDATABASE>
+```
+
+```powershell
+$env:DATABASE_URL="<the URL built above>"
+npm test                     # includes the schema replay
+node test/smoke-test.js      # spawns its own server on 127.0.0.1:3999
+```
+
+Note this exercises a code path production does not: the proxy host is
+`*.proxy.rlwy.net`, so `sslConfig()` takes its SSL branch. Production connects
+over `*.railway.internal` and takes the non-SSL branch. Running here is the only
+way that branch gets tested.

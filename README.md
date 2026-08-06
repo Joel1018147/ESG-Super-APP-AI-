@@ -62,13 +62,23 @@ A table with no writer answers nothing. Every one of the above is reported as
 ## Design system delivery — a deliberate divergence
 
 This repo **links** `modus-design-system.css` and inlines only the custom-property
-blocks (~2.8 KB). The other nine platforms inline the whole sheet (~87 KB) into
-every response.
+blocks (2.8 KB). The other nine platforms inline the whole sheet (94,580 bytes)
+into every response.
 
 The inherited comment justifying the inline approach claimed it "serves the same
 bytes as a cached static file". It does not: an inline `<style>` is re-sent on
-every navigation; a linked sheet is fetched once. Measured here, a signed-in page
-went from ~99 KB to ~8 KB.
+every navigation; a linked sheet is fetched once. Measured in production, by byte count from
+the server's own access log:
+
+| | Before | After |
+|---|---|---|
+| Signed-in page | 99,387 B | 8,187 B |
+| Signed-out page | 96,132 B | 4,247 B |
+| Stylesheet | inlined every time | 94,580 B once, then cached 7 days |
+
+(Sizes are UTF-8 **bytes**. An earlier draft of this section quoted 87,240 for
+the stylesheet — that was JavaScript string length, which counts the
+box-drawing characters in the comments as one unit each rather than three.)
 
 Inlining did buy one real thing — the shell could never render unstyled. Linking
 alone would trade a bandwidth problem for a silent-failure one. Inlining the token

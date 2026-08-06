@@ -269,7 +269,15 @@ test('the stylesheet is linked, not inlined, and cache-busted by content', () =>
     // A rule from deep in the file. If this appears, the whole sheet is being
     // inlined again and the ~97 KB per response is back.
     assert.ok(!html.includes('.table-wrap'), `${name}: full stylesheet is inlined`);
-    assert.ok(html.length < 20000, `${name}: page is ${html.length} bytes, expected well under 20 KB`);
+    // Measure the INLINE STYLE, not the page. Asserting total page size would
+    // start failing for an honest reason the day a page carries real markup —
+    // the assessment form already renders 40 indicators — and a test that
+    // fails for the wrong reason gets its threshold raised until it means
+    // nothing. What is being guarded is the stylesheet coming back inline.
+    const inlineBytes = (html.match(/<style>[\s\S]*?<\/style>/g) || [])
+      .reduce((n, blk) => n + Buffer.byteLength(blk, 'utf8'), 0);
+    assert.ok(inlineBytes < 12000,
+      `${name}: ${inlineBytes} bytes of inline <style>; the design system is being inlined again`);
   }
   // Content-derived, because express.static caches for 7 days and the sheet is
   // synced from master by a separate process. A fixed version string would

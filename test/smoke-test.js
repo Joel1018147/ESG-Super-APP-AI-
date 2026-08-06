@@ -183,7 +183,12 @@ const json = (method, o) => ({ method, headers: { 'Content-Type': 'application/j
     const res = await anon(href);
     assert.strictEqual(res.status, 200, `stylesheet returned ${res.status} to an anonymous request`);
     assert.ok((res.headers.get('content-type') || '').includes('css'), 'wrong content-type');
-    assert.ok(page.length < 20000, `dashboard is ${page.length} bytes; the sheet is being inlined again`);
+    // Same reasoning as the unit guard: pin this to the inline style block, not
+    // to total page size, so it survives the app growing real markup.
+    const inlineBytes = (page.match(/<style>[\s\S]*?<\/style>/g) || [])
+      .reduce((n, blk) => n + Buffer.byteLength(blk, 'utf8'), 0);
+    assert.ok(inlineBytes < 12000,
+      `dashboard carries ${inlineBytes} bytes of inline <style>; the sheet is being inlined again`);
   });
 
   await check('one company cannot read another company\'s assessment', async () => {
