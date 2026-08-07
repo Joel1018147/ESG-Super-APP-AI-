@@ -347,30 +347,61 @@ test('data-platform is never set without the stylesheet that gives it meaning', 
   }
 });
 
-test('a missing PDF parser cannot stop the app booting', () => {
-  // server.js:177 requires routes/documents at BOOT, which reaches
-  // extractionService -> pdfService. pdf-parse needs DOMMatrix, supplied only by
-  // @napi-rs/canvas's native binding, and that binding does not load on every
-  // platform — it does not load on this one. Required at module scope, the
-  // ReferenceError takes down login, dashboard and /health over an unused
-  // feature.
+test('the PDF parser is never loaded at module scope', () => {
+  // server.js requires routes/documents at BOOT, which reaches
+  // extractionService -> pdfService. pdfjs v5 is ESM-only and touches browser
+  // globals on load; anything that throws there would take down login,
+  // dashboard and /health over an unused feature. The import lives inside an
+  // async function for that reason.
   //
-  // This assertion is not hypothetical here: `require('pdf-parse')` genuinely
-  // throws on this machine, so the boot path below only survives because the
-  // parser is loaded lazily.
-  // read(), not readRaw(): the comment above this very assertion names
-  // require('pdf-parse') in prose, and the raw text matches it. Same trap the
-  // helper at the top of this file was written for.
+  // read(), not readRaw(): this comment names the module in prose and the raw
+  // text would match. Same trap the helper at the top of this file exists for.
   const src = read(path.join(SRC, 'services/pdfService.js'));
   const beforeFirstFn = src.slice(0, src.search(/^(async )?function /m));
-  assert.ok(!/require\(['"]pdf-parse['"]\)/.test(beforeFirstFn),
-    'pdf-parse is required at module scope — a load failure would break boot, not just extraction');
-
+  assert.ok(!/require\(['"]pdfjs-dist/.test(beforeFirstFn) && !/^import /m.test(beforeFirstFn),
+    'pdfjs is loaded at module scope — a load failure would break boot, not just extraction');
   assert.doesNotThrow(() => require('../src/routes/documents'),
     'the documents router cannot be required — the app would not boot');
+});
 
-  const { extractText } = require('../src/services/pdfService');
-  assert.strictEqual(typeof extractText, 'function', 'pdfService did not load');
+// NOT async. The harness at the top of this file calls fn() synchronously and
+// counts a returned promise as a pass, so an async test here would report green
+// no matter what it asserted. The body is execFileSync for that reason.
+test('text extraction needs no native binding', () => {
+  // THE REASON THIS EXISTS. pdf-parse@2 depends hard on @napi-rs/canvas —
+  // eleven prebuilt binaries — because it can also rasterise pages. That
+  // binding does not load on every platform, and on the Windows machine this
+  // project is developed on it does not load at all. The consequence was that
+  // all twelve Layer 2 guards — the ones keeping a language model away from an
+  // ESG score — could only be run by deploying.
+  //
+  // Text extraction never rasterises anything, so pdfjs alone suffices with
+  // three stub globals. This test PROVES that rather than assuming it: a child
+  // process is started in which @napi-rs/canvas cannot be resolved at all, and
+  // extraction must still work there.
+  const { execFileSync } = require('child_process');
+  const script = `
+    const Module = require('module');
+    const orig = Module._resolveFilename;
+    Module._resolveFilename = function (req, ...rest) {
+      if (String(req).startsWith('@napi-rs/canvas')) {
+        const e = new Error("Cannot find module '" + req + "'"); e.code = 'MODULE_NOT_FOUND'; throw e;
+      }
+      return orig.call(this, req, ...rest);
+    };
+    (async () => {
+      const { makePdf, makeScannedPdf } = require(${JSON.stringify(path.join(__dirname, 'fixtures/makePdf.js'))});
+      const { extractText } = require(${JSON.stringify(path.join(SRC, 'services/pdfService.js'))});
+      const r = await extractText(makePdf([['Report 2025','The Board adopted an anti-bribery policy in March 2024.']]));
+      if (r.status !== 'extracted') throw new Error('status was ' + r.status);
+      if (!r.text.replace(/\\s+/g,' ').includes('anti-bribery policy in March 2024')) throw new Error('text missing');
+      const s = await extractText(makeScannedPdf());
+      if (s.status !== 'no_text_layer') throw new Error('scan status was ' + s.status);
+      console.log('OK');
+    })().catch(e => { console.error(e.message); process.exit(1); });
+  `;
+  const out = execFileSync(process.execPath, ['-e', script], { encoding: 'utf8', stdio: ['ignore','pipe','pipe'] });
+  assert.match(out, /OK/, 'extraction failed when the native canvas binding was unresolvable');
 });
 
 console.log(`no-model-figures-test: ${passed} passed`);
