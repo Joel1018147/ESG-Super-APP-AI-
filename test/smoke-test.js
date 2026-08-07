@@ -236,12 +236,42 @@ const json = (method, o) => ({ method, headers: { 'Content-Type': 'application/j
 
   await check('every page route has a JSON equivalent that answers', async () => {
     for (const p of ['/api/me', '/api/company', '/api/assessments', '/api/carbon',
-                     '/api/frameworks', '/api/indicators', '/api/emission-factors',
-                     '/api/verra/status', '/api/documents',
+                     '/api/frameworks', '/api/frameworks/sedg-v2', '/api/indicators',
+                     '/api/emission-factors', '/api/verra/status', '/api/documents',
+                     '/api/analytics', '/api/kpis', '/api/assistant',
+                     '/api/workflow', '/api/users', '/api/integrations',
                      `/api/assessments/${assessmentId}/extractions`]) {
       const r = await A(p, { headers: { Accept: 'application/json' } });
       assert.strictEqual(r.status, 200, `${p} returned ${r.status}`);
     }
+  });
+
+  await check('every one of the 14 navigable screens renders signed-in', async () => {
+    // The demo is "one navigable screen per requirement section". A 500 or a
+    // redirect on any of them is the whole thing failing in front of someone.
+    const { MODULES } = require('../src/utils/layout');
+    assert.strictEqual(MODULES.length, 14, `expected 14 nav entries, found ${MODULES.length}`);
+    for (const m of MODULES) {
+      const r = await A(m.path);
+      assert.strictEqual(r.status, 200, `${m.path} returned ${r.status}`);
+      const html = await r.text();
+      // Not just "did it 200" — a page that renders the shell and nothing else
+      // still looks like a working screen in a screenshot.
+      assert.ok(html.includes('modus-design-system.css'), `${m.path} rendered unstyled`);
+      assert.ok(html.includes('data-platform="esg"'), `${m.path} lost the platform accent`);
+      assert.ok(/class="(card|empty-state|coming-soon|stat-card|alert)/.test(html),
+        `${m.path} rendered no real content block`);
+    }
+  });
+
+  await check('the official disclosure set is complete and not claimed as implemented', async () => {
+    const r = await A('/api/frameworks/sedg-v2', { headers: { Accept: 'application/json' } });
+    const b = await r.json();
+    assert.strictEqual(b.disclosures.length, 38, `expected 38 disclosures, got ${b.disclosures.length}`);
+    assert.strictEqual(b.counts.pillars.E, 17, 'E count');
+    assert.strictEqual(b.counts.pillars.S, 11, 'S count');
+    assert.strictEqual(b.counts.pillars.G, 10, 'G count');
+    assert.strictEqual(b.implemented, false, 'the API claims SEDG is implemented');
   });
 
   stop();

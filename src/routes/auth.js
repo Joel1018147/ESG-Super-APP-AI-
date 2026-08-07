@@ -20,7 +20,7 @@ function authPage(title, body, error) {
 
 router.get('/login', (req, res) => {
   const google = process.env.GOOGLE_CLIENT_ID
-    ? `<a class="btn btn-ghost" style="width:100%;margin-top:12px" href="/auth/google">Continue with Google</a>` : '';
+    ? `<a class="btn btn-outline" style="width:100%;margin-top:12px" href="/auth/google">Continue with Google</a>` : '';
   res.send(authPage('Sign in', `
     <form method="post" action="/auth/login">
       <div class="form-group"><label for="email">Email</label>

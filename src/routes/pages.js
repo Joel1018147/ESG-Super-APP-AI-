@@ -2,7 +2,8 @@
 
 const express = require('express');
 const { query } = require('../db');
-const { layout, esc, emptyState } = require('../utils/layout');
+const { layout, esc, emptyState, frameworkLabel } = require('../utils/layout');
+const sedg = require('../data/sedgV2');
 const { scoreAssessment, loadActiveScheme } = require('../services/scoringEngine');
 const { generateRecommendations } = require('../services/aiAdvisor');
 const { electricityToCo2e, fuelToCo2e } = require('../services/carbonEngine');
@@ -176,7 +177,7 @@ router.get('/assessment', async (req, res, next) => {
           <td>${esc(r.framework_code)} v${esc(r.framework_version)}</td>
           <td><span class="badge">${esc(r.status)}</span></td>
           <td>${r.overall === null || r.overall === undefined ? '—' : esc(r.overall)}</td>
-          <td><a class="btn btn-ghost" href="/assessment/${esc(r.id)}">Open</a></td></tr>`).join('')}
+          <td><a class="btn btn-outline" href="/assessment/${esc(r.id)}">Open</a></td></tr>`).join('')}
         </tbody></table>` : emptyState('instrumented_but_empty', { title: 'No assessments yet' });
 
     res.send(layout('ESG Assessment', `
@@ -264,7 +265,7 @@ router.get('/assessment/:id', async (req, res, next) => {
           const r = byInd[i.id] || {};
           return `<div class="form-group" style="border-top:1px solid var(--border);padding-top:14px">
             <label for="o_${esc(i.id)}"><strong>${esc(i.code)}</strong> ${esc(i.question_en)}
-              ${i.mapping_status === 'draft' ? '<span class="badge badge-warning" title="Modus-authored mapping, not yet reconciled against the official framework document">draft</span>' : ''}
+              ${i.mapping_status === 'draft' ? '<span class="badge badge-warning" title="Platform-authored mapping, not yet reconciled against the official framework document">draft</span>' : ''}
             </label>
             ${i.guidance_en ? `<small class="muted">${esc(i.guidance_en)}</small>` : ''}
             <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
@@ -446,7 +447,7 @@ router.get('/governance', async (req, res, next) => {
             ${results.map((r) => `<tr><td>${esc(r.verra_project_id)}</td><td>${esc(r.name)}</td>
               <td>${esc(r.country)}</td><td>${esc(r.methodology_code)}</td><td>${esc(r.status)}</td></tr>`).join('')}
             </tbody></table>
-            <small class="muted">Records mirrored from the Verra public registry (verra.org). Metadata and links only.</small>`
+            <small class="text-sm">Records mirrored from a public carbon crediting registry. Metadata and links only.</small>`
           : emptyState('zero', { title: 'No matches', body: `Nothing in the mirror matches "${q}".` })) : ''}`
       : emptyState(status.state, {
           title: status.state === 'uninstrumented' ? 'Registry mirror is not switched on' : 'Registry mirror is empty',
@@ -455,6 +456,7 @@ router.get('/governance', async (req, res, next) => {
             : 'Ingest is configured and working — the sync has not run yet or returned no records.' });
 
     res.send(layout('Governance & Recognition', `
+      <h3 class="section-title">Carbon Crediting Registry (public reference)</h3>
       <div class="ai-insight" style="margin-bottom:16px">
         <strong>What this is.</strong> A local mirror of a public carbon-crediting registry, for
         carbon-credit lookup. That registry certifies individual carbon <em>projects</em> and issues
@@ -476,6 +478,215 @@ router.get('/reports', (req, res) => {
     title: 'Report generation is not built yet',
     body: 'The scoring data it needs exists. PDF/DOCX/XLSX export is sprint 2 — this page is here so the gap is visible rather than hidden behind a broken button.',
   }), req.user, '/reports'));
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SECTION SCREENS
+//
+// One navigable screen per requirement section. Each states honestly what it
+// is: built, not-instrumented, or not-built. NO DEAD CONTROLS (contract
+// §4.3c) — there is no filter that filters nothing, no toggle bound to
+// nothing, and no Save that never posts on any page below. If it does not
+// act, it does not render.
+//
+// The scope list on each page is STATIC TEXT describing what the section will
+// cover. It is a scope statement, not a claim that any of it works.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** A scope list. Deliberately not a checklist and not a progress bar — both
+ *  would imply measured completion that nothing here measures. */
+const scope = (title, items) => `
+  <div class="card">
+    <h3 class="card-title">${esc(title)}</h3>
+    <ul>${items.map((i) => `<li>${esc(i)}</li>`).join('')}</ul>
+  </div>`;
+
+/** `.coming-soon` — defined at modus-design-system.css:986. Not built at all. */
+const comingSoon = (title, body, phase) => `
+  <div class="coming-soon">
+    <div class="coming-soon-icon">🚧</div>
+    <h2>${esc(title)}</h2>
+    <p>${esc(body)}</p>
+    ${phase ? `<div class="coming-soon-phase">${esc(phase)}</div>` : ''}
+  </div>`;
+
+// ── Frameworks — the real one ──────────────────────────────────────────────
+router.get('/frameworks', (req, res) => {
+  const { PROVENANCE: p, COUNTS: c } = sedg;
+
+  const tierBadge = (tier) => {
+    const tone = { Basic: 'badge-success', Intermediate: 'badge-info', Advanced: 'badge-warning' }[tier] || '';
+    return `<span class="badge ${tone}">${esc(tier)}</span>`;
+  };
+
+  const pillars = sedg.grouped().map((g) => `
+    <div class="card">
+      <h3 class="card-title">${esc(g.pillarName)} — ${g.topics.reduce((n, t) => n + t.disclosures.length, 0)} disclosures</h3>
+      ${g.topics.map((t) => `
+        <h4>${esc(t.topic)}</h4>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Code</th><th>Tier</th><th>Disclosure</th><th>Unit</th></tr></thead>
+            <tbody>
+              ${t.disclosures.map((d) => `<tr>
+                <td>${esc(d.code)}${d.newInV2 ? ' <span class="badge badge-info">new in v2</span>' : ''}</td>
+                <td>${tierBadge(d.tier)}</td>
+                <td>${esc(d.text)}</td>
+                <td>${esc(d.unit)}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`).join('')}
+    </div>`).join('');
+
+  const others = `
+    <div class="card">
+      <h3 class="card-title">Other frameworks</h3>
+      <p class="text-sm">Named so the gap is visible. None of these is loaded, mapped or scored.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Framework</th><th>Status</th><th>Note</th></tr></thead>
+          <tbody>
+            ${sedg.OTHER_FRAMEWORKS.map((f) => `<tr>
+              <td>${esc(f.name)}</td>
+              <td><span class="badge badge-warning">Not loaded</span></td>
+              <td>${esc(f.note)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+
+  res.send(layout('Frameworks', `
+    <div class="card">
+      <h3 class="card-title">${esc(p.document)}</h3>
+      <p><strong>Publisher.</strong> ${esc(p.publisher)}, ${esc(p.publisherNote)}. Published ${esc(p.published)}.</p>
+      <p><strong>Source.</strong> <a href="${esc(p.pdf)}" rel="noreferrer noopener" target="_blank">${esc(p.pdf)}</a></p>
+      <div class="grid grid-3">
+        <div class="stat-card"><div class="sc-label">Disclosures</div><div class="sc-value">${c.total}</div></div>
+        <div class="stat-card"><div class="sc-label">E / S / G</div><div class="sc-value">${c.pillars.E} / ${c.pillars.S} / ${c.pillars.G}</div></div>
+        <div class="stat-card"><div class="sc-label">Basic / Inter. / Adv.</div><div class="sc-value">${c.tiers.Basic} / ${c.tiers.Intermediate} / ${c.tiers.Advanced}</div></div>
+      </div>
+      <p class="text-sm">${esc(p.countNote)}</p>
+    </div>
+
+    <div class="alert">
+      <span class="badge badge-warning">SEDG-ALIGNED (DRAFT)</span>
+      <p><strong>What this platform claims, precisely.</strong> The assessment you take on this
+      platform is <em>${esc(frameworkLabel('MODUS_SEDG_ALIGNED', '0.9-draft'))}</em>. The
+      ${c.total} disclosures below are the official published set it will be reconciled against.
+      They are <strong>not implemented</strong>: they are not loaded as questions, not answerable,
+      and not scored. This platform is not SEDG-compliant and does not claim to be.</p>
+    </div>
+
+    ${pillars}
+    ${others}`, req.user, '/frameworks'));
+});
+
+// ── Analytics — table exists, nothing writes to it ─────────────────────────
+router.get('/analytics', (req, res) => {
+  res.send(layout('Analytics', `
+    ${emptyState('uninstrumented', {
+      title: 'Analytics is not instrumented yet',
+      body: 'Scores are stored per assessment, but nothing yet writes the time series, peer '
+          + 'benchmarks or trend aggregates this section needs. It is not switched on, rather than empty.',
+    })}
+    ${scope('What this section will cover', [
+      'Score trend over time, per pillar and overall',
+      'Peer benchmarking by sector and company size',
+      'Disclosure completeness against the official framework',
+      'Carbon intensity trend against reported activity',
+      'Evidence coverage — which answers are documented',
+    ])}`, req.user, '/analytics'));
+});
+
+// ── KPIs — table exists, nothing writes to it ──────────────────────────────
+router.get('/kpis', (req, res) => {
+  res.send(layout('KPIs', `
+    ${emptyState('uninstrumented', {
+      title: 'KPI tracking is not instrumented yet',
+      body: 'No target has been set and nothing writes KPI values. An empty chart here would '
+          + 'claim a capability that does not exist yet.',
+    })}
+    ${scope('What this section will cover', [
+      'Targets per pillar, set by the company',
+      'Actual against target, per reporting period',
+      'Emissions intensity and reduction targets',
+      'Training hours, turnover and safety rates',
+      'Alerting when a KPI moves away from its target',
+    ])}`, req.user, '/kpis'));
+});
+
+// ── AI Assistant — not built as a standalone surface ───────────────────────
+// The AI layer itself IS real and reachable today: `generateRecommendations`
+// runs on the assessment result and every call is logged to
+// esg_ai_interactions. What does not exist is a conversational assistant, so
+// this is coming-soon rather than uninstrumented — and it says where the
+// working AI actually is, rather than implying there is none.
+router.get('/assistant', (req, res) => {
+  res.send(layout('AI Assistant', `
+    ${comingSoon('A conversational assistant is not built yet',
+      'AI is already working elsewhere in this platform: your assessment result carries '
+      + 'AI-generated recommendations, and the model is never allowed to author a figure. '
+      + 'A general-purpose assistant surface is a separate piece of work.',
+      'Available today: open an assessment result to see AI recommendations')}
+    ${scope('What this section will cover', [
+      'Ask questions about your own assessment and evidence',
+      'Guidance on what a specific disclosure is asking for',
+      'Drafting narrative answers for review — never auto-submitted',
+      'Trilingual (EN / BM / 中文)',
+      'The model never produces a figure — the same guard the rest of the platform uses',
+    ])}`, req.user, '/assistant'));
+});
+
+// ── Workflow — not built ───────────────────────────────────────────────────
+router.get('/workflow', (req, res) => {
+  res.send(layout('Workflow', `
+    ${comingSoon('Review and approval workflow is not built yet',
+      'Assessments are currently completed and scored in one step, with no review stage. '
+      + 'Nothing in the database tracks an approval, so there is nothing to show here yet.',
+      'Not started')}
+    ${scope('What this section will cover', [
+      'Submit an assessment for internal review before it is final',
+      'Reviewer and approver roles, with an audit trail',
+      'Return-for-revision with comments against specific answers',
+      'Period locking once a reporting year is signed off',
+      'Notification when an action is waiting on someone',
+    ])}`, req.user, '/workflow'));
+});
+
+// ── Users & Roles — not built ──────────────────────────────────────────────
+router.get('/users', (req, res) => {
+  res.send(layout('Users & Roles', `
+    ${comingSoon('User and role management is not built yet',
+      'Accounts exist and are authenticated, and every route is authorised server-side. '
+      + 'What is missing is the screen to invite people and change their role — that is '
+      + 'currently a database operation.',
+      'Not started')}
+    ${scope('What this section will cover', [
+      'Invite a colleague by email',
+      'Assign and change roles, granted by an administrator and never self-claimed',
+      'Remove access, with the change recorded',
+      'See who last signed in',
+      'Audit trail of role changes',
+    ])}`, req.user, '/users'));
+});
+
+// ── Integrations — not built ───────────────────────────────────────────────
+router.get('/integrations', (req, res) => {
+  res.send(layout('Integrations', `
+    ${comingSoon('Integrations are not built yet',
+      'No third-party connection is configured, and none is running in the background. '
+      + 'Showing a list of logos with Connect buttons that do nothing would be worse than '
+      + 'showing this.',
+      'Not started')}
+    ${scope('What this section will cover', [
+      'Utility and energy data import for the carbon calculator',
+      'Accounting system import for the financial disclosures',
+      'HR system import for headcount, turnover and training hours',
+      'Document storage for evidence files',
+      'Export to a customer’s supplier portal',
+    ])}`, req.user, '/integrations'));
 });
 
 

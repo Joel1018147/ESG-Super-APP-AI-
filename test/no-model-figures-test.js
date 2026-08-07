@@ -10,9 +10,30 @@ const path = require('path');
 
 const SRC = path.join(__dirname, '../src');
 let passed = 0;
+// AN ASYNC TEST IN A SYNC HARNESS COUNTS AS A PASS WHATEVER IT ASSERTS —
+// recurring-bugs-checklist.md #14, third shape. This harness was synchronous,
+// so the first async test added to it would have gone green without running.
+// It now refuses a promise by name instead of swallowing one. Use `atest`.
 function test(name, fn) {
-  try { fn(); passed += 1; console.log(`  ✓ ${name}`); }
-  catch (e) { console.error(`  ✗ ${name}\n    ${e.message}`); process.exitCode = 1; }
+  try {
+    const out = fn();
+    if (out && typeof out.then === 'function') {
+      throw new Error('async function passed to sync test(); use atest()');
+    }
+    passed += 1; console.log(`  ✓ ${name}`);
+  } catch (e) { console.error(`  ✗ ${name}\n    ${e.message}`); process.exitCode = 1; }
+}
+
+// Async variant. Registered, awaited before the summary line, and its failure
+// sets the exit code the same way — so run-all.js sees it.
+const pending = [];
+function atest(name, fn) {
+  pending.push(
+    Promise.resolve().then(fn).then(
+      () => { passed += 1; console.log(`  ✓ ${name}`); },
+      (e) => { console.error(`  ✗ ${name}\n    ${e.message}`); process.exitCode = 1; },
+    ),
+  );
 }
 function walk(dir, out = []) {
   for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -224,6 +245,136 @@ test('every page shell carries the official system name', () => {
   assert.ok(layout('Sign in', '', null, '').includes(NAME), 'signed-out shell');
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// NO INTERNAL OR THIRD-PARTY BRAND IN VISIBLE TEXT
+//
+// The rule is about what a USER CAN READ, so the check is defined on rendered
+// text, not on source. It is a SHAPE, not an exemption list (checklist #13):
+//
+//   1. <script> and <style> bodies are removed  → the `modus-theme`
+//      localStorage key and any CSS survive untouched, because they are not
+//      text a user reads.
+//   2. every TAG is removed, which removes every ATTRIBUTE with it → the
+//      stylesheet path /css/modus-design-system.css and data-platform="esg"
+//      are structurally out of scope. No file is named, no class is exempted,
+//      and a new asset path added tomorrow is covered automatically.
+//
+// What remains is exactly the text nodes — what a person actually reads.
+//
+// KNOWN LIMIT, stated rather than papered over: `title="…"` is an attribute,
+// so a tooltip is NOT covered by this shape. pages.js's draft badge carries
+// one and was fixed by hand. If tooltips become load-bearing, this needs a
+// second, narrower check — not a widening of this one.
+// ═══════════════════════════════════════════════════════════════════════════
+const FORBIDDEN_IN_TEXT = [/modus/i, /verra/i];
+
+function visibleText(html) {
+  return html
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]*>/g, ' ')            // every tag, and therefore every attribute
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Renders a page route for real by calling its handler. Returns the HTML that
+ *  the route passed to res.send(). Throws if the route did not render — a
+ *  handler that silently produced nothing must fail the test rather than
+ *  quietly contribute zero coverage (contract §7b rule 4). */
+function renderRoute(router, routePath, req) {
+  const layer = router.stack.find((l) => l.route && l.route.path === routePath && l.route.methods.get);
+  assert.ok(layer, `no GET handler for ${routePath}`);
+  let html = null;
+  let failed = null;
+  const res = {
+    send(body) { html = body; },
+    json(body) { html = JSON.stringify(body); },
+    redirect() { failed = 'redirected instead of rendering'; },
+    status() { return res; },
+  };
+  const next = (err) => { failed = err ? err.message : 'called next() instead of rendering'; };
+  const out = layer.route.stack[0].handle(req, res, next);
+  // Every page handler in this repo is either sync or an async function whose
+  // body is fully synchronous up to the first await. The DB-backed ones await,
+  // so they are exercised through the stubbed pool below and resolve
+  // immediately — but assert it rather than assume it.
+  if (out && typeof out.then === 'function') return out.then(() => ({ html, failed }));
+  return Promise.resolve({ html, failed });
+}
+
+atest('no rendered page shows an internal or registry brand in visible text', async () => {
+  const { layout, bareLayout, MODULES } = require('../src/utils/layout');
+  const checked = [];
+
+  const assertClean = (label, html) => {
+    assert.ok(typeof html === 'string' && html.length > 200,
+      `${label}: rendered nothing to check (${typeof html}, ${html && html.length} bytes)`);
+    const text = visibleText(html);
+    for (const re of FORBIDDEN_IN_TEXT) {
+      const m = text.match(re);
+      assert.ok(!m, `${label}: visible text contains "${m && m[0]}" — `
+        + `context: …${text.slice(Math.max(0, text.search(re) - 70), text.search(re) + 70)}…`);
+    }
+    checked.push(label);
+  };
+
+  // ── Both shells ──────────────────────────────────────────────────────────
+  assertClean('shell: signed-out', bareLayout('Sign in', '<form><label>Email</label></form>'));
+  // Once per nav path, so the active-state branch and every nav label, group
+  // heading, brand line and topbar string is rendered at least once.
+  for (const m of MODULES) {
+    assertClean(`shell: signed-in @ ${m.path}`,
+      layout(m.label, '<div class="card">content</div>', { name: 'Joel', email: 'j@example.com' }, m.path));
+  }
+
+  // ── Every page route, rendered for real ──────────────────────────────────
+  // The DB is stubbed so the data-backed pages render their real templates.
+  // Rows come back empty, which is the honest shape for a fresh company and
+  // exercises the empty-state branches.
+  const dbPath = require.resolve('../src/db');
+  const realDb = require.cache[dbPath];
+  require.cache[dbPath] = {
+    id: dbPath, filename: dbPath, loaded: true, exports: {
+      query: async () => ({ rows: [], rowCount: 0 }),
+      pool: { connect: async () => ({ query: async () => ({ rows: [] }), release() {} }) },
+    },
+  };
+  for (const k of Object.keys(require.cache)) {
+    if (k.includes(`${path.sep}src${path.sep}`) && k !== dbPath) delete require.cache[k];
+  }
+
+  try {
+    const pages = require('../src/routes/pages');
+    const req = {
+      user: { id: 'u1', name: 'Joel', email: 'j@example.com', role: 'company_admin', company_id: 'c1' },
+      query: {}, params: {},
+    };
+    for (const m of MODULES) {
+      if (m.path === '/documents') continue;   // lives in routes/documents.js, below
+      const { html, failed } = await renderRoute(pages, m.path, req);
+      assert.ok(!failed, `${m.path}: ${failed}`);
+      assertClean(`page: ${m.path}`, html);
+    }
+    const docs = require('../src/routes/documents');
+    const { html, failed } = await renderRoute(docs, '/documents', req);
+    assert.ok(!failed, `/documents: ${failed}`);
+    assertClean('page: /documents', html);
+  } finally {
+    require.cache[dbPath] = realDb;
+    for (const k of Object.keys(require.cache)) {
+      if (k.includes(`${path.sep}src${path.sep}`) && k !== dbPath) delete require.cache[k];
+    }
+  }
+
+  // A loop that covered nothing passes every assertion inside it. Assert the
+  // DENOMINATOR: 14 nav paths + 14 signed-in shells + 1 signed-out shell.
+  assert.strictEqual(MODULES.length, 14, `expected 14 nav entries, found ${MODULES.length}`);
+  assert.strictEqual(checked.length, 29,
+    `expected 29 rendered surfaces checked, got ${checked.length}: ${checked.join(', ')}`);
+});
+
 test('robots.txt and the favicon are reachable without a session', () => {
   // Both are mounted above the auth guard. Railway's HTTP log caught
   // GET /robots.txt -> 302: a crawler reads that as "no robots.txt" and
@@ -424,4 +575,6 @@ test('the font URL is built as a file URL, not by concatenating a path separator
   assert.strictEqual(typeof extractText, 'function');
 });
 
-console.log(`no-model-figures-test: ${passed} passed`);
+Promise.all(pending).then(() => {
+  console.log(`no-model-figures-test: ${passed} passed`);
+});

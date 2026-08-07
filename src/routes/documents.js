@@ -64,7 +64,7 @@ router.get('/documents', async (req, res, next) => {
             <td>${Math.round(d.byte_size / 1024)} KB</td>
             <td><span class="${cls}">${esc(label)}</span>${d.page_count ? ` <small class="muted">${esc(d.page_count)}p</small>` : ''}</td>
             <td>${d.pending > 0 ? `<span class="badge badge-primary">${esc(d.pending)}</span>` : '—'}</td>
-            <td><a class="btn btn-ghost" href="/documents/${esc(d.id)}">Open</a></td></tr>`;
+            <td><a class="btn btn-outline" href="/documents/${esc(d.id)}">Open</a></td></tr>`;
         }).join('')}</tbody></table>`
       : emptyState('instrumented_but_empty', {
           title: 'No evidence uploaded yet',
@@ -173,7 +173,7 @@ router.get('/documents/:id', async (req, res, next) => {
         ${!d.assessment_id ? `<p class="muted">Not linked to an assessment, so it cannot be analysed.
             <a href="/assessment">Create one first</a>.</p>` : ''}
         <div style="display:flex;gap:10px;margin-top:12px">
-          <a class="btn btn-ghost" href="/documents/${esc(d.id)}/download">Download</a>
+          <a class="btn btn-outline" href="/documents/${esc(d.id)}/download">Download</a>
           ${analysable ? `<form method="post" action="/documents/${esc(d.id)}/analyse">
             <button class="btn btn-primary" type="submit">🤖 Analyse this report</button></form>` : ''}
         </div>
@@ -190,7 +190,7 @@ router.get('/documents/:id', async (req, res, next) => {
             <form method="post" action="/extractions/${esc(p.id)}/accept">
               <button class="btn btn-primary" type="submit">Accept</button></form>
             <form method="post" action="/extractions/${esc(p.id)}/reject">
-              <button class="btn btn-ghost" type="submit">Reject</button></form>
+              <button class="btn btn-outline" type="submit">Reject</button></form>
           </div>`)).join('')}` : ''}
 
       ${decided.length ? `<h3 style="margin:24px 0 12px">Reviewed</h3>

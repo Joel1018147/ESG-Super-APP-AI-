@@ -146,7 +146,7 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
 app.get('/health', async (req, res) => {
   try {
     await query('SELECT 1');
-    res.json({ ok: true, service: 'modus-esg', db: 'up' });
+    res.json({ ok: true, service: 'esg-ereporting', db: 'up' });
   } catch (err) {
     res.status(503).json({ ok: false, db: 'down', error: err.message });
   }

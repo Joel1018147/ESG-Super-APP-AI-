@@ -15,6 +15,8 @@ const { electricityToCo2e, fuelToCo2e } = require('../services/carbonEngine');
 const { mirrorStatus, syncProjects } = require('../services/verraService');
 const ex = require('../services/extractionService');
 const { enqueue } = require('../services/jobRunner');
+const { frameworkLabel } = require('../utils/layout');
+const sedg = require('../data/sedgV2');
 
 const router = express.Router();
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -30,8 +32,58 @@ router.get('/frameworks', wrap(async (req, res) => {
   const { rows } = await query(
     `SELECT code, version, name, publisher, framework_kind, is_active, source_url
        FROM esg_frameworks ORDER BY code, version`);
-  res.json({ frameworks: rows });
+  // `display_name` is what a client should render. `name` and `publisher` stay
+  // factual — the working framework really was authored by Modus AI Associates
+  // — but no UI renders them, so the attribution lives in the data and never on
+  // a screen. See src/utils/layout.js FRAMEWORK_DISPLAY.
+  res.json({
+    frameworks: rows.map((f) => ({ ...f, display_name: frameworkLabel(f.code, f.version) })),
+  });
 }));
+
+// ── The official disclosure set ────────────────────────────────────────────
+// Static reference data, not database rows. See src/data/sedgV2.js for why
+// these 38 are deliberately NOT seeded into esg_indicators.
+router.get('/frameworks/sedg-v2', wrap(async (req, res) => {
+  res.json({
+    provenance: sedg.PROVENANCE,
+    counts: sedg.COUNTS,
+    implemented: false,
+    implementation_note:
+      'These are the official published disclosures this platform will be reconciled against. '
+      + 'They are not loaded as questions, not answerable and not scored. '
+      + 'This platform is SEDG-aligned (draft), not SEDG-compliant.',
+    disclosures: sedg.DISCLOSURES,
+    other_frameworks: sedg.OTHER_FRAMEWORKS,
+  });
+}));
+
+// ── Section status endpoints ───────────────────────────────────────────────
+// Every page ships with its API equivalent (contract line 760). These report
+// the SAME honest state the page renders — `uninstrumented` where a backing
+// table exists but nothing writes to it, `not_built` where the capability does
+// not exist at all. A client must be able to tell those apart without scraping
+// HTML, which is the whole point of the three-empty-states rule.
+const SECTION_STATUS = {
+  analytics: { state: 'uninstrumented', built: false,
+    summary: 'Scores are stored per assessment, but nothing writes the time series, peer benchmarks or trend aggregates this section needs.' },
+  kpis: { state: 'uninstrumented', built: false,
+    summary: 'No target has been set and nothing writes KPI values.' },
+  assistant: { state: 'not_built', built: false,
+    summary: 'A conversational assistant surface does not exist. AI recommendations DO run on assessment results and are logged to esg_ai_interactions.' },
+  workflow: { state: 'not_built', built: false,
+    summary: 'Assessments are completed and scored in one step. Nothing tracks an approval.' },
+  users: { state: 'not_built', built: false,
+    summary: 'Accounts exist and every route is authorised server-side. Role management is currently a database operation.' },
+  integrations: { state: 'not_built', built: false,
+    summary: 'No third-party connection is configured and none runs in the background.' },
+};
+
+for (const [section, status] of Object.entries(SECTION_STATUS)) {
+  router.get(`/${section}`, wrap(async (req, res) => {
+    res.json({ section, ...status });
+  }));
+}
 
 router.get('/indicators', wrap(async (req, res) => {
   const { rows } = await query(

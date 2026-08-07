@@ -89,15 +89,56 @@ if (MODUS_CSS && !MODUS_CSS.includes('[data-platform="esg"]')) {
                'the ESG accent will silently fall back to the :root default.');
 }
 
+// One entry per requirement section, grouped. `group` drives the sidebar
+// headings; ORDER WITHIN THE ARRAY IS THE ORDER RENDERED, so the groups must
+// stay contiguous.
+const GROUPS = ['ASSESS', 'EVIDENCE', 'INTELLIGENCE', 'ADMINISTRATION'];
+
 const MODULES = [
-  { key: 'dashboard',  icon: '⊞',  label: 'Dashboard',      path: '/dashboard' },
-  { key: 'company',    icon: '🏢', label: 'Company Profile', path: '/company' },
-  { key: 'assessment', icon: '📋', label: 'ESG Assessment',  path: '/assessment' },
-  { key: 'carbon',     icon: '🌱', label: 'Carbon',          path: '/carbon' },
-  { key: 'documents',  icon: '📁', label: 'Evidence',        path: '/documents' },
-  { key: 'governance', icon: '🔎', label: 'Governance & Recognition', path: '/governance' },
-  { key: 'reports',    icon: '📄', label: 'Reports',         path: '/reports' },
+  { key: 'dashboard',    group: 'ASSESS',         icon: '⊞',  label: 'Dashboard',       path: '/dashboard' },
+  { key: 'company',      group: 'ASSESS',         icon: '🏢', label: 'Company Profile', path: '/company' },
+  { key: 'assessment',   group: 'ASSESS',         icon: '📋', label: 'ESG Assessment',  path: '/assessment' },
+  { key: 'carbon',       group: 'ASSESS',         icon: '🌱', label: 'Carbon',          path: '/carbon' },
+  { key: 'documents',    group: 'EVIDENCE',       icon: '📁', label: 'Evidence',        path: '/documents' },
+  { key: 'frameworks',   group: 'EVIDENCE',       icon: '📚', label: 'Frameworks',      path: '/frameworks' },
+  { key: 'reports',      group: 'EVIDENCE',       icon: '📄', label: 'Reports',         path: '/reports' },
+  { key: 'analytics',    group: 'INTELLIGENCE',   icon: '📈', label: 'Analytics',       path: '/analytics' },
+  { key: 'kpis',         group: 'INTELLIGENCE',   icon: '🎯', label: 'KPIs',            path: '/kpis' },
+  { key: 'assistant',    group: 'INTELLIGENCE',   icon: '🤖', label: 'AI Assistant',    path: '/assistant' },
+  { key: 'workflow',     group: 'ADMINISTRATION', icon: '🔀', label: 'Workflow',        path: '/workflow' },
+  { key: 'users',        group: 'ADMINISTRATION', icon: '👥', label: 'Users & Roles',   path: '/users' },
+  { key: 'integrations', group: 'ADMINISTRATION', icon: '🔌', label: 'Integrations',    path: '/integrations' },
+  { key: 'governance',   group: 'ADMINISTRATION', icon: '🔎', label: 'Governance & Recognition', path: '/governance' },
 ];
+
+// The bottom nav is FIVE, named explicitly. It used to be `MODULES.slice(0, 5)`,
+// which was correct only while MODULES happened to start with the five that
+// belong on a phone. Adding Carbon at position four would have silently pushed
+// Reports out and pulled Carbon in — a nav change nobody made, caused by an
+// edit somewhere else entirely.
+const BOTTOM_NAV_KEYS = ['dashboard', 'company', 'assessment', 'documents', 'reports'];
+
+// ── Framework display names ────────────────────────────────────────────────
+// The seed data is TRUE: the working framework really was authored by Modus AI
+// Associates, and seed.sql keeps saying so. It just never reaches a screen.
+// Render through this map, never `framework.name` / `.publisher` / `.code` raw.
+const FRAMEWORK_DISPLAY = {
+  'MODUS_SEDG_ALIGNED@0.9-draft': 'SME ESG Assessment (SEDG-aligned, draft)',
+  'MODUS_SEDG_ALIGNED': 'SME ESG Assessment (SEDG-aligned, draft)',
+  'SEDG@2.0': 'Simplified ESG Disclosure Guide v2',
+  'SEDG': 'Simplified ESG Disclosure Guide',
+  'VERRA_VCS@4.x': 'Carbon crediting registry standard (public reference)',
+  'VERRA_VCS': 'Carbon crediting registry standard (public reference)',
+};
+
+/** Display name for a framework. Falls back to a neutral label rather than to
+ *  the raw name — a missing map entry must not leak the publisher string. */
+function frameworkLabel(code, version) {
+  if (!code) return 'Assessment framework';
+  return FRAMEWORK_DISPLAY[`${code}@${version || ''}`]
+      || FRAMEWORK_DISPLAY[code]
+      || 'Assessment framework';
+}
 
 function esc(s) {
   return String(s ?? '')
@@ -157,13 +198,19 @@ function layout(title, content, user, activePath = '') {
 
   const initials = (user?.name?.[0] || user?.email?.[0] || 'U').toUpperCase();
 
-  const nav = MODULES.map((m) => {
-    const active = activePath === m.path ? ' active' : '';
-    return `<a class="nav-item${active}" href="${esc(m.path)}">
+  // Contract §4.3: brand → nav (GROUPED) → footer.
+  const nav = GROUPS.map((g) => {
+    const items = MODULES.filter((m) => m.group === g);
+    if (!items.length) return '';
+    const links = items.map((m) => {
+      const active = activePath === m.path ? ' active' : '';
+      return `<a class="nav-item${active}" href="${esc(m.path)}">
       <span class="nav-icon">${m.icon}</span><span class="nav-label">${esc(m.label)}</span></a>`;
+    }).join('');
+    return `<div class="nav-group"><div class="nav-group-label text-sm">${esc(g)}</div>${links}</div>`;
   }).join('');
 
-  const bottomNav = MODULES.slice(0, 5).map((m) => {
+  const bottomNav = BOTTOM_NAV_KEYS.map((k) => MODULES.find((m) => m.key === k)).filter(Boolean).map((m) => {
     const active = activePath === m.path ? ' active' : '';
     return `<a class="bn-item${active}" href="${esc(m.path)}">
       <span class="bn-icon">${m.icon}</span><span class="bn-label">${esc(m.label)}</span></a>`;
@@ -186,9 +233,12 @@ function layout(title, content, user, activePath = '') {
 .sidebar{width:var(--sidebar-w);background:var(--brand);color:#fff;display:flex;flex-direction:column;position:fixed;inset:0 auto 0 0;overflow-y:auto}
 .sb-brand{padding:18px 20px;font-weight:700;letter-spacing:.2px;display:flex;align-items:center;gap:10px}
 .sb-dot{width:10px;height:10px;border-radius:50%;background:var(--accent)}
+.sb-brand-sub{display:block;font-weight:500;color:#cbd5e1;letter-spacing:0;margin-top:2px}
 .nav-item{display:flex;align-items:center;gap:12px;padding:10px 20px;color:#cbd5e1;text-decoration:none;font-size:14px}
 .nav-item:hover{background:var(--brand-3);color:#fff}
 .nav-item.active{background:var(--accent-bg);color:#fff;box-shadow:inset 3px 0 0 var(--accent)}
+.nav-group{padding-top:6px}
+.nav-group-label{padding:8px 20px 4px;color:#94a3b8;letter-spacing:.08em}
 .main{flex:1;margin-left:var(--sidebar-w);display:flex;flex-direction:column;min-width:0}
 .topbar{height:var(--topbar-h);display:flex;align-items:center;justify-content:space-between;padding:0 24px;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:5}
 .avatar{width:32px;height:32px;border-radius:50%;background:var(--accent);color:var(--accent-contrast);display:grid;place-items:center;font-weight:600;font-size:13px}
@@ -213,7 +263,9 @@ function layout(title, content, user, activePath = '') {
 <body>
 <div class="app">
   <aside class="sidebar">
-    <div class="sb-brand"><span class="sb-dot"></span> Modus ESG</div>
+    <div class="sb-brand"><span class="sb-dot"></span>
+      <span>Malaysia SMEs ESG e-Reporting System
+        <span class="sb-brand-sub text-sm">Governance &amp; Recognition</span></span></div>
     <nav>${nav}</nav>
   </aside>
   <div class="main">
@@ -223,9 +275,9 @@ function layout(title, content, user, activePath = '') {
         <div class="topbar-system">Malaysia SMEs ESG e-Reporting System</div>
       </div>
       <div style="display:flex;align-items:center;gap:12px">
-        <button class="btn btn-ghost" id="themeBtn" type="button" aria-label="Toggle theme">◐</button>
+        <button class="btn btn-outline" id="themeBtn" type="button" aria-label="Toggle theme">◐</button>
         <div class="avatar" title="${esc(user?.email || '')}">${esc(initials)}</div>
-        <a class="btn btn-ghost" href="/auth/logout">Sign out</a>
+        <a class="btn btn-outline" href="/auth/logout">Sign out</a>
       </div>
     </header>
     <main class="content">${content}</main>
@@ -275,4 +327,7 @@ function emptyState(state, opts = {}) {
     <h3>${esc(s.title)}</h3><p>${esc(s.body)}</p></div>`;
 }
 
-module.exports = { layout, bareLayout, esc, emptyState, MODULES, TOKENS_CSS, CSS_HREF, CSS_VERSION };
+module.exports = {
+  layout, bareLayout, esc, emptyState, MODULES, GROUPS, BOTTOM_NAV_KEYS,
+  frameworkLabel, TOKENS_CSS, CSS_HREF, CSS_VERSION,
+};
