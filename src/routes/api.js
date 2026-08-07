@@ -32,12 +32,20 @@ router.get('/frameworks', wrap(async (req, res) => {
   const { rows } = await query(
     `SELECT code, version, name, publisher, framework_kind, is_active, source_url
        FROM esg_frameworks ORDER BY code, version`);
-  // `display_name` is what a client should render. `name` and `publisher` stay
-  // factual — the working framework really was authored by Modus AI Associates
-  // — but no UI renders them, so the attribution lives in the data and never on
-  // a screen. See src/utils/layout.js FRAMEWORK_DISPLAY.
+  // `name` and `publisher` are SELECTed and deliberately NOT returned. The
+  // stored data stays factual — the working framework really was authored by
+  // Modus AI Associates and seed.sql still says so — but a JSON body is
+  // something a person can open, so the response carries the display name and
+  // the identifiers only. See src/utils/layout.js FRAMEWORK_DISPLAY.
   res.json({
-    frameworks: rows.map((f) => ({ ...f, display_name: frameworkLabel(f.code, f.version) })),
+    frameworks: rows.map((f) => ({
+      code: f.code,
+      version: f.version,
+      display_name: frameworkLabel(f.code, f.version),
+      framework_kind: f.framework_kind,
+      is_active: f.is_active,
+      source_url: f.source_url,
+    })),
   });
 }));
 

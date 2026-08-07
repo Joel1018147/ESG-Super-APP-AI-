@@ -456,6 +456,44 @@ router.get('/governance', async (req, res, next) => {
             : 'Ingest is configured and working — the sync has not run yet or returned no records.' });
 
     res.send(layout('Governance & Recognition', `
+      <div class="card">
+        <h3 class="card-title">Governance &amp; Recognition</h3>
+        <p><strong>Platform owner.</strong> SMEs Sustainable Entrepreneur Organisation (SSEO).
+        SSEO owns the assessment framework this platform runs on and is the body that
+        revises it — a new version is issued as a new framework record, never an edit
+        to the one companies have already been scored against.</p>
+        <p class="text-sm">Scores carry the framework version, the weighting version and
+        the engine version that produced them, so any result on this platform can be traced
+        back to the exact rules in force when it was calculated.</p>
+      </div>
+
+      <div class="card">
+        <h3 class="card-title">Where this platform sits</h3>
+        <p>This platform produces a <strong>self-declared assessment supported by evidence</strong>.
+        It is a starting point, not an endorsement, and it deliberately stops before the
+        steps that require an independent party:</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Stage</th><th>Who does it</th><th>Status here</th></tr></thead>
+            <tbody>
+              <tr><td>1 · Self-assessment against the framework</td><td>The company</td>
+                  <td><span class="badge badge-success">This platform</span></td></tr>
+              <tr><td>2 · Evidence attached and reviewed by a person</td><td>The company</td>
+                  <td><span class="badge badge-success">This platform</span></td></tr>
+              <tr><td>3 · Independent verification of the disclosures</td><td>An external assurance provider</td>
+                  <td><span class="badge badge-warning">Not part of this platform</span></td></tr>
+              <tr><td>4 · Certification against a published standard</td><td>A certification body</td>
+                  <td><span class="badge badge-warning">Not part of this platform</span></td></tr>
+              <tr><td>5 · Investor or customer due diligence</td><td>The counterparty</td>
+                  <td><span class="badge badge-warning">Not part of this platform</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="text-sm">A score here does not certify anything and is not a substitute for
+        stages 3 to 5. It is designed to make those stages cheaper by having the evidence
+        already organised against the disclosures a counterparty will ask for.</p>
+      </div>
+
       <h3 class="section-title">Carbon Crediting Registry (public reference)</h3>
       <div class="ai-insight" style="margin-bottom:16px">
         <strong>What this is.</strong> A local mirror of a public carbon-crediting registry, for

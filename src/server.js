@@ -64,7 +64,14 @@ app.use(cors({ origin: process.env.APP_URL || true, credentials: true }));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 app.use(cookieParser());
-app.use(express.static(path.join(__dirname, '../public'), { maxAge: IS_PROD ? '7d' : 0 }));
+// `index: false` so express.static does NOT quietly answer `/` with
+// public/index.html before the explicit route below ever runs. Left on, the
+// landing page would be served by middleware ordering rather than by a route
+// anyone can find, and the `app.get('/')` handler would be unreachable dead
+// code that still reads as live.
+app.use(express.static(path.join(__dirname, '../public'), {
+  maxAge: IS_PROD ? '7d' : 0, index: false,
+}));
 
 app.use(session({
   store: new pgSession({ pool, tableName: 'session', createTableIfMissing: false }),
@@ -171,7 +178,13 @@ app.get('/favicon.ico', (req, res) => res.redirect(301, '/favicon.svg'));
 app.get('/robots.txt', (req, res) =>
   res.sendFile(path.join(__dirname, '../public/robots.txt')));
 
-app.get('/', (req, res) => res.redirect(req.isAuthenticated && req.isAuthenticated() ? '/dashboard' : '/auth/login'));
+// Public landing page. A signed-in visitor still goes straight to their
+// dashboard — the marketing page is for people who do not have an account yet,
+// and bouncing a signed-in user onto it looks like being logged out.
+app.get('/', (req, res) => {
+  if (req.isAuthenticated && req.isAuthenticated()) return res.redirect('/dashboard');
+  res.sendFile(path.join(__dirname, '../public/index.html'));
+});
 app.use('/auth', require('./routes/auth'));
 app.use('/api',  requireAuth, denyWritesForReadOnly, require('./routes/api'));
 app.use('/',     requireAuth, denyWritesForReadOnly, require('./routes/documents'));

@@ -375,6 +375,99 @@ atest('no rendered page shows an internal or registry brand in visible text', as
     `expected 29 rendered surfaces checked, got ${checked.length}: ${checked.join(', ')}`);
 });
 
+// A JSON body has no tags, so the HTML shape does not transfer. The equivalent
+// structural split is IDENTIFIER vs PROSE, and it is a shape, not a list of
+// exempt field names (checklist #13):
+//
+//   identifier — SCREAMING_SNAKE_CASE, a bare code like `0.9-draft`, a URL, or
+//                a UUID. Opaque tokens a client passes back to the server.
+//   prose      — everything else: any string a person would read.
+//
+// `MODUS_SEDG_ALIGNED` is an identifier and stays, exactly as §3.3 rules for
+// the /api/verra/* paths. `Modus SME ESG Assessment (SEDG-aligned draft)` is
+// prose and must not be returned. No field is named anywhere in this rule, so
+// a new field added tomorrow is covered by whichever half it falls into.
+const IDENTIFIER = /^(?:[A-Z][A-Z0-9_]*|[0-9][0-9a-z.-]*|https?:\/\/\S+|[0-9a-f-]{36})$/;
+
+function* proseStrings(value, where) {
+  if (typeof value === 'string') {
+    if (!IDENTIFIER.test(value)) yield [where, value];
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i += 1) yield* proseStrings(value[i], `${where}[${i}]`);
+    return;
+  }
+  if (value && typeof value === 'object') {
+    for (const [k, v] of Object.entries(value)) yield* proseStrings(v, `${where}.${k}`);
+  }
+}
+
+atest('no JSON response body carries an internal or registry brand', async () => {
+  // A JSON body has no tags to strip, so the whole payload IS readable text —
+  // and /api/frameworks used to return `name` and `publisher` straight from
+  // seed.sql. The stored row stays factual; the response must not carry it.
+  //
+  // Route paths are NOT part of this check: /api/verra/* is an identifier, not
+  // something rendered, and renaming live routes for a demo is churn with
+  // deploy risk. Only the BODY is asserted.
+  const dbPath = require.resolve('../src/db');
+  const realDb = require.cache[dbPath];
+  const FRAMEWORK_ROWS = [
+    { code: 'MODUS_SEDG_ALIGNED', version: '0.9-draft', name: 'Modus SME ESG Assessment (SEDG-aligned draft)',
+      publisher: 'Modus AI Associates LLP', framework_kind: 'entity_disclosure', is_active: true, source_url: null },
+    { code: 'VERRA_VCS', version: '4.x', name: 'Verified Carbon Standard', publisher: 'Verra',
+      framework_kind: 'project_crediting', is_active: false, source_url: 'https://verra.org/' },
+  ];
+  require.cache[dbPath] = {
+    id: dbPath, filename: dbPath, loaded: true, exports: {
+      query: async (sql) => ({
+        rows: /FROM esg_frameworks/.test(sql) ? FRAMEWORK_ROWS : [], rowCount: 0,
+      }),
+      pool: { connect: async () => ({ query: async () => ({ rows: [] }), release() {} }) },
+    },
+  };
+  for (const k of Object.keys(require.cache)) {
+    if (k.includes(`${path.sep}src${path.sep}`) && k !== dbPath) delete require.cache[k];
+  }
+
+  try {
+    const api = require('../src/routes/api');
+    // The stub feeds rows that DO contain both brands, so a handler that passes
+    // its row through unchanged fails here. A stub returning [] would make this
+    // test vacuous — it would pass on an unfixed route.
+    for (const routePath of ['/frameworks', '/frameworks/sedg-v2', '/analytics', '/kpis',
+                             '/assistant', '/workflow', '/users', '/integrations']) {
+      const layer = api.stack.find((l) => l.route && l.route.path === routePath && l.route.methods.get);
+      assert.ok(layer, `no GET handler for /api${routePath}`);
+      let body = null;
+      const res = { json(b) { body = b; }, status() { return res; } };
+      await layer.route.stack[0].handle({ user: { id: 'u1', company_id: 'c1' }, query: {}, params: {} },
+        res, (e) => { throw e || new Error(`/api${routePath} called next()`); });
+      assert.ok(body, `/api${routePath} returned no JSON`);
+      for (const [where, value] of proseStrings(body, `/api${routePath}`)) {
+        for (const re of FORBIDDEN_IN_TEXT) {
+          const m = value.match(re);
+          assert.ok(!m, `${where} carries "${m && m[0]}": "${value.slice(0, 120)}"`);
+        }
+      }
+    }
+    // Prove the stub actually reached the handler, so a silently-empty result
+    // cannot masquerade as a clean one.
+    const fw = api.stack.find((l) => l.route && l.route.path === '/frameworks');
+    let body = null;
+    await fw.route.stack[0].handle({ user: { id: 'u1', company_id: 'c1' }, query: {}, params: {} },
+      { json(b) { body = b; }, status() { return this; } }, (e) => { throw e; });
+    assert.strictEqual(body.frameworks.length, 2, 'the stub rows never reached the handler');
+    assert.ok(body.frameworks.every((f) => f.display_name), 'display_name is missing');
+  } finally {
+    require.cache[dbPath] = realDb;
+    for (const k of Object.keys(require.cache)) {
+      if (k.includes(`${path.sep}src${path.sep}`) && k !== dbPath) delete require.cache[k];
+    }
+  }
+});
+
 test('robots.txt and the favicon are reachable without a session', () => {
   // Both are mounted above the auth guard. Railway's HTTP log caught
   // GET /robots.txt -> 302: a crawler reads that as "no robots.txt" and
