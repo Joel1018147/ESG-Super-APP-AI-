@@ -411,6 +411,72 @@ atest('no rendered page shows an internal or registry brand in visible text', as
     `expected 29 rendered surfaces checked, got ${checked.length}: ${checked.join(', ')}`);
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// smecorp=false — THE ENDORSEMENT THAT IS NOT CLAIMED
+//
+// The governance source document carries a Strategic Endorsement section naming
+// a government agency, marked "subject to formal approval", under a footnote
+// requiring formal WRITTEN approval before the statement or logo is used. That
+// approval does not exist yet, so the name appears nowhere in this software —
+// not the name, not the logo, not an "endorsement pending" line. A qualifier in
+// a proposal and a rendered claim in working software are different things, and
+// the second is the one a partner's due diligence asks about.
+//
+// This is asserted here rather than written in a paragraph because prose decays
+// and a red build does not. The rule holds until Joel confirms written approval,
+// at which point this test is deleted deliberately — not edited around.
+//
+// SCOPE IS A SHAPE, NOT A FILE LIST (checklist #13): everything SHIPPED —
+// src/**/*.js and public/**/*.html. docs/ is deliberately outside it, because
+// docs/GOVERNANCE_SOURCE.md is where the exclusion is recorded and must be free
+// to name what it excludes. Nothing under docs/ is served to a user.
+//
+// Source is scanned with comments stripped, so the reasoning may be explained
+// in a comment but never rendered. HTML is scanned RAW as well as on visible
+// text — raw catches the `title="…"` tooltip case that the visibleText shape
+// above documents as its known limit.
+// ═══════════════════════════════════════════════════════════════════════════
+const UNAPPROVED_ENDORSEMENT = /sme\s*\.?\s*corp/i;
+
+test('no shipped file claims an endorsement that has not been granted', () => {
+  const checked = [];
+
+  for (const f of files) {
+    const m = read(f).match(UNAPPROVED_ENDORSEMENT);
+    assert.ok(!m, `${rel(f)} names the endorsing body ("${m && m[0]}") in shipped source`);
+    checked.push(rel(f));
+  }
+
+  const PUBLIC = path.join(__dirname, '../public');
+  const htmlFiles = [];
+  (function walkHtml(dir) {
+    for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, f.name);
+      if (f.isDirectory()) walkHtml(p);
+      else if (p.endsWith('.html')) htmlFiles.push(p);
+    }
+  }(PUBLIC));
+
+  for (const f of htmlFiles) {
+    const raw = readRaw(f);
+    const m = raw.match(UNAPPROVED_ENDORSEMENT);
+    assert.ok(!m, `${rel(f)} names the endorsing body ("${m && m[0]}")`);
+    assert.ok(!UNAPPROVED_ENDORSEMENT.test(visibleText(raw)), `${rel(f)}: visible text`);
+    checked.push(rel(f));
+  }
+
+  // ASSERT THE DENOMINATOR. A walk that covered nothing passes every assertion
+  // inside it (§7b rule 4). The landing page is named explicitly because it is
+  // the one surface an anonymous visitor reads, and a rename that dropped it
+  // from the walk would otherwise be invisible.
+  // Not an exact count — src/ legitimately grows. Low enough to survive a
+  // refactor, high enough that a broken walk (the real failure mode) cannot
+  // pass it: src/ is 18 files today.
+  assert.ok(files.length > 12, `source walk covered only ${files.length} files`);
+  assert.ok(checked.includes(path.join('public', 'index.html')),
+    `the landing page was not covered; checked: ${checked.join(', ')}`);
+});
+
 // A JSON body has no tags, so the HTML shape does not transfer. The equivalent
 // structural split is IDENTIFIER vs PROSE, and it is a shape, not a list of
 // exempt field names (checklist #13):

@@ -458,6 +458,10 @@ router.get('/governance', async (req, res, next) => {
     res.send(layout('Governance & Recognition', `
       <div class="card">
         <h3 class="card-title">Governance &amp; Recognition</h3>
+        <p><strong>Registration.</strong> The Malaysia SMEs ESG e-Reporting System is
+        registered under the SMEs Sustainable Entrepreneur Organisation (SSEO) as the
+        official platform for participating SME organisations and ESG reporting
+        initiatives.</p>
         <p><strong>Platform owner.</strong> SMEs Sustainable Entrepreneur Organisation (SSEO).
         SSEO owns the assessment framework this platform runs on and is the body that
         revises it — a new version is issued as a new framework record, never an edit
@@ -465,6 +469,46 @@ router.get('/governance', async (req, res, next) => {
         <p class="text-sm">Scores carry the framework version, the weighting version and
         the engine version that produced them, so any result on this platform can be traced
         back to the exact rules in force when it was calculated.</p>
+      </div>
+
+      <div class="card">
+        <h3 class="card-title">Purpose</h3>
+        <p class="text-sm">The platform aims to:</p>
+        <ul>
+          <li>Accelerate ESG adoption among Malaysian SMEs.</li>
+          <li>Simplify ESG reporting through a user-friendly digital system.</li>
+          <li>Enhance ESG readiness for local and international supply chains.</li>
+          <li>Support access to sustainable finance and ESG-linked opportunities.</li>
+          <li>Strengthen SME competitiveness through improved governance and sustainability
+              practices.</li>
+        </ul>
+      </div>
+
+      <!-- OBJECTIVES ARE NOT A FEATURE LIST.
+           Two of the eight — peer benchmarking and report generation — describe
+           capability that renders an uninstrumented empty state today. They are
+           what the source document calls objectives, so they are rendered as
+           objectives: a prose block of its own, carrying no control, no badge and
+           no link to a working screen. A reader who mistakes this for an inventory
+           of what is built has been misled by the page, not by the list. Do not
+           put a button in this card. -->
+      <h3 class="section-title">Platform objectives</h3>
+      <div class="card">
+        <p class="text-sm">Stated by SSEO for the system as a whole. This is what the
+        platform is for — not a description of what this screen does. Where a capability
+        is not built yet, the page for it says so in its own words.</p>
+        <p class="text-sm">The system supports SMEs to:</p>
+        <ul>
+          <li>Register and establish their ESG profile.</li>
+          <li>Conduct ESG maturity assessments.</li>
+          <li>Perform ESG self-reporting.</li>
+          <li>Monitor ESG performance through real-time dashboards.</li>
+          <li>Generate ESG reports aligned with Malaysian and international frameworks.</li>
+          <li>Benchmark performance against industry peers.</li>
+          <li>Receive AI-driven recommendations for continuous improvement.</li>
+          <li>Prepare for external verification, certification, and investor or customer
+              due diligence.</li>
+        </ul>
       </div>
 
       <div class="card">
@@ -492,6 +536,32 @@ router.get('/governance', async (req, res, next) => {
         <p class="text-sm">A score here does not certify anything and is not a substitute for
         stages 3 to 5. It is designed to make those stages cheaper by having the evidence
         already organised against the disclosures a counterparty will ask for.</p>
+      </div>
+
+      <div class="card">
+        <h3 class="card-title">Stakeholder ecosystem</h3>
+        <p><strong>Platform owner</strong> — SMEs Sustainable Entrepreneur Organisation (SSEO)</p>
+        <p><strong>Supporting partners</strong></p>
+        <ul>
+          <li>Universities and Research Institutions</li>
+          <li>ESG Consultants</li>
+          <li>Professional Bodies</li>
+          <li>Financial Institutions</li>
+          <li>Technology Providers</li>
+          <li>Sustainability Assurance Partners</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3 class="card-title">Expected outcomes</h3>
+        <ul>
+          <li>Increase ESG adoption among Malaysian SMEs.</li>
+          <li>Improve supply-chain sustainability readiness.</li>
+          <li>Enhance transparency and governance.</li>
+          <li>Enable access to green financing and investment opportunities.</li>
+          <li>Support Malaysia's ESG and Sustainable Development Goals (SDGs) agenda.</li>
+          <li>Build a nationally recognised digital ESG reporting ecosystem for SMEs.</li>
+        </ul>
       </div>
 
       <h3 class="section-title">Carbon Crediting Registry (public reference)</h3>
