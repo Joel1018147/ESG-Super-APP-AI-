@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run test suite (no DATABASE_URL — OS-level checks only)
+        run: npm test
+
+  test-with-db:
+    # services: (Docker containers) only run on Linux-hosted runners, so the
+    # DB-gated suites (schema-idempotency-test.js, layer2-test.js) can only be
+    # exercised for real here, not in the windows-latest/ubuntu-latest matrix
+    # above. This job is where those guards actually run.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: esg_ci_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/esg_ci_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run test suite with a real Postgres
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee /tmp/test-output.log
+
+      - name: Fail if the DB-gated guards were skipped instead of run
+        run: |
+          if grep -q "SKIPPED" /tmp/test-output.log; then
+            echo "::error::A DB-gated suite reported SKIPPED even with DATABASE_URL set — the guard that keeps a bad schema or a lying model away from esg_scores did not actually run. See test/schema-idempotency-test.js and test/layer2-test.js."
+            grep -B1 "SKIPPED" /tmp/test-output.log
+            exit 1
+          fi
