@@ -62,3 +62,49 @@ Note this exercises a code path production does not: the proxy host is
 `*.proxy.rlwy.net`, so `sslConfig()` takes its SSL branch. Production connects
 over `*.railway.internal` and takes the non-SSL branch. Running here is the only
 way that branch gets tested.
+
+## Agentic Engineering Standards (ecosystem-wide, added 2026-08-03)
+
+Added to this repo 2026-08-07. It was the only one of ten platforms without it,
+because this CLAUDE.md was written from scratch rather than from
+`Modus-Agent-OS/skills/claude-md-pattern.md` — which is why the M-EasyESG build
+re-derived three defect classes the SOP already documented.
+
+0. LOAD THE AGENT OS BEFORE BUILDING. `Modus-Agent-OS/BUILD_PROTOCOL.md` is the
+   control layer: how Cowork, Claude Code and sub-agents divide work by what each
+   can SEE, and why a claim about the other side is a hypothesis, never a fact.
+   Read it, plus `Modus-Agent-OS/skills/recurring-bugs-checklist.md`, before any
+   code. DO NOT RE-DERIVE what is on that checklist.
+
+1. KEEP THIS FILE MINIMAL. Current models correctly infer stack, structure, and
+   conventions by reading the codebase. Only document what a fresh read genuinely
+   can't recover: business rules, the vision behind a non-obvious decision, and
+   anything that would otherwise require asking Joel.
+
+2. SOURCE CODE OVER MEMORY FOR THIRD-PARTY INTEGRATIONS. Before writing code
+   against any external library, SDK, or API this platform doesn't already have
+   documented in this file, pull its real source into reference/repos/<org>/<project>/
+   and read that. See `Modus-Agent-OS/skills/source-code-context.md`.
+
+3. STRUCTURE CLEANUP BEFORE THE DEPLOY GATE. After a feature works and is tested,
+   check whether anything in the diff duplicates a mechanic already elsewhere in
+   this platform. See `Modus-Agent-OS/skills/code-structure-cleanup.md`.
+
+4. "DONE" MEANS THE THREE-STAGE GATE, NOT JUST ACTIVE ON RAILWAY. Compile
+   (ACTIVE) is a floor. A prompt isn't complete until Verify (live smoke test
+   against real-shaped data) and Structure (audit against
+   `recurring-bugs-checklist.md`) both pass. See
+   `Modus-Agent-OS/skills/three-stage-deploy-gate.md`.
+
+## Known divergence from the canonical harness
+
+`Modus-Agent-OS/skills/test-harness-integrity-audit.md` names
+`test/harness.js` + `negative-control*.js` as the pattern. This repo uses
+`test/run-all.js` with four suites and has **no negative-control plants**. Of 50
+assertions, only five have been mutation-tested.
+
+Adoption across the ecosystem is 2 of 10 — Dragon Ginseng and M-EasyMall follow
+it; M-EasyCommerce, the reference implementation, does not. So this is an open
+ecosystem decision, not an ESG-only defect. Either roll the pattern out or
+downgrade the language in that skill; do not silently leave a standard nobody
+follows.
