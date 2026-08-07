@@ -2,7 +2,7 @@
 const { execFileSync } = require('child_process');
 const path = require('path');
 
-const suites = ['scoring-engine-test.js', 'no-model-figures-test.js', 'schema-idempotency-test.js'];
+const suites = ['scoring-engine-test.js', 'no-model-figures-test.js', 'schema-idempotency-test.js', 'layer2-test.js'];
 let failed = 0;
 for (const s of suites) {
   console.log(`\n── ${s} ${'─'.repeat(Math.max(0, 60 - s.length))}`);

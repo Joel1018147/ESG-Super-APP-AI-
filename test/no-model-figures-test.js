@@ -88,12 +88,27 @@ test('reasoning controls are gated on the model actually sent', () => {
   assert.strictEqual(supportsReasoningControls(undefined), false);
 });
 
-test('no setTimeout is used to schedule work outside the job poller', () => {
+test('setTimeout is never used to schedule work', () => {
+  // The rule is about SCHEDULING, not about the function. Work that must happen
+  // later belongs in esg_scheduled_jobs, because a timer dies with the
+  // container and Railway restarts containers whenever it likes.
+  //
+  // This used to be enforced by exempting three files by name, which is how a
+  // rule quietly becomes a suggestion — the fourth legitimate use just gets
+  // added to the list. Instead the two legitimate SHAPES are stripped first,
+  // and anything still standing is a real violation in any file.
+  const ALLOWED = [
+    // An awaited delay inside already-running code: rate-limit pauses.
+    /await new Promise\(\s*\(\s*\w+\s*\)\s*=>\s*setTimeout\(\s*\w+\s*,[^)]*\)\s*\)/g,
+    // A request timeout paired with an AbortController.
+    /setTimeout\(\s*\(\)\s*=>\s*\w+\.abort\(\)\s*,[^)]*\)/g,
+  ];
   for (const f of files) {
-    if (f.endsWith('jobRunner.js') || f.endsWith('groqService.js') || f.endsWith('verraService.js')) continue;
-    const src = read(f);
+    let src = read(f);
+    for (const shape of ALLOWED) src = src.replace(shape, '');
     assert.ok(!/setTimeout\s*\(/.test(src),
-      `${rel(f)} uses setTimeout — scheduled work belongs in esg_scheduled_jobs, not in a timer that dies with the container`);
+      `${rel(f)} uses setTimeout in a shape that is not an awaited delay or an abort timer — ` +
+      `scheduled work belongs in esg_scheduled_jobs`);
   }
 });
 
@@ -330,6 +345,32 @@ test('data-platform is never set without the stylesheet that gives it meaning', 
   for (const f of walkHtml(pubDir)) {
     check(path.relative(pubDir, f), fs.readFileSync(f, 'utf8'));
   }
+});
+
+test('a missing PDF parser cannot stop the app booting', () => {
+  // server.js:177 requires routes/documents at BOOT, which reaches
+  // extractionService -> pdfService. pdf-parse needs DOMMatrix, supplied only by
+  // @napi-rs/canvas's native binding, and that binding does not load on every
+  // platform — it does not load on this one. Required at module scope, the
+  // ReferenceError takes down login, dashboard and /health over an unused
+  // feature.
+  //
+  // This assertion is not hypothetical here: `require('pdf-parse')` genuinely
+  // throws on this machine, so the boot path below only survives because the
+  // parser is loaded lazily.
+  // read(), not readRaw(): the comment above this very assertion names
+  // require('pdf-parse') in prose, and the raw text matches it. Same trap the
+  // helper at the top of this file was written for.
+  const src = read(path.join(SRC, 'services/pdfService.js'));
+  const beforeFirstFn = src.slice(0, src.search(/^(async )?function /m));
+  assert.ok(!/require\(['"]pdf-parse['"]\)/.test(beforeFirstFn),
+    'pdf-parse is required at module scope — a load failure would break boot, not just extraction');
+
+  assert.doesNotThrow(() => require('../src/routes/documents'),
+    'the documents router cannot be required — the app would not boot');
+
+  const { extractText } = require('../src/services/pdfService');
+  assert.strictEqual(typeof extractText, 'function', 'pdfService did not load');
 });
 
 console.log(`no-model-figures-test: ${passed} passed`);

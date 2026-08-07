@@ -36,8 +36,9 @@ $env:DATABASE_URL="postgres://..."; node test/smoke-test.js   # full end-to-end 
   only `groqService.js` reads `GROQ_MODEL`, no `SELECT *`, no SQL interpolation,
   no nullable UNIQUE, no `setTimeout` scheduling
 - `test/schema-idempotency-test.js` — replays schema + seed three times
+- `test/layer2-test.js` — the extraction guards, run against a hallucinating model
 - `test/smoke-test.js` — register → profile → assessment → score → carbon →
-  dashboard, plus cross-tenant isolation
+  upload → analyse → dashboard, plus cross-tenant isolation
 
 ## What is built (sprint 1)
 
@@ -52,7 +53,6 @@ recommendations with offline fallback · full JSON API · Postgres job queue.
 |---|---|
 | Official SEDG disclosures not imported. The 40 seeded indicators are `mapping_status = 'draft'`. | Badged "draft" in the assessment UI. `SEDG v2.0` framework row exists with zero indicators. See `docs/SCORING_METHODOLOGY.md`. |
 | Diesel and petrol emission factors are DEFRA placeholders, not Malaysian. | `verification_status = 'unverified'`; every entry using them is stamped `is_provisional` and badged in the UI. |
-| Evidence upload not built. `esg_documents` exists with no writer. | `/documents` says so rather than showing a broken button. |
 | Report generation (PDF/DOCX/XLSX) not built. | `/reports` says so. |
 | Registry ingest off until `VERRA_API_BASE` is set. | `/governance` reports **uninstrumented**, not "empty". |
 

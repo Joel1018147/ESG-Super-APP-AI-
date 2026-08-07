@@ -191,6 +191,40 @@ const json = (method, o) => ({ method, headers: { 'Content-Type': 'application/j
       `dashboard carries ${inlineBytes} bytes of inline <style>; the sheet is being inlined again`);
   });
 
+  let documentId = null;
+  await check('a PDF uploads, stores and lists', async () => {
+    const { makePdf } = require('./fixtures/makePdf');
+    const pdf = makePdf([['Sustainability Report', 'We publish an anti-bribery policy.']]);
+    const fd = new FormData();
+    fd.append('doc_type', 'esg_report');
+    fd.append('file', new Blob([pdf], { type: 'application/pdf' }), 'report.pdf');
+    const r = await A('/documents', { method: 'POST', body: fd });
+    assert.ok([302, 303].includes(r.status), `upload returned ${r.status}`);
+    const list = await (await A('/api/documents', { headers: { Accept: 'application/json' } })).json();
+    const doc = list.documents.find((d) => d.filename === 'report.pdf');
+    assert.ok(doc, 'uploaded file is not in the list');
+    assert.strictEqual(doc.text_status, 'pending', 'a fresh upload should not claim to be analysed');
+    documentId = doc.id;
+  });
+
+  await check('analysis is queued, and a second request is reported not silently dropped', async () => {
+    const first = await A(`/api/documents/${documentId}/analyse`, json('POST', {}));
+    assert.strictEqual(first.status, 202, 'first analyse was not queued');
+    assert.strictEqual((await first.json()).queued, true);
+    // The per-target dedupe key means a duplicate is refused rather than
+    // queued twice — and the caller is told, rather than being left to wonder
+    // why nothing happened.
+    const second = await A(`/api/documents/${documentId}/analyse`, json('POST', {}));
+    const b = await second.json();
+    assert.strictEqual(b.queued, false, 'the same document was queued twice');
+  });
+
+  await check('the evidence page renders the document and its true status', async () => {
+    const html = await (await A(`/documents/${documentId}`)).text();
+    assert.ok(html.includes('report.pdf'), 'filename missing');
+    assert.ok(!html.includes('is not built yet'), 'the old stub page is still being served');
+  });
+
   await check('one company cannot read another company\'s assessment', async () => {
     const B = jarFetch({});
     await B('/auth/register', form({
@@ -202,7 +236,9 @@ const json = (method, o) => ({ method, headers: { 'Content-Type': 'application/j
 
   await check('every page route has a JSON equivalent that answers', async () => {
     for (const p of ['/api/me', '/api/company', '/api/assessments', '/api/carbon',
-                     '/api/frameworks', '/api/indicators', '/api/emission-factors', '/api/verra/status']) {
+                     '/api/frameworks', '/api/indicators', '/api/emission-factors',
+                     '/api/verra/status', '/api/documents',
+                     `/api/assessments/${assessmentId}/extractions`]) {
       const r = await A(p, { headers: { Accept: 'application/json' } });
       assert.strictEqual(r.status, 200, `${p} returned ${r.status}`);
     }

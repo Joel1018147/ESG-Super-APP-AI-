@@ -174,6 +174,7 @@ app.get('/robots.txt', (req, res) =>
 app.get('/', (req, res) => res.redirect(req.isAuthenticated && req.isAuthenticated() ? '/dashboard' : '/auth/login'));
 app.use('/auth', require('./routes/auth'));
 app.use('/api',  requireAuth, denyWritesForReadOnly, require('./routes/api'));
+app.use('/',     requireAuth, denyWritesForReadOnly, require('./routes/documents'));
 app.use('/',     requireAuth, denyWritesForReadOnly, require('./routes/pages'));
 
 // 404

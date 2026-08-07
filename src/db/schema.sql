@@ -607,3 +607,89 @@ BEGIN
     END IF;
   END LOOP;
 END $$;
+
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 10. LAYER 2 — ANALYSIS OF UPLOADED ESG REPORTS
+--
+-- The MoM asks the AI to "estimate ESG performance" from an uploaded report.
+-- Taken literally that would have a language model author a score, which is the
+-- one thing this system must never do. The shape below is how that request is
+-- honoured without breaking it:
+--
+--   1. The model answers a CLOSED question per indicator — yes / partial / no.
+--      It never emits a number, a percentage or a score.
+--   2. Every answer must come with a VERBATIM QUOTE. The quote is checked
+--      against the extracted text; if it is not found, the proposal is
+--      auto-rejected as a hallucination and never reaches a human.
+--   3. A verified proposal is still only a PROPOSAL. A person accepts it before
+--      it becomes a row in esg_responses. An AI reading a PDF must not silently
+--      raise a company's ESG rating.
+--   4. Coverage percentages are arithmetic over ACCEPTED proposals, computed by
+--      scoringEngine.js, exactly as for questionnaire answers.
+--
+-- So Layer 2 is not a second scoring path. It is a second INPUT path into the
+-- single scoring engine.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+ALTER TABLE esg_documents ADD COLUMN IF NOT EXISTS page_count      integer;
+ALTER TABLE esg_documents ADD COLUMN IF NOT EXISTS extracted_text  text;
+ALTER TABLE esg_documents ADD COLUMN IF NOT EXISTS extraction_error text;
+-- Distinguishes "not looked at yet" from "looked at, and this PDF is a scan
+-- with no text layer" from "looked at, and it genuinely says nothing relevant".
+-- Reporting a scan as an empty report is the error that makes an owner stop
+-- looking.
+ALTER TABLE esg_documents ADD COLUMN IF NOT EXISTS text_status text NOT NULL DEFAULT 'pending';
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'esg_documents_text_status_chk') THEN
+    ALTER TABLE esg_documents ADD CONSTRAINT esg_documents_text_status_chk
+      CHECK (text_status IN ('pending','extracting','extracted','no_text_layer','failed'));
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS esg_document_extractions (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  document_id     uuid NOT NULL REFERENCES esg_documents(id) ON DELETE CASCADE,
+  assessment_id   uuid REFERENCES esg_assessments(id) ON DELETE SET NULL,
+  indicator_id    uuid NOT NULL REFERENCES esg_indicators(id),
+  -- An OPTION CODE, never a value. There is deliberately no numeric column on
+  -- this table: adding one would create the first path by which a
+  -- model-authored figure could reach a company, and
+  -- test/layer2-test.js asserts the column does not exist.
+  proposed_option_code text NOT NULL,
+  evidence_quote  text NOT NULL,
+  page_no         integer,
+  -- Set by the extractor, not by the model. False means the quote could not be
+  -- located in the document's own extracted text.
+  quote_verified  boolean NOT NULL DEFAULT false,
+  status          text NOT NULL DEFAULT 'pending'
+                  CHECK (status IN ('pending','accepted','rejected','auto_rejected')),
+  reject_reason   text,
+  model           text,
+  reviewed_by     uuid REFERENCES esg_users(id) ON DELETE SET NULL,
+  reviewed_at     timestamptz,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now()
+);
+-- One live proposal per indicator per document. Auto-rejected hallucinations
+-- are kept for audit and are excluded here, so a rejected proposal never blocks
+-- a later good one.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_esg_doc_extractions_live
+  ON esg_document_extractions (document_id, indicator_id)
+  WHERE status <> 'auto_rejected';
+CREATE INDEX IF NOT EXISTS idx_esg_doc_extractions_review
+  ON esg_document_extractions (assessment_id, status);
+
+-- The original singleton index was UNIQUE (job_type) WHERE pending/running.
+-- Correct for a recurring job like the registry sync — exactly wrong for a
+-- per-document job, where it would let ONE company analyse ONE report at a
+-- time across the entire platform, and silently drop everyone else's request
+-- via ON CONFLICT DO NOTHING. Nobody would see an error; the button would just
+-- do nothing.
+--
+-- Dedupe is now per TARGET: jobs with no dedupe_key stay singleton per type
+-- (the sync), jobs that name one are unique per key (one per document).
+DROP INDEX IF EXISTS uq_esg_jobs_singleton;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_esg_jobs_dedupe
+  ON esg_scheduled_jobs (job_type, coalesce(payload->>'dedupe_key', ''))
+  WHERE status IN ('pending','running');

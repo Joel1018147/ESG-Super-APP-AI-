@@ -13,6 +13,8 @@ const { scoreAssessment, loadActiveScheme, computeScores } = require('../service
 const { generateRecommendations } = require('../services/aiAdvisor');
 const { electricityToCo2e, fuelToCo2e } = require('../services/carbonEngine');
 const { mirrorStatus, syncProjects } = require('../services/verraService');
+const ex = require('../services/extractionService');
+const { enqueue } = require('../services/jobRunner');
 
 const router = express.Router();
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -237,6 +239,61 @@ router.get('/verra/projects', wrap(async (req, res) => {
 
 router.post('/verra/sync', wrap(async (req, res) => {
   res.json(await syncProjects(req.body || {}));
+}));
+
+// ── Layer 2 ────────────────────────────────────────────────────────────────
+router.get('/documents', wrap(async (req, res) => {
+  const { rows } = await query(
+    `SELECT id, filename, doc_type, mime_type, byte_size, text_status, page_count, created_at
+       FROM esg_documents WHERE company_id=$1 ORDER BY created_at DESC`, [cid(req)]);
+  res.json({ documents: rows });
+}));
+
+router.post('/documents/:id/analyse', wrap(async (req, res) => {
+  const { rows } = await query(
+    `SELECT id, assessment_id, mime_type FROM esg_documents WHERE id=$1 AND company_id=$2`,
+    [req.params.id, cid(req)]);
+  if (!rows[0]) return res.status(404).json({ error: 'Not found' });
+  if (!rows[0].assessment_id) return res.status(400).json({ error: 'Document is not linked to an assessment' });
+  const jobId = await enqueue(ex.JOB_TYPE, {
+    dedupe_key: rows[0].id, documentId: rows[0].id, assessmentId: rows[0].assessment_id,
+    companyId: cid(req), userId: req.user.id,
+  });
+  // null means a job for this document is already queued or running — reported
+  // rather than swallowed, so a caller polling knows why nothing changed.
+  res.status(jobId ? 202 : 200).json({ queued: Boolean(jobId), jobId });
+}));
+
+router.get('/assessments/:id/extractions', wrap(async (req, res) => {
+  const a = await ownedAssessment(req);
+  if (!a) return res.status(404).json({ error: 'Not found' });
+  const { rows } = await query(
+    `SELECT e.id, i.code, i.pillar, e.proposed_option_code, e.evidence_quote, e.page_no,
+            e.status, e.quote_verified, e.reject_reason, e.model, e.reviewed_at
+       FROM esg_document_extractions e JOIN esg_indicators i ON i.id=e.indicator_id
+      WHERE e.assessment_id=$1 ORDER BY e.status, i.pillar, i.code`, [a.id]);
+  res.json({ extractions: rows, coverage: await ex.coverage(a.id) });
+}));
+
+/** Ownership is checked by joining through the document. Without it any
+ *  signed-in user could accept another company's proposal by guessing a UUID —
+ *  and accepting is the one action that changes a score. */
+async function ownedExtraction(req) {
+  const { rows } = await query(
+    `SELECT e.id FROM esg_document_extractions e
+       JOIN esg_documents d ON d.id = e.document_id
+      WHERE e.id=$1 AND d.company_id=$2`, [req.params.id, cid(req)]);
+  return rows[0] || null;
+}
+
+router.post('/extractions/:id/accept', wrap(async (req, res) => {
+  if (!await ownedExtraction(req)) return res.status(404).json({ error: 'Not found' });
+  res.json(await ex.acceptProposal(req.params.id, req.user.id));
+}));
+
+router.post('/extractions/:id/reject', wrap(async (req, res) => {
+  if (!await ownedExtraction(req)) return res.status(404).json({ error: 'Not found' });
+  res.json(await ex.rejectProposal(req.params.id, req.user.id, (req.body || {}).reason));
 }));
 
 module.exports = router;

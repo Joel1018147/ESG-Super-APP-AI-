@@ -478,11 +478,5 @@ router.get('/reports', (req, res) => {
   }), req.user, '/reports'));
 });
 
-router.get('/documents', (req, res) => {
-  res.send(layout('Evidence', emptyState('uninstrumented', {
-    title: 'Evidence upload is not built yet',
-    body: 'esg_documents exists and esg_responses.document_id points at it, but nothing writes to it yet. A table with no writer answers nothing — sprint 2 adds the upload.',
-  }), req.user, '/documents'));
-});
 
 module.exports = router;

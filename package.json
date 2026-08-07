@@ -1,7 +1,7 @@
 {
   "name": "modus-esg-super-app",
   "version": "0.1.0",
-  "description": "Modus AI Ecosystem \u2014 Malaysia SMEs ESG e-Reporting System",
+  "description": "Modus AI Ecosystem — Malaysia SMEs ESG e-Reporting System",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
@@ -28,7 +28,8 @@
     "multer": "^2.0.1",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
-    "pg": "^8.13.0",
-    "passport-local": "^1.0.0"
+    "passport-local": "^1.0.0",
+    "pdf-parse": "^2.4.5",
+    "pg": "^8.13.0"
   }
 }
