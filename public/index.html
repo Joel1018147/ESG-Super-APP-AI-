@@ -7,200 +7,275 @@
 <meta name="description" content="An ESG self-assessment and evidence platform for Malaysian SMEs. Answer the disclosures your customers ask for, attach the evidence, and see where you stand.">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- TWO FONTS, TWO JOBS (UI contract §5.1). Outfit for what you SCAN, Inter for
+     what you READ, never a third. The design system already declares both as
+     --font / --font-display and applies --font-display automatically to
+     .section-title, .card-title and friends — but ESG's shells load Inter ONLY,
+     so Outfit silently fell back to Inter everywhere. Loading it here fixes the
+     landing page; src/utils/layout.js:160,227 still load Inter alone and the
+     signed-in shell still has no Outfit. That is a real gap, out of scope for
+     this change, and deliberately not papered over here. -->
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <!-- The design system supplies every colour, radius and font. This page adds
      layout only — it does not redeclare a single token. A landing page that
      defines its own palette is how a repo forks away from the master. -->
 <link rel="stylesheet" href="/css/modus-design-system.css">
 <style>
-/* Layout geometry only. No colour, no font-size that isn't a scale step. */
+/* GEOMETRY ONLY. Every colour below resolves through a token that EXISTS —
+   checked against the stylesheet, not assumed (§3: a custom property that
+   merely looks like a token renders transparent and throws nothing).
+
+   The dark band uses --brand, which is dark in BOTH themes (#0f172a light,
+   #020817 dark), so the hero cannot invert into an unreadable light-on-light.
+   --bg and --surface DO flip and are wrong here for exactly that reason.
+   Foreground on the band is --accent-contrast, ESG's declared sixth accent
+   token and the only one that stays light in both themes. */
 *, *::before, *::after { box-sizing: border-box; }
 body { background: var(--bg); color: var(--text); line-height: 1.65; margin: 0; }
 a { color: inherit; text-decoration: none; }
 
-.lp-nav { position: sticky; top: 0; z-index: 100; background: var(--surface);
-  border-bottom: 1px solid var(--border); padding: 0 24px; display: flex;
-  align-items: center; justify-content: space-between; height: 60px; }
-.lp-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; }
+/* ── the dark band: nav + hero + stats are one continuous surface ────────── */
+.lp-dark { background: var(--brand); color: var(--accent-contrast); }
+
+.lp-nav { position: sticky; top: 0; z-index: 100; background: var(--brand);
+  border-bottom: 1px solid var(--brand-3); display: flex; align-items: center;
+  justify-content: space-between; gap: 24px; padding: 0 24px; height: 64px; }
+.lp-brand { display: flex; align-items: center; gap: 10px; font-weight: 700;
+  color: var(--accent-contrast); white-space: nowrap; }
 .lp-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--accent); flex: none; }
-.lp-nav-right { display: flex; align-items: center; gap: 10px; }
+.lp-nav-links { display: flex; gap: 28px; }
+.lp-nav-links a { color: var(--muted); font-size: 14px; font-weight: 500; }
+.lp-nav-links a:hover, .lp-nav-links a:focus-visible { color: var(--accent-contrast); }
+.lp-nav-right { display: flex; align-items: center; gap: 10px; flex: none; }
 
 .lp-wrap { max-width: 1060px; margin: 0 auto; padding: 0 24px; }
-.lp-hero { padding: 72px 0 48px; text-align: center; }
-.lp-hero h1 { letter-spacing: -1px; line-height: 1.12; margin: 0 0 18px; }
-.lp-hero p { color: var(--text-2); max-width: 640px; margin: 0 auto 32px; }
+
+.lp-hero { padding: 96px 0 72px; text-align: center; }
+.lp-pill { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 28px;
+  padding: 7px 16px; border-radius: 999px; background: var(--brand-3);
+  border: 1px solid var(--border-2); color: var(--muted); font-size: 13px; font-weight: 500; }
+.lp-pill .lp-dot { width: 8px; height: 8px; }
+.lp-hero h1 { font-size: clamp(38px, 6.2vw, 76px); font-weight: 800; line-height: 1.06;
+  letter-spacing: -2px; margin: 0 0 26px; color: var(--accent-contrast); }
+.lp-hero h1 .lp-accent { color: var(--accent); display: block; }
+.lp-hero p { color: var(--muted); max-width: 620px; margin: 0 auto 36px; font-size: 17px; }
 .lp-cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
 
-.lp-section { padding: 44px 0; border-top: 1px solid var(--border); }
+/* ── stat strip ─────────────────────────────────────────────────────────── */
+.lp-stats { border-top: 1px solid var(--brand-3); background: var(--brand-2); }
+.lp-stat-grid { display: grid; gap: 24px; padding: 36px 0;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.lp-stat { text-align: center; }
+.lp-stat-num { display: block; font-size: 40px; font-weight: 800; line-height: 1;
+  letter-spacing: -1.5px; color: var(--accent-contrast); }
+.lp-stat-label { display: block; margin-top: 8px; color: var(--muted); font-size: 14px; }
+
+/* ── light sections ─────────────────────────────────────────────────────── */
+.lp-section { padding: 64px 0; border-top: 1px solid var(--border); }
 .lp-section > h2 { margin: 0 0 8px; }
-.lp-section > p.lead { color: var(--text-2); margin: 0 0 24px; max-width: 700px; }
+.lp-section > p.lead { color: var(--text-2); margin: 0 0 28px; max-width: 700px; }
 .lp-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
-.lp-num { display: inline-flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px; border-radius: 50%; background: var(--accent-bg);
-  color: var(--accent); font-weight: 700; flex: none; }
-.lp-step { display: flex; gap: 12px; align-items: flex-start; }
-.lp-foot { border-top: 1px solid var(--border); padding: 28px 0 48px; color: var(--text-2); }
 .lp-list { margin: 0 0 8px; padding-left: 20px; }
 .lp-list > li { margin-bottom: 8px; }
 .lp-list-2 { columns: 2; column-gap: 32px; }
 .lp-list-2 > li { break-inside: avoid; }
-@media (max-width: 640px) { .lp-hero { padding: 48px 0 36px; } .lp-list-2 { columns: 1; } }
+.lp-foot { border-top: 1px solid var(--border); padding: 32px 0 56px; color: var(--text-2); }
+
+@media (max-width: 860px) { .lp-nav-links { display: none; } }
+@media (max-width: 640px) {
+  .lp-hero { padding: 60px 0 48px; }
+  .lp-list-2 { columns: 1; }
+  .lp-nav { gap: 12px; padding: 0 14px; }
+  .lp-brand { font-size: 13px; white-space: normal; }
+}
 </style>
 </head>
 <body>
 
 <a class="skip-link" href="#main">Skip to content</a>
 
-<nav class="lp-nav">
-  <div class="lp-brand"><span class="lp-dot"></span> Malaysia SMEs ESG e-Reporting System</div>
-  <div class="lp-nav-right">
-    <a class="btn btn-outline" href="/auth/login">Sign in</a>
-    <a class="btn btn-primary" href="/auth/register">Register your company</a>
-  </div>
-</nav>
+<div class="lp-dark">
+  <nav class="lp-nav">
+    <div class="lp-brand"><span class="lp-dot"></span> Malaysia SMEs ESG e-Reporting System</div>
+    <!-- Every anchor here resolves to a section that exists further down. A nav
+         link to nothing is a dead control (§4.3c). No language selector: this
+         page has no translation engine behind it, and a switcher that sets a
+         variable and translates nothing is the same defect one rung along. -->
+    <div class="lp-nav-links">
+      <a href="#what">What it does</a>
+      <a href="#limits">What it doesn't claim</a>
+      <a href="#governance">Governance</a>
+    </div>
+    <div class="lp-nav-right">
+      <a class="btn btn-outline" href="/auth/login">Sign in</a>
+      <a class="btn btn-primary" href="/auth/register">Register your company</a>
+    </div>
+  </nav>
 
-<main id="main">
-  <div class="lp-wrap">
-
-    <section class="lp-hero">
-      <span class="badge badge-info">Governance &amp; Recognition</span>
-      <h1 class="h-display">Answer the ESG questions your customers are already asking</h1>
-      <p>A self-assessment and evidence platform for Malaysian SMEs. Work through the
-         disclosures once, attach the documents you already have, and get a score you can
-         explain — with every figure traceable to the answer and the evidence behind it.</p>
-      <div class="lp-cta">
-        <a class="btn btn-primary btn-lg" href="/auth/register">Register your company</a>
-        <a class="btn btn-outline btn-lg" href="/auth/login">Sign in</a>
-      </div>
-    </section>
-
-    <section class="lp-section">
-      <h2 class="section-title">A registered platform</h2>
-      <p class="lead">The Malaysia SMEs ESG e-Reporting System is registered under the SMEs
-         Sustainable Entrepreneur Organisation (SSEO) as the official platform for
-         participating SME organisations and ESG reporting initiatives.</p>
-      <p class="lead"><strong>Platform owner.</strong> SMEs Sustainable Entrepreneur
-         Organisation (SSEO).</p>
-    </section>
-
-    <section class="lp-section">
-      <h2 class="section-title">Purpose</h2>
-      <p class="lead">The platform aims to:</p>
-      <ul class="lp-list">
-        <li>Accelerate ESG adoption among Malaysian SMEs.</li>
-        <li>Simplify ESG reporting through a user-friendly digital system.</li>
-        <li>Enhance ESG readiness for local and international supply chains.</li>
-        <li>Support access to sustainable finance and ESG-linked opportunities.</li>
-        <li>Strengthen SME competitiveness through improved governance and sustainability
-            practices.</li>
-      </ul>
-    </section>
-
-    <section class="lp-section">
-      <h2 class="section-title">What it does</h2>
-      <p class="lead">Four things, and it is honest about where each one stops.</p>
-      <div class="lp-grid">
-        <div class="card">
-          <h3 class="card-title">Assess</h3>
-          <p>A structured questionnaire across Environmental, Social and Governance.
-             Quantitative questions score on <em>disclosure</em>, not on whether the number
-             is good — inventing a pass mark would be a judgement nobody has agreed.</p>
+  <main id="main">
+    <div class="lp-wrap">
+      <section class="lp-hero">
+        <span class="lp-pill"><span class="lp-dot"></span>
+          Malaysia SMEs ESG e-Reporting System — by Modus AI Associates</span>
+        <h1 class="h-display">Answer the ESG questions
+          <span class="lp-accent">your customers already ask</span></h1>
+        <p>A self-assessment and evidence platform for Malaysian SMEs. Work through the
+           disclosures once, attach the documents you already have, and get a score you can
+           explain — with every figure traceable to the answer and the evidence behind it.</p>
+        <div class="lp-cta">
+          <a class="btn btn-primary btn-lg" href="/auth/register">Register your company</a>
+          <a class="btn btn-outline btn-lg" href="/auth/login">Sign in</a>
         </div>
-        <div class="card">
-          <h3 class="card-title">Evidence</h3>
-          <p>Upload a policy, a utility bill or a full report. An answer backed by a
-             document scores higher than one that is only declared, and the platform
-             records which is which.</p>
-        </div>
-        <div class="card">
-          <h3 class="card-title">Carbon</h3>
-          <p>Scope 1 and Scope 2 from activity data, using published emission factors.
-             Every entry stores the factor, its version and its source, so a figure can be
-             re-checked years later.</p>
-        </div>
-        <div class="card">
-          <h3 class="card-title">Read your own documents</h3>
-          <p>The system reads an uploaded report and <em>proposes</em> answers, each with the
-             quoted sentence it came from. Nothing is recorded until a person accepts it.</p>
+      </section>
+    </div>
+
+    <!-- EVERY NUMBER HERE IS TRUE AND CHECKABLE IN THIS REPO.
+         38 — src/data/sedgV2.js DISCLOSURES.length, asserted in smoke-test.js:292
+         40 — seeded indicators, asserted in schema-idempotency-test.js
+          3 — E, S and G
+         EN — there is no i18n engine in this repo yet, so this says so
+         No adoption or customer count appears here, because there is not one
+         this repo can prove. A stat a stakeholder can disprove in the room is
+         worth less than no stat at all. -->
+    <div class="lp-stats">
+      <div class="lp-wrap">
+        <div class="lp-stat-grid">
+          <div class="lp-stat"><span class="lp-stat-num h-display">38</span>
+            <span class="lp-stat-label">SEDG v2 disclosures published in full</span></div>
+          <div class="lp-stat"><span class="lp-stat-num h-display">40</span>
+            <span class="lp-stat-label">Assessment indicators scored</span></div>
+          <div class="lp-stat"><span class="lp-stat-num h-display">3</span>
+            <span class="lp-stat-label">Pillars — Environmental, Social, Governance</span></div>
+          <div class="lp-stat"><span class="lp-stat-num h-display">EN</span>
+            <span class="lp-stat-label">English only for now — BM and 中文 not built yet</span></div>
         </div>
       </div>
-    </section>
+    </div>
+  </main>
+</div>
 
-    <section class="lp-section">
-      <h2 class="section-title">How a company uses it</h2>
-      <div class="lp-grid">
-        <div class="lp-step"><span class="lp-num">1</span>
-          <div><strong>Register</strong><p>Company details, sector and location, so the right
-            emission factors apply.</p></div></div>
-        <div class="lp-step"><span class="lp-num">2</span>
-          <div><strong>Answer</strong><p>Work through the disclosures. Not applicable is a
-            real answer and is treated as one.</p></div></div>
-        <div class="lp-step"><span class="lp-num">3</span>
-          <div><strong>Attach evidence</strong><p>Upload what you already have. Review what the
-            system proposes from it.</p></div></div>
-        <div class="lp-step"><span class="lp-num">4</span>
-          <div><strong>Score and share</strong><p>A score with its framework version, weighting
-            version and engine version attached.</p></div></div>
+<div class="lp-wrap">
+
+  <section class="lp-section" id="what">
+    <h2 class="section-title">What it does</h2>
+    <p class="lead">Four things, and it is honest about where each one stops.</p>
+    <div class="lp-grid">
+      <div class="card">
+        <h3 class="card-title">Assess</h3>
+        <p>A structured questionnaire across Environmental, Social and Governance.
+           Quantitative questions score on <em>disclosure</em>, not on whether the number
+           is good — inventing a pass mark would be a judgement nobody has agreed.</p>
       </div>
-    </section>
-
-    <section class="lp-section">
-      <h2 class="section-title">What this platform does not claim</h2>
-      <p class="lead">Stated up front, because a counterparty will ask and the answer should
-         be the same on the website as it is inside the product.</p>
-      <div class="lp-grid">
-        <div class="card">
-          <h3 class="card-title">Not a certification</h3>
-          <p>A score here is a self-assessment supported by evidence. It is not an audit, not
-             an assurance opinion, and not a certificate.</p>
-        </div>
-        <div class="card">
-          <h3 class="card-title">Aligned, not compliant</h3>
-          <p>The assessment is aligned in draft to Malaysia's Simplified ESG Disclosure Guide.
-             The official disclosure set is published in full inside the platform, and the
-             reconciliation against it is not finished.</p>
-        </div>
-        <div class="card">
-          <h3 class="card-title">The model never writes a number</h3>
-          <p>AI drafts recommendations and proposes answers from your documents. It is
-             structurally prevented from producing or altering a score.</p>
-        </div>
+      <div class="card">
+        <h3 class="card-title">Evidence</h3>
+        <p>Upload a policy, a utility bill or a full report. An answer backed by a
+           document scores higher than one that is only declared, and the platform
+           records which is which.</p>
       </div>
-    </section>
+      <div class="card">
+        <h3 class="card-title">Carbon</h3>
+        <p>Scope 1 and Scope 2 from activity data, using published emission factors.
+           Every entry stores the factor, its version and its source, so a figure can be
+           re-checked years later.</p>
+      </div>
+      <div class="card">
+        <h3 class="card-title">Read your own documents</h3>
+        <p>The system reads an uploaded report and <em>proposes</em> answers, each with the
+           quoted sentence it came from. Nothing is recorded until a person accepts it.</p>
+      </div>
+    </div>
+  </section>
 
-    <section class="lp-section">
-      <h2 class="section-title">Governance</h2>
-      <p class="lead"><strong>Platform owner.</strong> SMEs Sustainable Entrepreneur
-         Organisation (SSEO). SSEO owns the assessment framework and is the body that revises
-         it. A revision is issued as a new framework version, never as an edit to the one
-         companies have already been scored against.</p>
-      <p class="lead">The platform covers self-assessment and evidence. Independent
-         verification, certification, and investor or customer due diligence sit outside it
-         and are performed by other parties.</p>
-    </section>
+  <section class="lp-section">
+    <h2 class="section-title">How a company uses it</h2>
+    <div class="lp-grid">
+      <div class="card"><h3 class="card-title">1 · Register</h3>
+        <p>Company details, sector and location, so the right emission factors apply.</p></div>
+      <div class="card"><h3 class="card-title">2 · Answer</h3>
+        <p>Work through the disclosures. Not applicable is a real answer and is treated
+           as one.</p></div>
+      <div class="card"><h3 class="card-title">3 · Attach evidence</h3>
+        <p>Upload what you already have. Review what the system proposes from it.</p></div>
+      <div class="card"><h3 class="card-title">4 · Score and share</h3>
+        <p>A score with its framework version, weighting version and engine version
+           attached.</p></div>
+    </div>
+  </section>
 
-    <section class="lp-section">
-      <h2 class="section-title">Supporting partners</h2>
-      <p class="lead">The types of organisation that support the platform alongside its
-         owner.</p>
-      <ul class="lp-list lp-list-2">
-        <li>Universities and Research Institutions</li>
-        <li>ESG Consultants</li>
-        <li>Professional Bodies</li>
-        <li>Financial Institutions</li>
-        <li>Technology Providers</li>
-        <li>Sustainability Assurance Partners</li>
-      </ul>
-    </section>
+  <section class="lp-section" id="limits">
+    <h2 class="section-title">What this platform does not claim</h2>
+    <p class="lead">Stated up front, because a counterparty will ask and the answer should
+       be the same on the website as it is inside the product.</p>
+    <div class="lp-grid">
+      <div class="card">
+        <h3 class="card-title">Not a certification</h3>
+        <p>A score here is a self-assessment supported by evidence. It is not an audit, not
+           an assurance opinion, and not a certificate.</p>
+      </div>
+      <div class="card">
+        <h3 class="card-title">Aligned, not compliant</h3>
+        <p>The assessment is aligned in draft to Malaysia's Simplified ESG Disclosure Guide.
+           The official disclosure set is published in full inside the platform, and the
+           reconciliation against it is not finished.</p>
+      </div>
+      <div class="card">
+        <h3 class="card-title">The model never writes a number</h3>
+        <p>AI drafts recommendations and proposes answers from your documents. It is
+           structurally prevented from producing or altering a score.</p>
+      </div>
+    </div>
+  </section>
 
-  </div>
+  <section class="lp-section" id="governance">
+    <h2 class="section-title">Governance</h2>
+    <p class="lead">The Malaysia SMEs ESG e-Reporting System is registered under the SMEs
+       Sustainable Entrepreneur Organisation (SSEO) as the official platform for
+       participating SME organisations and ESG reporting initiatives.</p>
+    <p class="lead"><strong>Platform owner.</strong> SMEs Sustainable Entrepreneur
+       Organisation (SSEO). SSEO owns the assessment framework and is the body that revises
+       it. A revision is issued as a new framework version, never as an edit to the one
+       companies have already been scored against.</p>
+    <p class="lead">The platform covers self-assessment and evidence. Independent
+       verification, certification, and investor or customer due diligence sit outside it
+       and are performed by other parties.</p>
+  </section>
 
-  <div class="lp-wrap lp-foot">
+  <section class="lp-section">
+    <h2 class="section-title">Purpose</h2>
+    <p class="lead">The platform aims to:</p>
+    <ul class="lp-list">
+      <li>Accelerate ESG adoption among Malaysian SMEs.</li>
+      <li>Simplify ESG reporting through a user-friendly digital system.</li>
+      <li>Enhance ESG readiness for local and international supply chains.</li>
+      <li>Support access to sustainable finance and ESG-linked opportunities.</li>
+      <li>Strengthen SME competitiveness through improved governance and sustainability
+          practices.</li>
+    </ul>
+  </section>
+
+  <section class="lp-section">
+    <h2 class="section-title">Supporting partners</h2>
+    <p class="lead">The types of organisation that support the platform alongside its
+       owner.</p>
+    <ul class="lp-list lp-list-2">
+      <li>Universities and Research Institutions</li>
+      <li>ESG Consultants</li>
+      <li>Professional Bodies</li>
+      <li>Financial Institutions</li>
+      <li>Technology Providers</li>
+      <li>Sustainability Assurance Partners</li>
+    </ul>
+  </section>
+
+  <div class="lp-foot">
     <p><strong>Malaysia SMEs ESG e-Reporting System</strong> — Governance &amp; Recognition</p>
     <p class="text-sm">Have an account? <a href="/auth/login"><strong>Sign in</strong></a>.
        New here? <a href="/auth/register"><strong>Register your company</strong></a>.</p>
+    <p class="text-sm">Built by Modus AI Associates.</p>
   </div>
-</main>
+
+</div>
 
 <script>
 // Theme only. Shared ecosystem key, applied before paint by the same convention

@@ -302,10 +302,16 @@ test('every page shell carries the official system name', () => {
 // one and was fixed by hand. If tooltips become load-bearing, this needs a
 // second, narrower check — not a widening of this one.
 // ═══════════════════════════════════════════════════════════════════════════
-const FORBIDDEN_IN_TEXT = [/modus/i, /verra/i];
+// Shells and signed-in pages: NO "modus" in any form. The builder attribution
+// is a marketing-page thing; inside the product the only name that matters is
+// the system's own. `m-?easy\s*esg` is listed because it names the product as
+// ours WITHOUT containing the substring "modus" — see the attribution section
+// further down, which shares this rule and states the shape.
+const FORBIDDEN_IN_TEXT = [/modus/i, /verra/i, /m-?easy\s*esg/i];
 
 function visibleText(html) {
   return html
+    .replace(/<!--[\s\S]*?-->/g, ' ')    // comments are not text a user reads
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
     .replace(/<[^>]*>/g, ' ')            // every tag, and therefore every attribute
@@ -409,6 +415,70 @@ atest('no rendered page shows an internal or registry brand in visible text', as
   assert.strictEqual(MODULES.length, 14, `expected 14 nav entries, found ${MODULES.length}`);
   assert.strictEqual(checked.length, 29,
     `expected 29 rendered surfaces checked, got ${checked.length}: ${checked.join(', ')}`);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PRODUCT NAMING vs DEVELOPER ATTRIBUTION
+//
+// The rule that actually holds is not "the string Modus never appears". It is:
+//
+//   the PRODUCT is never named as a Modus product, anywhere;
+//   the BUILDER may be credited, on the public marketing page only.
+//
+// "Modus ESG" and "M-EasyESG" name the product. "Modus AI Associates" credits
+// the firm that built it. The first is a claim about what this platform IS —
+// which SSEO owns, not Modus — and it is wrong on the landing page and wrong on
+// the dashboard. The second is ordinary attribution and belongs on a marketing
+// page, the same way any agency's work is credited.
+//
+// This is a SHAPE, not an exempt-files array (checklist #13). The shape is:
+// the ONLY permitted "modus" token in visible text is the exact attribution
+// string, and it is permitted only where a visitor is being told who built the
+// thing. Strip that one exact string and assert nothing is left — so a new
+// construction invented tomorrow ("Modus ESG Platform", "the Modus system") is
+// caught without anyone adding it to a list.
+//
+// LLP is asserted separately and negatively: ecosystem-context.md's branding
+// rule is client-facing "Modus AI Associates", internal/legal only
+// "Modus AI Associates LLP". The landing page is as client-facing as it gets.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Product-as-Modus constructions that do NOT contain the substring "modus" and
+// so would survive the residue check below. Everything that DOES contain it is
+// caught structurally and needs no pattern here.
+const PRODUCT_AS_MODUS = [/m-?easy\s*esg/i];
+
+// Two constants, deliberately. A /g regex is STATEFUL under .test() — lastIndex
+// carries between calls, so the same pattern used for both stripping and
+// presence returns alternating true/false and the guard silently half-works.
+// That is recurring-bugs #14 with extra steps.
+const ATTRIBUTION_G  = /Modus AI Associates/g;
+const ATTRIBUTION_1  = /Modus AI Associates/;
+const ATTRIBUTION_LLP = /Modus AI Associates[\s,]*LLP\b/i;
+
+test('the landing page credits the builder without naming the product as ours', () => {
+  const landing = readRaw(path.join(__dirname, '../public/index.html'));
+  const t = visibleText(landing);
+  assert.ok(t.length > 500, `landing rendered only ${t.length} chars of visible text`);
+
+  // The attribution is REQUIRED, not merely tolerated — it is the one thing on
+  // this page that a later edit could quietly drop.
+  assert.ok(ATTRIBUTION_1.test(t), 'the "Modus AI Associates" attribution is missing');
+
+  // …and never with LLP after it.
+  assert.ok(!ATTRIBUTION_LLP.test(t), 'client-facing copy must never append LLP');
+
+  for (const re of PRODUCT_AS_MODUS) {
+    const m = t.match(re);
+    assert.ok(!m, `the product is named as a Modus product: "${m && m[0]}"`);
+  }
+  assert.ok(!/verra/i.test(t), 'the registry brand appears on the landing page');
+
+  // THE SHAPE: strip the one permitted string, assert nothing survives.
+  const residue = t.replace(ATTRIBUTION_G, ' ');
+  const m = residue.match(/modus/i);
+  assert.ok(!m, `"modus" appears outside the attribution — context: `
+    + `…${residue.slice(Math.max(0, residue.search(/modus/i) - 70), residue.search(/modus/i) + 70)}…`);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
