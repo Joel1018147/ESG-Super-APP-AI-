@@ -49,9 +49,27 @@ async function generateWithGroq(prompt, opts = {}) {
     temperature: opts.temperature ?? 0.3,
     max_tokens:  opts.maxTokens ?? 800,
   };
+  // THINKING IS OFF BY DEFAULT. This used to send the controls only when a
+  // caller asked for them, so every caller that forgot got a thinking model —
+  // and qwen3.6 spends its whole budget thinking before it emits anything.
+  //
+  // That silently broke Layer 2 extraction in production: the reply was a
+  // ~700-token <think> block, truncated at max_tokens before a single
+  // `CODE|option|quote` line, so the strict parser matched nothing and every
+  // upload produced zero proposals. Nothing errored — the document showed
+  // text_status `extracted` and an empty review queue, which reads exactly like
+  // "this report discloses nothing".
+  //
+  // It was invisible to the suite because test/layer2-test.js injects a fake
+  // `generate`, which is right for testing the guards and means the real
+  // round-trip had never once been exercised.
+  //
+  // A feature that genuinely needs deliberation passes reasoningEffort:
+  // 'default' explicitly, at its own call site, where the latency is a visible
+  // decision.
   if (supportsReasoningControls(model)) {
-    if (opts.reasoningEffort) body.reasoning_effort = opts.reasoningEffort;
-    if (opts.reasoningFormat) body.reasoning_format = opts.reasoningFormat;
+    body.reasoning_effort = opts.reasoningEffort || 'none';
+    body.reasoning_format = opts.reasoningFormat || 'hidden';
   }
 
   const controller = new AbortController();

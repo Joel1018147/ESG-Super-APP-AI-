@@ -109,6 +109,42 @@ test('reasoning controls are gated on the model actually sent', () => {
   assert.strictEqual(supportsReasoningControls(undefined), false);
 });
 
+atest('thinking is off by default on every Groq call', async () => {
+  // Layer 2 shipped broken and silent because this was opt-in. qwen3.6 spends
+  // its entire max_tokens budget on a <think> block, so the extractor's reply
+  // was truncated before its first `CODE|option|quote` line, the strict parser
+  // matched nothing, and every upload produced an empty review queue with no
+  // error anywhere.
+  //
+  // The suite could not have caught it: layer2-test.js injects a fake
+  // `generate`, so the real request body had never been asserted. This test
+  // asserts the BODY, with fetch stubbed — no network, no API key.
+  const { generateWithGroq } = require('../src/services/groqService');
+  const realFetch = global.fetch;
+  const sent = [];
+  global.fetch = async (url, init) => {
+    sent.push(JSON.parse(init.body));
+    return { ok: true, json: async () => ({ choices: [{ message: { content: 'ok' } }] }) };
+  };
+  try {
+    await generateWithGroq('p', { apiKey: 'k', model: 'qwen/qwen3.6-27b' });
+    assert.strictEqual(sent[0].reasoning_effort, 'none', 'thinking is not disabled by default');
+    assert.strictEqual(sent[0].reasoning_format, 'hidden', 'reasoning output is not hidden by default');
+
+    // A caller that genuinely needs deliberation can still ask for it.
+    await generateWithGroq('p', { apiKey: 'k', model: 'qwen/qwen3.6-27b', reasoningEffort: 'default' });
+    assert.strictEqual(sent[1].reasoning_effort, 'default', 'an explicit effort is not honoured');
+
+    // Still gated: sending these to a model that does not accept them is a 400
+    // on every call.
+    await generateWithGroq('p', { apiKey: 'k', model: 'llama-3.3-70b-versatile' });
+    assert.ok(!('reasoning_effort' in sent[2]),
+      'reasoning controls sent to a model that does not support them');
+  } finally {
+    global.fetch = realFetch;
+  }
+});
+
 test('setTimeout is never used to schedule work', () => {
   // The rule is about SCHEDULING, not about the function. Work that must happen
   // later belongs in esg_scheduled_jobs, because a timer dies with the
