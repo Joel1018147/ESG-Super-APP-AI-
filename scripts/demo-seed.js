@@ -90,35 +90,45 @@ function makePdf(title, lines) {
 // against specific indicators. Every figure here is invented for a fictional
 // company; none of it is presented as anyone's real performance.
 const REPORT_TITLE = 'Seri Timur Manufacturing Sdn Bhd (DEMO) - Sustainability Report 2025';
+//
+// ONE SENTENCE PER LINE, and every line short enough not to wrap. The extractor
+// only accepts a proposal whose quote it can find verbatim in the extracted
+// page text. A sentence split across two PDF text lines is not contiguous once
+// extracted, so every quote spanning the break fails verification and the
+// proposal is discarded — which is what happened on the first production run:
+// text_status came back `extracted`, and zero proposals survived.
 const REPORT_LINES = [
   'This report is a FICTIONAL DEMONSTRATION DOCUMENT. It describes no real company.',
   '',
   '1. GOVERNANCE',
-  'The Board approved a written Code of Conduct in March 2025, and it applies to all',
-  'employees, directors and contractors.',
-  'The company maintains a documented anti-bribery and anti-corruption policy aligned',
-  'to Section 17A of the MACC Act 2009.',
-  'A confidential whistleblowing channel is available to all employees and suppliers,',
-  'operated by an independent third party.',
-  'The company has a data privacy policy aligned to the Personal Data Protection Act 2010.',
+  'The Board approved a written Code of Conduct in March 2025.',
+  'The company maintains a documented anti-bribery and anti-corruption policy.',
+  'A confidential whistleblowing channel is available to all employees.',
+  'The company has a data privacy policy aligned to the PDPA 2010.',
   'A supplier code of conduct was issued to all key suppliers during 2025.',
   'The accounts for the financial year were subject to an external audit.',
   'Ethics and compliance training was delivered to all staff during the year.',
+  'A named sustainability committee is accountable for ESG performance.',
+  'The board includes two independent non-executive directors.',
+  'A risk register is maintained and reviewed by the board twice a year.',
   '',
   '2. ENVIRONMENT',
-  'The company has set a target to reduce Scope 1 and Scope 2 emissions by 20 per cent',
-  'by 2030, against a 2024 base year.',
-  'Rooftop solar supplied 12 per cent of the electricity consumed at the Shah Alam plant',
-  'during 2025.',
-  'Waste is segregated into general, recyclable and scheduled streams and recorded monthly.',
+  'The company has set a documented target to reduce emissions by 2030.',
+  'Rooftop solar supplied part of the electricity used at the Shah Alam plant.',
+  'Waste is segregated into general, recyclable and scheduled streams.',
+  'Monthly electricity consumption is tracked from utility bills.',
+  'Water consumption is tracked and recorded monthly.',
+  'Fuel used by owned vehicles is recorded from fleet card statements.',
+  'There were no reportable environmental incidents during the year.',
   '',
   '3. SOCIAL',
-  'The company operates a written health and safety policy, reviewed annually by management.',
-  'The company recorded 2 lost-time injuries during the reporting year.',
-  'Average training hours per employee was 18.5 hours in 2025.',
-  'Women represent 38 per cent of the total workforce and 25 per cent of management positions.',
-  'The company has declared that it uses no child labour and no forced labour, covering',
-  'its own operations and its direct suppliers.',
+  'The company operates a written health and safety policy.',
+  'Workplace injuries and lost time are recorded and reviewed.',
+  'The company measures customer satisfaction through an annual survey.',
+  'The company contributed to community programmes during the year.',
+  'The company declares that it uses no child labour and no forced labour.',
+  'A documented human rights and non-discrimination policy is in place.',
+  'Employees may raise grievances through a named contact in management.',
 ];
 
 // ── The 40 answers ─────────────────────────────────────────────────────────
@@ -306,11 +316,12 @@ const step = (n, msg) => console.log(`  ${n}. ${msg}`);
   step(8, 'extraction queued');
 
   let ex = { extractions: [] };
-  for (let i = 0; i < 40; i += 1) {
-    await new Promise((r) => setTimeout(r, 3000));      // polling a queue, not scheduling work
+  for (let i = 0; i < 50; i += 1) {
+    await new Promise((r) => setTimeout(r, 4000));      // polling a queue, not scheduling work
     ex = await json(`/api/assessments/${a.id}/extractions`, 'GET');
     if (ex.extractions.length) break;
   }
+  if (ex.coverage) step(8, `coverage: ${JSON.stringify(ex.coverage)}`);
   const pending = ex.extractions.filter((e) => e.status === 'pending');
   const accepted = ex.extractions.filter((e) => e.status === 'accepted');
   step(8, `${ex.extractions.length} proposals, ${pending.length} PENDING REVIEW, ${accepted.length} accepted`);

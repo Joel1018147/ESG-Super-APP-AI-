@@ -14,7 +14,7 @@ const { generateRecommendations } = require('../services/aiAdvisor');
 const { electricityToCo2e, fuelToCo2e } = require('../services/carbonEngine');
 const { mirrorStatus, syncProjects } = require('../services/verraService');
 const ex = require('../services/extractionService');
-const { enqueue } = require('../services/jobRunner');
+const { enqueue, runOnce } = require('../services/jobRunner');
 const { frameworkLabel } = require('../utils/layout');
 const sedg = require('../data/sedgV2');
 
@@ -319,6 +319,12 @@ router.post('/documents/:id/analyse', wrap(async (req, res) => {
     dedupe_key: rows[0].id, documentId: rows[0].id, assessmentId: rows[0].assessment_id,
     companyId: cid(req), userId: req.user.id,
   });
+  // Nudge the worker, exactly as the HTML route at routes/documents.js does.
+  // Without this the two paths for the same action behaved differently: the
+  // page started extracting immediately and the API sat until the next 30s
+  // poll. Same job, same durability — only how soon it starts differed, which
+  // is the kind of drift that gets diagnosed as "the API is broken".
+  if (jobId) setImmediate(() => runOnce().catch((e) => console.error('extraction:', e.message)));
   // null means a job for this document is already queued or running — reported
   // rather than swallowed, so a caller polling knows why nothing changed.
   res.status(jobId ? 202 : 200).json({ queued: Boolean(jobId), jobId });
