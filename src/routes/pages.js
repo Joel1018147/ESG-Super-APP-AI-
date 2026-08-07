@@ -85,7 +85,7 @@ router.get('/dashboard', async (req, res, next) => {
           <div><span class="badge badge-primary" style="font-size:16px">${esc(overall.band_code || 'Not banded')}</span></div>
         </div>
         <p class="muted" style="margin-top:12px">
-          ${esc(a.framework_code)} v${esc(overall.framework_version)} ·
+          ${esc(frameworkLabel(a.framework_code, a.framework_version))} ·
           weighting v${esc(overall.weighting_version)} ·
           engine v${esc(overall.engine_version)} ·
           reporting year ${esc(a.reporting_year)}
@@ -174,7 +174,7 @@ router.get('/assessment', async (req, res, next) => {
     const list = rows.length ? `<table class="table"><thead><tr>
         <th>Year</th><th>Framework</th><th>Status</th><th>Score</th><th></th></tr></thead><tbody>
         ${rows.map((r) => `<tr><td>${esc(r.reporting_year)}</td>
-          <td>${esc(r.framework_code)} v${esc(r.framework_version)}</td>
+          <td>${esc(frameworkLabel(r.framework_code, r.framework_version))}</td>
           <td><span class="badge">${esc(r.status)}</span></td>
           <td>${r.overall === null || r.overall === undefined ? '—' : esc(r.overall)}</td>
           <td><a class="btn btn-outline" href="/assessment/${esc(r.id)}">Open</a></td></tr>`).join('')}

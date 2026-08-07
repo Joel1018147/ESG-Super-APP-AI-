@@ -261,6 +261,28 @@ const json = (method, o) => ({ method, headers: { 'Content-Type': 'application/j
       assert.ok(html.includes('data-platform="esg"'), `${m.path} lost the platform accent`);
       assert.ok(/class="(card|empty-state|coming-soon|stat-card|alert)/.test(html),
         `${m.path} rendered no real content block`);
+
+      // THE SAME VISIBLE-TEXT RULE AS THE UNIT GUARD, BUT WITH REAL DATA.
+      //
+      // The unit guard renders every page against an EMPTY database, so any
+      // string that only appears once a row exists is invisible to it. That is
+      // not hypothetical: /dashboard and /assessment both printed the raw
+      // framework code `MODUS_SEDG_ALIGNED` in a provenance line and a table
+      // cell that render only when an assessment exists. Both passed the unit
+      // guard and both leaked in production.
+      //
+      // This suite has a scored assessment by the time it gets here, so it is
+      // the only place that check can actually fire. Same shape: strip script
+      // and style bodies, strip every tag and therefore every attribute.
+      const text = html
+        .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
+      for (const re of [/modus/i, /verra/i]) {
+        const hit = text.match(re);
+        assert.ok(!hit, `${m.path} visible text contains "${hit && hit[0]}": `
+          + `…${text.slice(Math.max(0, text.search(re) - 80), text.search(re) + 80)}…`);
+      }
     }
   });
 
