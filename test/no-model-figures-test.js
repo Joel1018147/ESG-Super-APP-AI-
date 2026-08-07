@@ -404,4 +404,24 @@ test('text extraction needs no native binding', () => {
   assert.match(out, /OK/, 'extraction failed when the native canvas binding was unresolvable');
 });
 
+test('the font URL is built as a file URL, not by concatenating a path separator', () => {
+  // A SHAPE guard, because no assertion about the resulting VALUE could catch
+  // this on Linux. The original was `path.join(...) + path.sep`, which yields a
+  // trailing "/" on Linux and "\\" on Windows; pdfjs requires "/", so
+  // getDocument() threw on every extraction — but only on Windows.
+  //
+  // The irony is the point: that line existed purely to silence a log warning,
+  // and it broke the one machine the change it rode along with was written to
+  // unblock. It passed every test, on every platform anyone could test it on.
+  const src = read(path.join(SRC, 'services/pdfService.js'));
+  assert.ok(/pathToFileURL/.test(src),
+    'the standard-fonts URL must be built with pathToFileURL, which normalises separators and the drive letter');
+  assert.ok(!/standardFontDataUrl[\s\S]{0,200}?\+\s*path\.sep/.test(src) &&
+            !/return\s+\w+\s*\+\s*path\.sep/.test(src),
+    'the font URL is being built by concatenating path.sep — that produces a backslash on Windows');
+
+  const { extractText } = require('../src/services/pdfService');
+  assert.strictEqual(typeof extractText, 'function');
+});
+
 console.log(`no-model-figures-test: ${passed} passed`);
