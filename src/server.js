@@ -188,6 +188,7 @@ app.get('/', (req, res) => {
 app.use('/auth', require('./routes/auth'));
 app.use('/api',  requireAuth, denyWritesForReadOnly, require('./routes/api'));
 app.use('/',     requireAuth, denyWritesForReadOnly, require('./routes/documents'));
+app.use('/',     requireAuth, denyWritesForReadOnly, require('./routes/carbonImport'));
 app.use('/',     requireAuth, denyWritesForReadOnly, require('./routes/pages'));
 
 // 404

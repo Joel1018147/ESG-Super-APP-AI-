@@ -693,3 +693,56 @@ DROP INDEX IF EXISTS uq_esg_jobs_singleton;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_esg_jobs_dedupe
   ON esg_scheduled_jobs (job_type, coalesce(payload->>'dedupe_key', ''))
   WHERE status IN ('pending','running');
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 8. CARBON BULK IMPORT (EXCEL UPLOAD -> AUTO-FILL)
+--
+-- Same shape as M-EasyCommerce's product import, and the same four guards as
+-- extractionService.js's Layer 2, adapted to a structured spreadsheet instead
+-- of prose:
+--   1. THE MODEL NEVER SEES A CELL VALUE. It is shown column headers only and
+--      proposes a header -> field mapping. It never proposes an activity
+--      amount, a date, or a kg CO2e figure.
+--   2. Evidence is the cell reference itself (row number, header) — stronger
+--      than a PDF quote because it is exact, not fuzzy-matched.
+--   3. An unmapped or invented target is dropped, not coerced.
+--   4. Nothing reaches esg_carbon_entries until a human approves the mapping.
+--      Commit is then fully deterministic: every row goes through the SAME
+--      carbonEngine.electricityToCo2e / fuelToCo2e calculation and the SAME
+--      factor-stamping as the manual /carbon form. No new calculation path.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS esg_carbon_import_batches (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id        uuid NOT NULL REFERENCES esg_companies(id) ON DELETE CASCADE,
+  filename          text NOT NULL,
+  uploaded_by       uuid REFERENCES esg_users(id) ON DELETE SET NULL,
+  status            text NOT NULL DEFAULT 'mapping_pending'
+                    CHECK (status IN ('mapping_pending','committing','committed','error')),
+  column_headers    jsonb NOT NULL DEFAULT '[]',
+  proposed_mapping  jsonb NOT NULL DEFAULT '{}',
+  approved_mapping  jsonb,
+  row_count         integer NOT NULL DEFAULT 0,
+  committed_count   integer NOT NULL DEFAULT 0,
+  error_count       integer NOT NULL DEFAULT 0,
+  error_message     text,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  updated_at        timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_esg_carbon_import_batches_company
+  ON esg_carbon_import_batches (company_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS esg_carbon_import_rows (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  batch_id          uuid NOT NULL REFERENCES esg_carbon_import_batches(id) ON DELETE CASCADE,
+  row_number        integer NOT NULL,
+  raw_cells         jsonb NOT NULL,
+  status            text NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending','committed','error')),
+  carbon_entry_id   uuid REFERENCES esg_carbon_entries(id) ON DELETE SET NULL,
+  error_message     text,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  updated_at        timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_esg_carbon_import_rows_batch_row
+  ON esg_carbon_import_rows (batch_id, row_number);

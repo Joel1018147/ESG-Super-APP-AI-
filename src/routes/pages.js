@@ -376,6 +376,7 @@ router.get('/carbon', async (req, res, next) => {
         Scope 2 cannot be calculated without it — Peninsular and Sarawak factors differ by 3.7x.
         <a href="/company">Company profile →</a></div>` : `
       <div class="card"><h3>Add an entry</h3>
+        <a href="/carbon/import" class="btn btn-outline" style="float:right">🤖 Bulk Import (Excel)</a>
         <form method="post" action="/carbon" style="display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
           <div class="form-group" style="margin:0"><label for="kind">Type</label>
             <select class="input" id="kind" name="kind">
