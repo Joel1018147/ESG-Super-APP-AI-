@@ -746,3 +746,59 @@ CREATE TABLE IF NOT EXISTS esg_carbon_import_rows (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_esg_carbon_import_rows_batch_row
   ON esg_carbon_import_rows (batch_id, row_number);
+
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- SEDG v2 — the `disclosure` response type            (Run 22, 2026-08-09)
+-- ───────────────────────────────────────────────────────────────────────────
+-- Roughly half of SEDG v2's 38 disclosures do not fit any existing response
+-- type: 8 are multi-line-item numerics (E2.1 is six fuel/energy lines), 8 are
+-- open lists, 3 are number-plus-narrative. See docs/SEDG_V2_SOURCE.md §2.
+--
+-- ONE new type carries all three shapes, because the SHAPE lives in data, not
+-- in the type: esg_indicators.line_items names the expected parts, and
+-- esg_responses.value_json holds one entry per part. Completeness is then a
+-- single rule — disclosed parts / applicable parts — for all three.
+--
+-- The rejected alternative was splitting E2.1 into E2.1a..E2.1f. It needs no
+-- schema change at all, which is genuinely attractive, but it breaks the 1:1
+-- with published disclosure codes and turns 38 into ~70 — making "we implement
+-- the 38 SEDG disclosures" false on its face, which is the whole point.
+--
+-- Both columns are additive and nullable, so no existing row changes and no
+-- existing query sees a different value.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                  WHERE table_name = 'esg_indicators' AND column_name = 'line_items') THEN
+    ALTER TABLE esg_indicators ADD COLUMN line_items jsonb;
+  END IF;
+END $$;
+
+COMMENT ON COLUMN esg_indicators.line_items IS
+  'For response_type=disclosure: JSON array naming the expected parts, verbatim from the publisher (e.g. ["Renewable fuel sources",...]). NULL means a free-form list with no fixed parts.';
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                  WHERE table_name = 'esg_responses' AND column_name = 'value_json') THEN
+    ALTER TABLE esg_responses ADD COLUMN value_json jsonb;
+  END IF;
+END $$;
+
+COMMENT ON COLUMN esg_responses.value_json IS
+  'For response_type=disclosure: {"parts":{"<label>":{"value":<num|string>,"na":<bool>}}} for a fixed-part disclosure, or {"text":"..."} for a free list. NULL for every other type.';
+
+-- The response_type CHECK is declared inline on the table, so it must be
+-- replaced rather than extended. Dropped and re-added under an explicit name
+-- so this block is idempotent and the constraint stops depending on Postgres's
+-- auto-generated naming.
+DO $$
+BEGIN
+  ALTER TABLE esg_indicators DROP CONSTRAINT IF EXISTS esg_indicators_response_type_check;
+  ALTER TABLE esg_indicators DROP CONSTRAINT IF EXISTS chk_esg_indicators_response_type;
+  ALTER TABLE esg_indicators ADD CONSTRAINT chk_esg_indicators_response_type
+    CHECK (response_type IN ('yes_no','yes_partial_no','maturity_0_4','quantitative','multi_select','disclosure'));
+END $$;

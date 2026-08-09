@@ -49,6 +49,20 @@ const STANDARD_OPTIONS = Object.freeze({
 // honest thing to measure and the thing SEDG itself asks for.
 const QUANTITATIVE_TYPES = Object.freeze(['quantitative']);
 
+// jsonb arrives from node-postgres already parsed, but a hand-built fixture or
+// a driver without the type parser hands over a string. Accept both rather
+// than depending on which one a caller happens to be.
+function asArray(v) {
+  if (Array.isArray(v)) return v;
+  if (typeof v === 'string') { try { const p = JSON.parse(v); return Array.isArray(p) ? p : null; } catch { return null; } }
+  return null;
+}
+function asObject(v) {
+  if (v && typeof v === 'object' && !Array.isArray(v)) return v;
+  if (typeof v === 'string') { try { const p = JSON.parse(v); return (p && typeof p === 'object' && !Array.isArray(p)) ? p : null; } catch { return null; } }
+  return null;
+}
+
 const PILLARS = Object.freeze(['E', 'S', 'G']);
 
 function toNum(v, fallback = 0) {
@@ -86,6 +100,59 @@ function ratioFor(indicator, response, optionsByIndicator) {
     const n = toNum(v, NaN);
     if (!Number.isFinite(n) || n < 0) return 0;
     return 1;                              // disclosed — see the note above
+  }
+
+  // ── disclosure: completeness, not performance ────────────────────────────
+  // SEDG asks for reported figures, and a figure has no good or bad — 1,240
+  // tCO2e is neither. What IS meaningful is how much of the disclosure the
+  // company can actually make, so the ratio is:
+  //
+  //     parts disclosed / parts applicable
+  //
+  // A part marked not-applicable leaves the DENOMINATOR, exactly as an N/A
+  // indicator does one level up. Four of six lines disclosed and the other two
+  // N/A is a complete disclosure: 4/4 = 1.0, not 4/6.
+  //
+  // This branch must sit ABOVE the STANDARD_OPTIONS lookup. That lookup
+  // returns null for any type it does not know, and null means unscorable —
+  // so a disclosure row falling through would vanish from both numerator and
+  // denominator with no trace, which is trap D in docs/SEDG_V2_SOURCE.md.
+  if (indicator.response_type === 'disclosure') {
+    const parts = asArray(indicator.line_items);
+    const vj = asObject(response.value_json);
+
+    // No fixed parts: an open list. Non-empty text is a disclosure, empty is not.
+    if (!parts || parts.length === 0) {
+      const text = (vj && typeof vj.text === 'string') ? vj.text : (response.value_text || '');
+      return String(text).trim() === '' ? 0 : 1;
+    }
+
+    const answered = (vj && vj.parts && typeof vj.parts === 'object') ? vj.parts : {};
+    let applicable = 0;
+    let disclosed = 0;
+    for (const label of parts) {
+      const part = answered[label];
+      if (part && part.na === true) continue;   // leaves the denominator
+      applicable += 1;
+      if (!part) continue;
+      const v = part.value;
+      if (v === null || v === undefined) continue;
+      if (typeof v === 'number') {
+        if (Number.isFinite(v) && v >= 0) disclosed += 1;
+        continue;
+      }
+      const s = String(v).trim();
+      if (s === '') continue;
+      const n = parseFloat(s);
+      // A narrative part ("nature of the incident") is disclosed when it has
+      // text; a numeric part must parse and be non-negative, matching the
+      // quantitative branch above rather than inventing a second rule.
+      if (Number.isFinite(n)) { if (n >= 0) disclosed += 1; }
+      else disclosed += 1;
+    }
+    // Every part N/A: nothing left to disclose. Unscorable, NOT zero.
+    if (applicable === 0) return null;
+    return disclosed / applicable;
   }
 
   const table = STANDARD_OPTIONS[indicator.response_type];
@@ -290,10 +357,14 @@ async function scoreAssessment(assessmentId) {
   }
 
   const [{ rows: indicators }, { rows: responses }, { rows: options }] = await Promise.all([
-    query(`SELECT id, code, pillar, response_type, weight
+    // line_items and value_json are additive for response_type='disclosure'.
+    // Without them here the disclosure branch reads undefined and every SEDG
+    // row scores as an empty open list, which is a silent 0 rather than an
+    // error — so they belong in the SELECT, not in a later lookup.
+    query(`SELECT id, code, pillar, response_type, weight, line_items
              FROM esg_indicators WHERE framework_id = $1 AND is_active ORDER BY sort_order`,
           [assessment.framework_id]),
-    query(`SELECT indicator_id, option_code, value_numeric, is_na, evidence_tier
+    query(`SELECT indicator_id, option_code, value_numeric, value_text, value_json, is_na, evidence_tier
              FROM esg_responses WHERE assessment_id = $1`, [assessmentId]),
     query(`SELECT o.indicator_id, o.option_code, o.points_ratio
              FROM esg_indicator_options o

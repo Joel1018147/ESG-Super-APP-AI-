@@ -136,6 +136,90 @@ WHERE f.code = 'MODUS_SEDG_ALIGNED' AND f.version = '0.9-draft'
 ON CONFLICT (framework_id, code) DO NOTHING;
 
 
+-- ── 3b. SEDG v2.0 — THE 38 OFFICIAL DISCLOSURES ────────────────────────────
+-- Imported 2026-08-09 (Run 22) from docs/SEDG_V2_SOURCE.md §3, which quotes
+-- the publisher's own PDF. 17 E / 11 S / 10 G; tiers 16 basic / 13
+-- intermediate / 9 advanced. test/sedg-import-test.js asserts those counts and
+-- compares every question_en against that document string-for-string.
+--
+-- WHY THESE VALUES ARE WHAT THEY ARE:
+--   question_en  verbatim, INCLUDING the source's own inconsistent terminal
+--                full stops on E5.1 and E5.2. Not normalised — the point of
+--                mapping_status='official' is that this text is the
+--                publisher's, and a tidied quote is no longer a quote.
+--   question_bm  NULL, and question_zh NULL. The official BM and Chinese
+--   question_zh  guides are VERSION 1 (Dec 2023) and cover 35 of these 38 —
+--                E1.7, E3.1 and S2.3 have no official translation at all.
+--                Inventing one would be precisely what mapping_status exists
+--                to prevent.
+--   weight       1.000 on all 38. SEDG publishes no weighting. Inventing one
+--                would be a Modus opinion wearing the regulator's name.
+--   allows_na    true exactly where the published text says "(if applicable)"
+--                or "if any", and nowhere else.
+--   external_ref the disclosure code itself — unlike the Modus rows, whose
+--                external_ref holds an invented theme slug (trap E).
+--   line_items   the expected parts, verbatim, for a fixed-part disclosure;
+--                NULL for an open list. This is what makes one response type
+--                carry all three awkward shapes.
+--
+-- Scoped to the SEDG framework and ON CONFLICT DO NOTHING, so it can never
+-- touch MODUS_SEDG_ALIGNED and cannot multiply on replay.
+INSERT INTO esg_indicators
+  (framework_id, code, pillar, tier, sort_order, question_en, guidance_en,
+   response_type, unit, weight, allows_na, external_ref, mapping_status, line_items)
+SELECT f.id, v.code, v.pillar, v.tier, v.ord, v.q, NULL, v.rtype, v.unit,
+       1.000, v.na, v.code, 'official', v.lines::jsonb
+FROM esg_frameworks f
+CROSS JOIN (VALUES
+  -- ── ENVIRONMENTAL — 17 ──────────────────────────────────────────────────
+  ('SEDG-E1.1','E','basic',        10,'Report total Scope 1 (direct) GHG emissions in metric tonnes of CO2 equivalent','quantitative','tCO2e',false,NULL),
+  ('SEDG-E1.2','E','basic',        20,'Report total Scope 2 (indirect) GHG emissions in metric tonnes of CO2 equivalent','quantitative','tCO2e',false,NULL),
+  ('SEDG-E1.3','E','intermediate', 30,'Report total Scope 1 GHG emissions reduced as a direct result of reduction initiatives, in metric tonnes of CO2 equivalent','quantitative','tCO2e',false,NULL),
+  ('SEDG-E1.4','E','intermediate', 40,'Report total Scope 2 GHG emissions reduced as a direct result of reduction initiatives, in metric tonnes of CO2 equivalent','quantitative','tCO2e',false,NULL),
+  ('SEDG-E1.5','E','advanced',     50,'Report total Scope 3 (other indirect) GHG emissions in metric tonnes of CO2 equivalent','quantitative','tCO2e',false,NULL),
+  ('SEDG-E1.6','E','advanced',     60,'Report total Scope 3 GHG emissions reduced as a direct result of reduction initiatives, in metric tonnes of CO2 equivalent','quantitative','tCO2e',false,NULL),
+  ('SEDG-E1.7','E','advanced',     70,'Report total Scope 1 and 2 GHG intensity in metric tonnes CO2 equivalent per unit of organisation-specific metrics','quantitative','tCO2e per unit',false,NULL),
+  ('SEDG-E2.1','E','basic',        80,'Report the consumption of the following in joules or watthours: • Renewable fuel sources • Non-renewable fuel sources • Electricity • Heating (if applicable) • Cooling (if applicable) • Steam (if applicable)','disclosure','J / Wh',true,'["Renewable fuel sources","Non-renewable fuel sources","Electricity","Heating (if applicable)","Cooling (if applicable)","Steam (if applicable)"]'),
+  ('SEDG-E2.2','E','intermediate', 90,'Report the reduction in consumption of the following (achieved as a direct result of conservation and efficiency initiatives) in joules or watthours: • Non-renewable fuel sources • Electricity • Heating (if applicable) • Cooling (if applicable) • Steam (if applicable)','disclosure','J / Wh',true,'["Non-renewable fuel sources","Electricity","Heating (if applicable)","Cooling (if applicable)","Steam (if applicable)"]'),
+  ('SEDG-E3.1','E','basic',       100,'Report the total water withdrawn from all areas, and a breakdown of this total by type in litres: • Purchased water • Surface water (if applicable) • Groundwater (if applicable) • Seawater (if applicable) • Produced water (if applicable)','disclosure','litres',true,'["Purchased water","Surface water (if applicable)","Groundwater (if applicable)","Seawater (if applicable)","Produced water (if applicable)"]'),
+  ('SEDG-E3.2','E','intermediate',110,'Report the reduction in total water withdrawn from all areas, and a breakdown of this total by type in litres: • Purchased water • Surface water (if applicable) • Groundwater (if applicable) • Seawater (if applicable) • Produced water (if applicable)','disclosure','litres',true,'["Purchased water","Surface water (if applicable)","Groundwater (if applicable)","Seawater (if applicable)","Produced water (if applicable)"]'),
+  ('SEDG-E4.1','E','basic',       120,'Report total waste in metric tonnes: • Generated • Diverted from disposal • Directed to disposal','disclosure','tonnes',false,'["Generated","Diverted from disposal","Directed to disposal"]'),
+  ('SEDG-E4.2','E','intermediate',130,'Report total waste generated, diverted from disposal, and directed to disposal, each broken down into metric tonnes of: • Hazardous and non-hazardous waste • Sector specific waste streams • Material composition','disclosure','tonnes',false,'["Hazardous and non-hazardous waste","Sector specific waste streams","Material composition"]'),
+  ('SEDG-E4.3','E','advanced',    140,'Report total hazardous and non-hazardous waste diverted from disposal broken down into the following recovery streams in metric tonnes: • Preparation for reuse • Recycling • Other recovery options','disclosure','tonnes',false,'["Preparation for reuse","Recycling","Other recovery options"]'),
+  ('SEDG-E4.4','E','advanced',    150,'Report total hazardous and non-hazardous waste directed to disposal broken down into the following disposal streams in metric tonnes: • Incineration (with energy recovery) • Incineration (without energy recovery) • Landfilling • Other disposal options','disclosure','tonnes',false,'["Incineration (with energy recovery)","Incineration (without energy recovery)","Landfilling","Other disposal options"]'),
+  ('SEDG-E5.1','E','basic',       160,'List the materials and total weights used to produce and package the company''s primary products and services in metric tonnes, if any.','disclosure','list + tonnes',true,NULL),
+  ('SEDG-E5.2','E','advanced',    170,'Report the percentage of recycled input materials used to manufacture the company''s primary products and services.','quantitative','%',false,NULL),
+
+  -- ── SOCIAL — 11 ─────────────────────────────────────────────────────────
+  ('SEDG-S1.1','S','basic',        10,'Report the number and nature of child labour and forced labour incidents, if any','disclosure','number + narrative',true,'["Number","Nature"]'),
+  ('SEDG-S1.2','S','intermediate', 20,'List the operations and suppliers considered to have significant risk for incidents of child labour and forced labour, including: • Type of operation or supplier • Locations at risk','disclosure','list',false,'["Type of operation or supplier","Locations at risk"]'),
+  ('SEDG-S2.1','S','basic',        30,'Report the average hours of training per employee','quantitative','hours',false,NULL),
+  ('SEDG-S2.2','S','intermediate', 40,'Report the total number of employees and the turnover rate','disclosure','number + %',false,'["Total number of employees","Turnover rate"]'),
+  ('SEDG-S2.3','S','basic',        50,'Report the percentage of employees meeting or above applicable minimum wage laws, if any','quantitative','%',true,NULL),
+  ('SEDG-S3.1','S','basic',        60,'Report the percentage of the company''s employees by: • Gender • Age','disclosure','%',false,'["Gender","Age"]'),
+  ('SEDG-S3.2','S','intermediate', 70,'Report the percentage of the company''s directors by: • Gender • Age','disclosure','%',false,'["Gender","Age"]'),
+  ('SEDG-S4.1','S','basic',        80,'Report the number of fatalities and injuries in the company, if any','disclosure','number',true,'["Fatalities","Injuries"]'),
+  ('SEDG-S4.2','S','intermediate', 90,'Report the total number and percentage of employees trained on health and safety standards','disclosure','number + %',false,'["Total number","Percentage"]'),
+  ('SEDG-S5.1','S','basic',       100,'Report the total amount of community investments and donations','quantitative','MYR',false,NULL),
+  ('SEDG-S5.2','S','advanced',    110,'List the company''s operations with negative impact on local communities','disclosure','list',false,NULL),
+
+  -- ── GOVERNANCE — 10 ─────────────────────────────────────────────────────
+  ('SEDG-G1.1','G','basic',        10,'Report the number of directors in the company','quantitative','number',false,NULL),
+  ('SEDG-G1.2','G','intermediate', 20,'List the governance structure of the board, including committees of the board and management, if applicable','disclosure','structure / list',true,NULL),
+  ('SEDG-G2.1','G','basic',        30,'List the company''s policies, including but not limited to: • Code of Conduct • Anti-Corruption Policy • Whistleblowing Policy • Health and Safety Policy','disclosure','list',false,NULL),
+  ('SEDG-G3.1','G','basic',        40,'Report the year of the last submitted audited financial report','quantitative','year',false,NULL),
+  ('SEDG-G3.2','G','intermediate', 50,'List the risks of company operations and activities, including but not limited to: • Regulatory compliance risk • Business continuity risk','disclosure','list',false,NULL),
+  ('SEDG-G3.3','G','advanced',     60,'List the sustainability risks of company if applicable, including but not limited to: • Climate-related physical risk • Climate-related transition risk','disclosure','list',true,NULL),
+  ('SEDG-G4.1','G','basic',        70,'Report the total number and nature of confirmed incidents of corruption, if any','disclosure','number + narrative',true,'["Number","Nature"]'),
+  ('SEDG-G4.2','G','intermediate', 80,'Report the total number and percentage of employees who have received training on the company''s anti-bribery and anti-corruption policy','disclosure','number + %',false,'["Total number","Percentage"]'),
+  ('SEDG-G4.3','G','advanced',     90,'List the significant risks related to corruption','disclosure','list',false,NULL),
+  ('SEDG-G5.1','G','intermediate',100,'Report the total number and nature of substantiated complaints received concerning breaches of customer privacy and loss of customer data, if any','disclosure','number + narrative',true,'["Number","Nature"]')
+) AS v(code, pillar, tier, ord, q, rtype, unit, na, lines)
+WHERE f.code = 'SEDG' AND f.version = '2.0'
+ON CONFLICT (framework_id, code) DO NOTHING;
+
+
+
 -- ── 4. EMISSION FACTORS ────────────────────────────────────────────────────
 -- Malaysia has THREE grids and their factors differ by a factor of 3.7. Using a
 -- national average would overstate a Sarawak SME's Scope 2 by roughly 270%.
