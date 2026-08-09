@@ -228,17 +228,67 @@ router.get('/assessment/:id', async (req, res, next) => {
 
     const [{ rows: inds }, { rows: resp }] = await Promise.all([
       query(`SELECT id, code, pillar, tier, question_en, guidance_en, response_type, unit,
-                    weight, allows_na, mapping_status
+                    weight, allows_na, mapping_status, line_items
                FROM esg_indicators WHERE framework_id = $1 AND is_active ORDER BY pillar, sort_order`,
             [a[0].framework_id]),
-      query(`SELECT indicator_id, option_code, value_numeric, is_na, evidence_tier
+      query(`SELECT indicator_id, option_code, value_numeric, value_text, value_json, is_na, evidence_tier
                FROM esg_responses WHERE assessment_id = $1`, [req.params.id]),
     ]);
     const byInd = Object.fromEntries(resp.map((r) => [r.indicator_id, r]));
 
+    // A SEDG disclosure is answered part by part. The parts come from
+    // esg_indicators.line_items, so the SHAPE is data and this renderer needs
+    // no per-indicator knowledge.
+    //
+    // Field names are FLAT — dv_<id>__<index> and dn_<id>__<index> — for two
+    // reasons: express.urlencoded runs with extended:false here, so bracket
+    // nesting would not parse at all; and the part labels contain spaces and
+    // parentheses ("Heating (if applicable)"), which have no business in a
+    // form field name. The index is the position in line_items, and the label
+    // is looked up from the indicator on the way back in.
+    //
+    // A part labelled "Nature" takes free text; every other part takes a
+    // number. That is a property of the data — the three compound disclosures
+    // (S1.1, G4.1, G5.1) all carry line_items ["Number","Nature"] — not a list
+    // of exempt indicators, so it does not grow by one every time (#13).
+    const isNarrativePart = (label) => String(label).toLowerCase() === 'nature';
+
+    const disclosureField = (i, r) => {
+      const parts = Array.isArray(i.line_items) ? i.line_items : null;
+      const vj = (r.value_json && typeof r.value_json === 'object') ? r.value_json : {};
+
+      // No fixed parts: an open list. Non-empty text is a complete disclosure.
+      if (!parts || parts.length === 0) {
+        const text = typeof vj.text === 'string' ? vj.text : (r.value_text || '');
+        return `<textarea class="input" name="dt_${esc(i.id)}" rows="3"
+                  placeholder="${esc(i.unit || 'One per line')}">${esc(text)}</textarea>`;
+      }
+
+      const answered = (vj.parts && typeof vj.parts === 'object') ? vj.parts : {};
+      return `<div style="display:flex;flex-direction:column;gap:6px">${parts.map((label, idx) => {
+        const part = answered[label] || {};
+        const isNa = part.na === true;
+        // Zero is a real disclosure. `?? ''` keeps 0 rendered as "0"; a truthy
+        // test here would blank it and silently turn a disclosure into a gap.
+        const val = part.value ?? '';
+        const input = isNarrativePart(label)
+          ? `<input class="input" name="dv_${esc(i.id)}__${idx}" type="text"
+                    value="${esc(val)}" placeholder="${esc(label)}"${isNa ? ' disabled' : ''}>`
+          : `<input class="input" name="dv_${esc(i.id)}__${idx}" type="number" step="any" min="0"
+                    value="${esc(val)}" placeholder="${esc(i.unit || '')}"${isNa ? ' disabled' : ''}>`;
+        return `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span style="flex:1;min-width:160px;font-size:13px">${esc(label)}</span>
+          <span style="flex:1;min-width:140px">${input}</span>
+          <label style="display:flex;align-items:center;gap:4px;font-size:12px">
+            <input type="checkbox" name="dn_${esc(i.id)}__${idx}"${isNa ? ' checked' : ''}> N/A</label>
+        </div>`;
+      }).join('')}</div>`;
+    };
+
     const field = (i) => {
       const r = byInd[i.id] || {};
       const sel = (v) => (String(r.option_code) === v ? ' selected' : '');
+      if (i.response_type === 'disclosure') return disclosureField(i, r);
       if (i.response_type === 'quantitative') {
         return `<input class="input" name="v_${i.id}" type="number" step="any" min="0"
                   value="${esc(r.value_numeric ?? '')}" placeholder="${esc(i.unit || '')}">`;
@@ -257,6 +307,17 @@ router.get('/assessment/:id', async (req, res, next) => {
         <option value="no"${sel('no')}>No</option></select>`;
     };
 
+    // Trap F's user-visible half: only 'draft' rendered a badge, so the 38
+    // rows whose text IS the publisher's — mapping_status='official' — showed
+    // no provenance at all and looked identical to an unreconciled one. All
+    // three states render now.
+    const mappingBadge = (status) => {
+      if (status === 'draft') return '<span class="badge badge-warning" title="Platform-authored mapping, not yet reconciled against the official framework document">draft</span>';
+      if (status === 'official') return '<span class="badge badge-green" title="Verbatim from the publisher\'s own document">official</span>';
+      if (status === 'reconciled') return '<span class="badge" title="Platform-authored, checked against the official framework document">reconciled</span>';
+      return '';
+    };
+
     const section = (p, title) => {
       const list = inds.filter((i) => i.pillar === p);
       if (!list.length) return '';
@@ -265,7 +326,7 @@ router.get('/assessment/:id', async (req, res, next) => {
           const r = byInd[i.id] || {};
           return `<div class="form-group" style="border-top:1px solid var(--border);padding-top:14px">
             <label for="o_${esc(i.id)}"><strong>${esc(i.code)}</strong> ${esc(i.question_en)}
-              ${i.mapping_status === 'draft' ? '<span class="badge badge-warning" title="Platform-authored mapping, not yet reconciled against the official framework document">draft</span>' : ''}
+              ${mappingBadge(i.mapping_status)}
             </label>
             ${i.guidance_en ? `<small class="muted">${esc(i.guidance_en)}</small>` : ''}
             <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
@@ -309,7 +370,7 @@ router.post('/assessment/:id', async (req, res, next) => {
     if (!a[0]) return res.status(404).send('Not found');
 
     const { rows: inds } = await query(
-      `SELECT id, response_type, allows_na FROM esg_indicators WHERE framework_id = $1 AND is_active`,
+      `SELECT id, response_type, allows_na, line_items FROM esg_indicators WHERE framework_id = $1 AND is_active`,
       [a[0].framework_id]);
 
     for (const i of inds) {
@@ -319,6 +380,50 @@ router.post('/assessment/:id', async (req, res, next) => {
       const val    = num(valRaw);
       const tier   = ['self_declared', 'documented', 'verified'].includes(req.body[`e_${i.id}`])
                      ? req.body[`e_${i.id}`] : 'self_declared';
+
+      // ── disclosure ────────────────────────────────────────────────────────
+      // Persisted as jsonb rather than through value_numeric, because one
+      // response carries up to six parts. The three states a part can be in —
+      // disclosed (including ZERO), not applicable, and simply unanswered —
+      // must stay distinguishable here or the engine cannot tell them apart
+      // either, and a company reporting 0 tonnes of hazardous waste would be
+      // scored as if it had not answered.
+      if (i.response_type === 'disclosure') {
+        const parts = Array.isArray(i.line_items) ? i.line_items : null;
+        let payload = null;
+        let has = false;
+
+        if (!parts || parts.length === 0) {
+          const text = String(req.body[`dt_${i.id}`] ?? '').trim();
+          if (text !== '') { payload = { text }; has = true; }
+        } else {
+          const bag = {};
+          parts.forEach((label, idx) => {
+            const na  = Boolean(req.body[`dn_${i.id}__${idx}`]);
+            const raw = req.body[`dv_${i.id}__${idx}`];
+            if (na) { bag[label] = { na: true }; has = true; return; }
+            if (raw === undefined || String(raw).trim() === '') return;   // unanswered
+            const n = Number(String(raw).trim());
+            // Number('') is 0, which is why the empty check happens first.
+            bag[label] = { value: Number.isFinite(n) ? n : String(raw).trim() };
+            has = true;
+          });
+          if (has) payload = { parts: bag };
+        }
+
+        if (!has && !isNa) {
+          await query(`DELETE FROM esg_responses WHERE assessment_id=$1 AND indicator_id=$2`, [a[0].id, i.id]);
+          continue;
+        }
+        await query(
+          `INSERT INTO esg_responses (assessment_id, indicator_id, value_json, is_na, evidence_tier, answered_by)
+           VALUES ($1,$2,$3,$4,$5,$6)
+           ON CONFLICT (assessment_id, indicator_id) DO UPDATE SET
+             value_json = EXCLUDED.value_json, is_na = EXCLUDED.is_na,
+             evidence_tier = EXCLUDED.evidence_tier, answered_by = EXCLUDED.answered_by`,
+          [a[0].id, i.id, payload === null ? null : JSON.stringify(payload), isNa, tier, req.user.id]);
+        continue;
+      }
 
       const answered = isNa || (opt !== undefined && opt !== '') || val !== null;
       if (!answered) {
@@ -684,8 +789,18 @@ router.get('/frameworks', (req, res) => {
       <p><strong>What this platform claims, precisely.</strong> The assessment you take on this
       platform is <em>${esc(frameworkLabel('MODUS_SEDG_ALIGNED', '0.9-draft'))}</em>. The
       ${c.total} disclosures below are the official published set it will be reconciled against.
-      They are <strong>not implemented</strong>: they are not loaded as questions, not answerable,
-      and not scored. This platform is not SEDG-compliant and does not claim to be.</p>
+      They are <strong>implemented</strong>: all ${c.total} are loaded as questions, answerable in
+      the assessment, and scored — <strong>on completeness of disclosure, not on performance</strong>.
+      A reported figure has no good or bad; 1,240 tCO2e is neither. What is scored is how much of
+      SEDG this company can actually disclose, with a part marked not-applicable leaving the
+      denominator rather than counting against you.</p>
+      <p>What is still <strong>not</strong> true, stated so it is not assumed:
+      SEDG v2.0 is <strong>not the default framework</strong> — assessments run against
+      <em>${esc(frameworkLabel('MODUS_SEDG_ALIGNED', '0.9-draft'))}</em> unless SEDG is chosen;
+      there is <strong>no cross-framework mapping</strong> between those 40 questions and these
+      ${c.total} disclosures; and <strong>no Bahasa Melayu or 中文 text exists</strong> for them,
+      because the official translations are Version 1 and three of these disclosures are new in
+      Version 2. This platform is <strong>not SEDG-compliant</strong> and does not claim to be.</p>
     </div>
 
     ${pillars}

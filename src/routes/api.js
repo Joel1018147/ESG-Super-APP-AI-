@@ -56,10 +56,19 @@ router.get('/frameworks/sedg-v2', wrap(async (req, res) => {
   res.json({
     provenance: sedg.PROVENANCE,
     counts: sedg.COUNTS,
-    implemented: false,
+    implemented: true,
+    scored_on: 'completeness_of_disclosure',
+    is_default_framework: false,
+    has_cross_framework_mapping: false,
+    has_translations: false,
     implementation_note:
-      'These are the official published disclosures this platform will be reconciled against. '
-      + 'They are not loaded as questions, not answerable and not scored. '
+      'All 38 are loaded as questions, answerable in the assessment, and scored on '
+      + 'COMPLETENESS OF DISCLOSURE — not on performance. A reported figure has no good or '
+      + 'bad value; what is scored is how much of SEDG the company can disclose, and a part '
+      + 'marked not-applicable leaves the denominator. SEDG v2.0 is NOT the default '
+      + 'framework, there is no cross-framework mapping to the 40 assessment '
+      + 'questions this platform runs, and no BM or '
+      + 'Chinese text exists (the official translations are v1). '
       + 'This platform is SEDG-aligned (draft), not SEDG-compliant.',
     disclosures: sedg.DISCLOSURES,
     other_frameworks: sedg.OTHER_FRAMEWORKS,
