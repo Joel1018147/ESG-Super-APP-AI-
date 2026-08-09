@@ -106,6 +106,30 @@ async function atest(name, fn) {
     assert.strictEqual(rows[1]['Utility Type'], 'FUEL_DIESEL');
   });
 
+  // ── Guard 1, no DB needed: buildPrompt is a pure function ─────────────────
+  // This replaces a test that could not fail: parseMapping already drops any
+  // header not in the sheet's own header set, so asserting that proposed
+  // mapping keys are a subset of the headers is structurally guaranteed
+  // (and passes trivially on {}, which is what a failed Groq call returns).
+  // That checked the mapping OUTPUT, never the PROMPT — a prompt that leaked
+  // a cell value would still produce header-keyed output and this would
+  // still pass. Assert directly on what gets sent to the model instead.
+  test('the prompt sent to the model contains headers only, never a cell value', () => {
+    const promptHeaders = ['Period From', 'Period To', 'Type', 'Reading'];
+    const cellValuesThatMustNeverAppear = [
+      '2025-01-01', '2025-01-31', '2025-02-01', '2025-02-28',
+      '2025-03-01', '2025-03-31', '2025-04-01', '2025-05-01', '2025-05-31',
+      'FUEL_DIESEL', 'FUEL_UNKNOWN', '1000', '50', '-5', '10',
+    ];
+    const prompt = svc.buildPrompt(promptHeaders);
+    for (const h of promptHeaders) {
+      assert.ok(prompt.includes(h), `prompt is missing header ${h}`);
+    }
+    for (const v of cellValuesThatMustNeverAppear) {
+      assert.ok(!prompt.includes(v), `prompt leaked a cell value: ${v}`);
+    }
+  });
+
   if (!process.env.DATABASE_URL) {
     console.log('  SKIPPED (integration) — no DATABASE_URL. The pure parseMapping/parseWorkbook');
     console.log('  guards above still ran with no database. Run with a real Postgres before');
@@ -140,12 +164,6 @@ async function atest(name, fn) {
 
   const batch = await svc.createBatch({
     companyId, filename: 'test.xlsx', uploadedBy: userId, headers: sheetHeaders, rows: sheetRows,
-  });
-
-  await atest('the model was never given row data — proposeMapping only ever received headers', async () => {
-    // Sanity: proposed_mapping keys, if any, must be a subset of the sheet's own headers.
-    const proposed = Object.keys(batch.proposed_mapping || {});
-    for (const h of proposed) assert.ok(sheetHeaders.includes(h), `mapping referenced a header not in the sheet: ${h}`);
   });
 
   const approvedMapping = {
@@ -190,6 +208,43 @@ async function atest(name, fn) {
       [`Other Co ${stamp}`]);
     const leaked = await svc.getBatch(batch.id, other[0].id);
     assert.strictEqual(leaked, null, 'a batch was readable by a company that does not own it');
+  });
+
+  await atest('two concurrent commitBatch calls on the same batch: exactly one wins, no doubled entries', async () => {
+    // A fresh batch of its own — the batch above is already committed by this
+    // point, and committing an already-committed batch is a different (still
+    // covered) case from two commits racing each other before either finishes.
+    const raceHeaders = ['Period From', 'Period To', 'Type', 'Reading'];
+    const raceRows = [
+      { 'Period From': '2025-06-01', 'Period To': '2025-06-30', 'Type': 'electricity', 'Reading': '2000' },
+      { 'Period From': '2025-07-01', 'Period To': '2025-07-31', 'Type': 'FUEL_DIESEL', 'Reading': '75' },
+    ];
+    const raceBatch = await svc.createBatch({
+      companyId, filename: 'race.xlsx', uploadedBy: userId, headers: raceHeaders, rows: raceRows,
+    });
+    await svc.approveMapping(raceBatch.id, companyId, {
+      'Period From': 'period_start', 'Period To': 'period_end', 'Type': 'kind', 'Reading': 'amount',
+    });
+
+    const results = await Promise.allSettled([
+      svc.commitBatch(raceBatch.id, companyId, userId),
+      svc.commitBatch(raceBatch.id, companyId, userId),
+    ]);
+
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter((r) => r.status === 'rejected');
+    assert.strictEqual(fulfilled.length, 1, `expected exactly 1 commit to succeed, got ${fulfilled.length}`);
+    assert.strictEqual(rejected.length, 1, `expected exactly 1 commit to reject, got ${rejected.length}`);
+    assert.ok(/already committed or not ready/i.test(rejected[0].reason.message), rejected[0].reason.message);
+
+    const { rows: raceEntries } = await query(
+      `SELECT * FROM esg_carbon_entries WHERE company_id=$1 AND period_start >= '2025-06-01'`, [companyId]);
+    assert.strictEqual(raceEntries.length, 2, `expected exactly 2 carbon entries (no duplicates), got ${raceEntries.length}`);
+
+    const { rows: raceBatchRow } = await query(
+      `SELECT committed_count, error_count FROM esg_carbon_import_batches WHERE id=$1`, [raceBatch.id]);
+    assert.strictEqual(raceBatchRow[0].committed_count, 2, `committed_count was double-accumulated: ${raceBatchRow[0].committed_count}`);
+    assert.strictEqual(raceBatchRow[0].error_count, 0);
   });
 
   console.log(`\ncarbon-import-test: ${passed} passed, ${failed} failed`);

@@ -176,7 +176,18 @@ async function commitBatch(batchId, companyId, userId) {
   const { rows: co } = await query(`SELECT grid_region FROM esg_companies WHERE id=$1`, [companyId]);
   const gridRegion = co[0] && co[0].grid_region;
 
-  await query(`UPDATE esg_carbon_import_batches SET status='committing', updated_at=now() WHERE id=$1`, [batchId]);
+  // Atomic claim: a batch can be committed exactly once. Without this, two
+  // concurrent commitBatch() calls both pass the approved_mapping check above,
+  // both select the same 'pending' rows, and both write an esg_carbon_entries
+  // row per row — a doubled tonnage in the company's report with no human
+  // ever having chosen that. The UPDATE ... WHERE status='mapping_pending'
+  // RETURNING id makes only ONE caller win the race; the loser gets no row
+  // back and must not touch esg_carbon_entries at all.
+  const { rows: claimed } = await query(
+    `UPDATE esg_carbon_import_batches SET status='committing', updated_at=now()
+       WHERE id=$1 AND company_id=$2 AND status='mapping_pending' RETURNING id`,
+    [batchId, companyId]);
+  if (!claimed.length) throw new Error('Batch already committed or not ready');
 
   const { rows: pendingRows } = await query(
     `SELECT id, batch_id, row_number, raw_cells, status, carbon_entry_id, error_message, created_at, updated_at
