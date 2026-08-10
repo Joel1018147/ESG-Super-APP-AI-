@@ -176,7 +176,7 @@ body{background:var(--bg)}
 <script>
 (function(){
   var KEY='modus-theme', saved=null;
-  try{saved=localStorage.getItem(KEY);}catch(e){}
+  try{saved=localStorage.getItem(KEY);}catch(e){console.warn('theme preference unreadable:',e&&e.message);}
   if(saved)document.documentElement.setAttribute('data-theme',saved);
 })();
 </script>
@@ -288,13 +288,13 @@ function layout(title, content, user, activePath = '') {
 (function(){
   var KEY='modus-theme';
   var saved=null;
-  try{saved=localStorage.getItem(KEY);}catch(e){}
+  try{saved=localStorage.getItem(KEY);}catch(e){console.warn('theme preference unreadable:',e&&e.message);}
   if(saved)document.documentElement.setAttribute('data-theme',saved);
   var b=document.getElementById('themeBtn');
   if(b)b.addEventListener('click',function(){
     var next=document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark';
     document.documentElement.setAttribute('data-theme',next);
-    try{localStorage.setItem(KEY,next);}catch(e){}
+    try{localStorage.setItem(KEY,next);}catch(e){console.warn('theme preference not saved:',e&&e.message);}
   });
 })();
 </script>

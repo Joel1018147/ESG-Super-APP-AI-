@@ -65,18 +65,43 @@ function buildPrompt(headers) {
   return `COLUMN HEADERS:\n${headers.map((h) => `"${h}"`).join('\n')}\n\nFIELDS:\n${TARGET_FIELDS.join(', ')}\n\nLines only.`;
 }
 
+// RULE 6. A failed audit-log write is not discarded and is not allowed to
+// masquerade as the operation it was recording.
+//
+// The trap this closes: the successful-path logInteraction() sits INSIDE the
+// try that wraps the Groq call, so simply deleting its .catch() would send a
+// logging failure into the Groq catch and report it as a MODEL failure. That
+// is a worse lie than the silence it replaces, because it would blame a
+// working model for a broken table. Each cause keeps its own name.
+//
+// stderr, not a rethrow: the log row is evidence about the call, not part of
+// it, and losing the evidence must not also lose the answer. Railway surfaces
+// console.error, so this is loud where someone is actually looking.
+async function logOrReport(row, context) {
+  try {
+    await logInteraction(row);
+  } catch (logErr) {
+    console.error(`❌ ai_interactions write FAILED (${context}) — the model call itself was unaffected: ${logErr.message}`);
+  }
+}
+
 async function proposeMapping(headers, { companyId, userId } = {}) {
   const started = Date.now();
   let reply = '';
   try {
     reply = await generateWithGroq(buildPrompt(headers), { system: SYSTEM, temperature: 0, maxTokens: 300 });
-    await logInteraction({ companyId, userId, feature: 'carbon_import_mapping', model: groqModel(),
-                           promptChars: headers.join(',').length, responseChars: reply.length,
-                           latencyMs: Date.now() - started, ok: true }).catch(() => {});
+    await logOrReport({ companyId, userId, feature: 'carbon_import_mapping', model: groqModel(),
+                        promptChars: headers.join(',').length, responseChars: reply.length,
+                        latencyMs: Date.now() - started, ok: true }, 'mapping proposal succeeded');
   } catch (err) {
-    await logInteraction({ companyId, userId, feature: 'carbon_import_mapping', model: groqModel(),
-                           latencyMs: Date.now() - started, ok: false, error: err.message }).catch(() => {});
-    return {}; // AI is best-effort; an empty mapping just means the human maps every column by hand
+    await logOrReport({ companyId, userId, feature: 'carbon_import_mapping', model: groqModel(),
+                       latencyMs: Date.now() - started, ok: false, error: err.message }, 'mapping proposal failed');
+    // RULE 6. This used to `return {}`, and an empty mapping is EXACTLY what a
+    // successful call that recognised none of the headers also returns — so the
+    // review screen was pixel-identical in both cases and the user could not
+    // tell "the AI understood nothing" from "the AI never ran". Throwing makes
+    // the caller decide, and createBatch() records it on the batch.
+    throw new Error(`AI mapping did not run: ${err.message}`);
   }
   return parseMapping(reply, headers);
 }
@@ -105,13 +130,39 @@ function parseMapping(reply, headers) {
 
 // ── Batch lifecycle ──────────────────────────────────────────────────────────
 async function createBatch({ companyId, filename, uploadedBy, headers, rows }) {
-  const proposed = await proposeMapping(headers, { companyId, userId: uploadedBy });
+  // The spreadsheet parsed fine; only the convenience proposal can fail here.
+  // Failing the whole upload because a suggestion engine was unreachable would
+  // be over-correction — RULE 6 asks that the thing that failed be SEEN to have
+  // failed, not that everything downstream of it be destroyed.
+  //
+  // The two states are kept apart in the DATABASE, not only on screen:
+  //   error_message = NULL  -> the AI ran; an empty proposal means it matched nothing
+  //   error_message set     -> the AI did not run at all
+  //
+  // The discriminator is error_message and NOT a null proposed_mapping, which
+  // was the first design here: that column is NOT NULL, and widening it would
+  // be a schema change this run is explicitly not allowed to make. The test
+  // found that before the code shipped, which is the point of writing it first.
+  //
+  // status is deliberately NOT set to 'error', even though the CHECK allows it:
+  // commitBatch()'s atomic claim filters on status='mapping_pending', so an
+  // errored batch could never be mapped by hand afterwards. That would turn a
+  // transient Groq blip into a permanently dead upload.
+  let proposed = null;
+  let mappingError = null;
+  try {
+    proposed = await proposeMapping(headers, { companyId, userId: uploadedBy });
+  } catch (err) {
+    mappingError = err.message;
+    console.error(`❌ carbon import: ${err.message} — batch kept, manual mapping still available`);
+  }
   return withTransaction(async (client) => {
     const { rows: b } = await client.query(
       `INSERT INTO esg_carbon_import_batches
-         (company_id, filename, uploaded_by, status, column_headers, proposed_mapping, row_count)
-       VALUES ($1,$2,$3,'mapping_pending',$4,$5,$6) RETURNING *`,
-      [companyId, filename, uploadedBy, JSON.stringify(headers), JSON.stringify(proposed), rows.length]);
+         (company_id, filename, uploaded_by, status, column_headers, proposed_mapping, row_count, error_message)
+       VALUES ($1,$2,$3,'mapping_pending',$4,$5,$6,$7) RETURNING *`,
+      [companyId, filename, uploadedBy, JSON.stringify(headers),
+       JSON.stringify(proposed || {}), rows.length, mappingError]);
     const batch = b[0];
     for (let i = 0; i < rows.length; i += 1) {
       await client.query(

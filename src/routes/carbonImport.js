@@ -89,6 +89,16 @@ router.get('/carbon/import/:batchId', async (req, res, next) => {
     }
 
     const headers = batch.column_headers;
+    // RULE 6, the user-facing half. A batch whose AI mapping failed must not be
+    // presented as though the AI had an opinion. error_message originates from
+    // an exception, so it is escaped like any other untrusted string.
+    const aiFailed = Boolean(batch.error_message);
+    const aiNotice = aiFailed
+      ? `<div class="alert alert-warning" role="alert"><strong>The AI column mapping did not run.</strong>
+           Your spreadsheet uploaded and parsed correctly — only the suggestion step failed, so nothing
+           is pre-selected below. Map the columns yourself and commit as normal.
+           <br><small class="muted">${esc(batch.error_message)}</small></div>`
+      : '';
     const proposed = batch.proposed_mapping || {};
     const mappingRows = headers.map((h) => {
       const suggested = proposed[h] || '';
@@ -104,6 +114,7 @@ router.get('/carbon/import/:batchId', async (req, res, next) => {
     res.send(layout('Review import mapping', `
       <div class="card">
         <h3>${esc(batch.filename)}</h3>
+        ${aiNotice}
         <p class="muted">${esc(batch.row_count)} row(s) detected. Review the AI's suggested mapping below —
         change or clear any column — then approve to calculate and save.</p>
         <form method="post" action="/carbon/import/${esc(batch.id)}/approve">

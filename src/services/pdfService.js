@@ -126,7 +126,15 @@ async function extractText(buffer) {
     const status = text.replace(/\s+/g, '').length < 40 ? 'no_text_layer' : 'extracted';
     return { status, pageCount: doc.numPages, pages, text };
   } finally {
-    await doc.destroy().catch(() => {});
+    // RULE 6. A leaked pdf.js handle is invisible until the process degrades,
+    // which is the whole reason it must not be swallowed. Reported and not
+    // rethrown: the extraction itself already succeeded, and failing it now
+    // would discard a good result over a cleanup fault.
+    try {
+      await doc.destroy();
+    } catch (destroyErr) {
+      console.error(`❌ pdf document handle not released: ${destroyErr.message}`);
+    }
   }
 }
 
