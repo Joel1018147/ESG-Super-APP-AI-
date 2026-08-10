@@ -220,6 +220,31 @@ ON CONFLICT (framework_id, code) DO NOTHING;
 
 
 
+-- ── 3c. ACTIVATE SEDG v2.0 ─────────────────────────────────────────────────
+-- TRAP A, and the reason this is one UPDATE setting TWO columns. Both
+-- assessment-creation paths used to resolve a framework with
+--     ORDER BY effective_from DESC NULLS LAST LIMIT 1
+-- and SEDG's effective_from was NULL, so setting is_active alone would sort it
+-- behind MODUS_SEDG_ALIGNED's 2026-01-01 and change nothing — silently, with no
+-- error. Setting only the flag IS the failure this statement exists to avoid.
+--
+-- WHY 2025-07-01: it is when Capital Markets Malaysia actually published SEDG
+-- v2. The honest value is also the safe one here — it sorts BEFORE the Modus
+-- framework's 2026-01-01, so anything still falling through that ORDER BY keeps
+-- resolving to MODUS_SEDG_ALIGNED. After Run 25 no creation path falls through,
+-- but the ordering is what a future caller inherits, so it is not cosmetic. A
+-- date that made SEDG the implicit default would have changed what every
+-- unspecified caller receives, which is the silent switch RULE 6 is about.
+--
+-- display_name is corrected in the same statement: it read 'AWAITING OFFICIAL
+-- IMPORT', which stopped being true in Run 22.
+UPDATE esg_frameworks
+   SET is_active      = true,
+       effective_from = DATE '2025-07-01',
+       name           = 'Simplified ESG Disclosure Guide v2 (38 disclosures)'
+ WHERE code = 'SEDG' AND version = '2.0';
+
+
 -- ── 4. EMISSION FACTORS ────────────────────────────────────────────────────
 -- Malaysia has THREE grids and their factors differ by a factor of 3.7. Using a
 -- national average would overstate a Sarawak SME's Scope 2 by roughly 270%.

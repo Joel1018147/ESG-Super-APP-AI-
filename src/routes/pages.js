@@ -166,6 +166,18 @@ router.post('/company', async (req, res, next) => {
 router.get('/assessment', async (req, res, next) => {
   try {
     const cid = companyIdOf(req);
+    // Every selectable framework, with the number of questions each actually
+    // carries. A name and a version alone do not tell a company what it is
+    // committing to answering — 40 maturity questions and 38 disclosures are
+    // very different undertakings.
+    const { rows: frameworkChoices } = await query(
+      `SELECT f.id, f.code, f.version, count(i.id)::int AS n
+         FROM esg_frameworks f
+         LEFT JOIN esg_indicators i ON i.framework_id = f.id AND i.is_active
+        WHERE f.framework_kind = 'entity_disclosure' AND f.is_active
+        GROUP BY f.id, f.code, f.version
+        ORDER BY f.code`);
+
     const { rows } = await query(
       `SELECT a.id, a.reporting_year, a.status, a.framework_code, a.framework_version,
               (SELECT score_0_100 FROM esg_scores s WHERE s.assessment_id = a.id AND s.scope='OVERALL') AS overall
@@ -183,11 +195,19 @@ router.get('/assessment', async (req, res, next) => {
     res.send(layout('ESG Assessment', `
       <div class="card"><h3>Start an assessment</h3>
         <form method="post" action="/assessment" style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+          <div class="form-group" style="margin:0"><label for="framework_id">Framework</label>
+            <select class="input" id="framework_id" name="framework_id" required>
+              <option value="">— choose a framework —</option>
+              ${frameworkChoices.map((fw) => `<option value="${esc(fw.id)}">${esc(frameworkLabel(fw.code, fw.version))} · ${esc(fw.n)} questions</option>`).join('')}
+            </select></div>
           <div class="form-group" style="margin:0"><label for="year">Reporting year</label>
             <input class="input" id="year" name="reporting_year" type="number" min="2015" max="2100"
                    value="${new Date().getFullYear() - 1}" required></div>
           <button class="btn btn-primary" type="submit">Create</button>
-        </form></div>
+        </form>
+        <small class="muted">The framework is stamped on the assessment when it is created and
+        does not change afterwards — that is what stops a later switch from rescoring answers you
+        have already given.</small></div>
       <div class="table-wrap" style="margin-top:16px">${list}</div>`, req.user, '/assessment'));
   } catch (err) { next(err); }
 });
@@ -198,10 +218,29 @@ router.post('/assessment', async (req, res, next) => {
     const year = parseInt(req.body.reporting_year, 10);
     if (!Number.isInteger(year)) return res.redirect('/assessment');
 
+    // RULE 6. The framework is an explicit CHOICE now, not the first row of an
+    // ORDER BY. A request naming nothing, or naming something inactive or
+    // nonexistent, is refused — never quietly given a substitute. A user who
+    // believed they were assessing against SEDG and silently received the Modus
+    // 40 could not tell from any screen afterwards; the score, the questions and
+    // the report would all be internally consistent and all be the wrong thing.
+    const chosen = String(req.body.framework_id || '').trim();
+    if (!chosen) {
+      return res.status(400).send(layout('Choose a framework',
+        emptyState('zero', { title: 'No framework was chosen',
+          body: 'An assessment is scored against one specific framework, so it cannot be created until you pick one. Nothing was saved.' }),
+        req.user, '/assessment'));
+    }
+
     const { rows: f } = await query(
       `SELECT id, code, version FROM esg_frameworks
-        WHERE framework_kind = 'entity_disclosure' AND is_active ORDER BY effective_from DESC NULLS LAST LIMIT 1`);
-    if (!f[0]) throw new Error('No active entity-disclosure framework is seeded');
+        WHERE id = $1 AND framework_kind = 'entity_disclosure' AND is_active`, [chosen]);
+    if (!f[0]) {
+      return res.status(400).send(layout('Unknown framework',
+        emptyState('zero', { title: 'That framework is not available',
+          body: 'It does not exist, or it is not currently active. Nothing was created — choose one from the list.' }),
+        req.user, '/assessment'));
+    }
     const scheme = await loadActiveScheme();
 
     const { rows } = await query(
@@ -795,7 +834,9 @@ router.get('/frameworks', (req, res) => {
       SEDG this company can actually disclose, with a part marked not-applicable leaving the
       denominator rather than counting against you.</p>
       <p>What is still <strong>not</strong> true, stated so it is not assumed:
-      SEDG v2.0 is <strong>not the default framework</strong> — assessments run against
+      SEDG v2.0 is <strong>selectable</strong> — choose it when you start an assessment, and all
+      ${c.total} disclosures are what you are asked. It is deliberately not the framework you get
+      by default; the default remains
       <em>${esc(frameworkLabel('MODUS_SEDG_ALIGNED', '0.9-draft'))}</em> unless SEDG is chosen;
       there is <strong>no cross-framework mapping</strong> between those 40 questions and these
       ${c.total} disclosures; and <strong>no Bahasa Melayu or 中文 text exists</strong> for them,

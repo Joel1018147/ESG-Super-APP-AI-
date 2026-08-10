@@ -108,8 +108,10 @@ router.get('/indicators', wrap(async (req, res) => {
             i.weight, i.allows_na, i.mapping_status, i.external_ref,
             f.code AS framework_code, f.version AS framework_version
        FROM esg_indicators i JOIN esg_frameworks f ON f.id = i.framework_id
-      WHERE i.is_active AND ($1::text IS NULL OR f.code = $1)
-      ORDER BY i.pillar, i.sort_order`, [req.query.framework || null]);
+      WHERE i.is_active
+        AND ($1::text IS NULL OR f.code = $1)
+        AND ($2::text IS NULL OR f.version = $2)
+      ORDER BY i.pillar, i.sort_order`, [req.query.framework || null, req.query.version || null]);
   res.json({ indicators: rows });
 }));
 
@@ -151,11 +153,45 @@ router.get('/assessments', wrap(async (req, res) => {
 router.post('/assessments', wrap(async (req, res) => {
   const year = parseInt((req.body || {}).reporting_year, 10);
   if (!Number.isInteger(year)) return res.status(400).json({ error: 'reporting_year is required' });
-  const { rows: f } = await query(
-    `SELECT id, code, version FROM esg_frameworks
-      WHERE framework_kind='entity_disclosure' AND is_active
-      ORDER BY effective_from DESC NULLS LAST LIMIT 1`);
-  if (!f[0]) return res.status(500).json({ error: 'No active entity-disclosure framework seeded' });
+  // RULE 6. The framework is chosen, never inferred. Accepts either
+  // framework_id, or framework + framework_version — the pair, because a code
+  // alone stops being unique the moment a second version of one is seeded,
+  // which is the same premise failure as trap C.
+  //
+  // A caller who names nothing, or names something unknown or inactive, gets a
+  // 400. It must NOT quietly receive MODUS_SEDG_ALIGNED: a client that believed
+  // it was creating a SEDG assessment and silently got the Modus 40 would carry
+  // that error into every score it later read.
+  const body = req.body || {};
+  const fid = String(body.framework_id || '').trim();
+  const fcode = String(body.framework || '').trim();
+  const fver = String(body.framework_version || '').trim();
+  if (!fid && !fcode) {
+    return res.status(400).json({
+      error: 'framework is required',
+      detail: 'Pass framework_id, or framework with framework_version. There is deliberately no default.',
+    });
+  }
+  const { rows: f } = fid
+    ? await query(
+      `SELECT id, code, version FROM esg_frameworks
+        WHERE id = $1 AND framework_kind='entity_disclosure' AND is_active`, [fid])
+    : await query(
+      `SELECT id, code, version FROM esg_frameworks
+        WHERE code = $1 AND ($2::text IS NULL OR version = $2)
+          AND framework_kind='entity_disclosure' AND is_active`, [fcode, fver || null]);
+  if (!f[0]) {
+    return res.status(400).json({
+      error: 'unknown or inactive framework',
+      detail: 'Nothing was created. GET /api/frameworks lists the selectable ones.',
+    });
+  }
+  if (f.length > 1) {
+    return res.status(400).json({
+      error: 'ambiguous framework',
+      detail: `${fcode} has ${f.length} active versions; pass framework_version.`,
+    });
+  }
   const scheme = await loadActiveScheme();
   const { rows } = await query(
     `INSERT INTO esg_assessments

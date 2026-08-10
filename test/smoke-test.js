@@ -92,17 +92,40 @@ const json = (method, o) => ({ method, headers: { 'Content-Type': 'application/j
     assert.strictEqual((await r.json()).grid_region, 'peninsular');
   });
 
+  // TRAP C. Two frameworks are selectable now, so naming a code without a
+  // version stopped being unambiguous. Both are named here and in the
+  // /api/indicators request below; if either filter loses its version again,
+  // this test fails rather than quietly asserting against the wrong set.
+  const FW = { framework: 'MODUS_SEDG_ALIGNED', framework_version: '0.9-draft' };
+
+  await check('creating an assessment REQUIRES a framework — there is no default', async () => {
+    const r = await A('/api/assessments', json('POST', { reporting_year: 2025 }));
+    assert.strictEqual(r.status, 400, 'a create with no framework must be refused, not silently defaulted');
+    const b = await r.json();
+    assert.match(b.error || '', /framework is required/i, JSON.stringify(b));
+  });
+
+  await check('an unknown framework is refused, not substituted', async () => {
+    const r = await A('/api/assessments', json('POST', { reporting_year: 2025, framework: 'NOT_A_FRAMEWORK' }));
+    assert.strictEqual(r.status, 400, 'an unknown framework must not fall back to the Modus 40');
+  });
+
   await check('an assessment can be created and is idempotent per year', async () => {
-    const r1 = await A('/api/assessments', json('POST', { reporting_year: 2025 }));
+    const r1 = await A('/api/assessments', json('POST', { reporting_year: 2025, ...FW }));
     assert.strictEqual(r1.status, 201);
     assessmentId = (await r1.json()).id;
-    const r2 = await A('/api/assessments', json('POST', { reporting_year: 2025 }));
+    const r2 = await A('/api/assessments', json('POST', { reporting_year: 2025, ...FW }));
     assert.strictEqual((await r2.json()).id, assessmentId, 'a second create for the same year must not fork a duplicate');
   });
 
   await check('responses save, and unknown indicator codes are reported not swallowed', async () => {
-    const inds = await (await A('/api/indicators?framework=MODUS_SEDG_ALIGNED', { headers: { Accept: 'application/json' } })).json();
-    assert.ok(inds.indicators.length >= 40, `expected the seeded indicator set, got ${inds.indicators.length}`);
+    const inds = await (await A(`/api/indicators?framework=${FW.framework}&version=${FW.framework_version}`, { headers: { Accept: 'application/json' } })).json();
+    // EXACTLY 40, not "at least". With SEDG selectable the old >= 40 would
+    // have passed on 78 — every indicator in the database — and the responses
+    // built from it would have been posted against the wrong framework.
+    assert.strictEqual(inds.indicators.length, 40, `expected exactly the Modus 40, got ${inds.indicators.length}`);
+    assert.ok(inds.indicators.every((i) => i.framework_version === FW.framework_version),
+      'the version filter is not being applied — indicators from another framework version came back');
     const responses = inds.indicators.map((i) => (
       i.response_type === 'quantitative'
         ? { code: i.code, value_numeric: 100, evidence_tier: 'documented' }
