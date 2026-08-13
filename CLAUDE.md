@@ -101,7 +101,7 @@ re-derived three defect classes the SOP already documented.
 
 `Modus-Agent-OS/skills/test-harness-integrity-audit.md` names
 `test/harness.js` + `negative-control*.js` as the pattern. This repo uses
-`test/run-all.js` with four suites and has **no negative-control plants**. Of 50
+`test/run-all.js` with nine suites and has **no negative-control plants**. Of 50
 assertions, only five have been mutation-tested.
 
 Adoption across the ecosystem is 2 of 10 — Dragon Ginseng and M-EasyMall follow
