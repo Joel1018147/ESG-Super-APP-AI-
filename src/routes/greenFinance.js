@@ -378,7 +378,7 @@ router.get('/green-finance/admin/products/:id/edit', adminOnly, wrap(async (req,
       Leave a field empty to record that <strong>the institution publishes nothing</strong> for it.
       An empty field is not zero, and the register renders the two differently.
     </div></div>
-    <form class="card" id="editForm">
+    <form class="card" id="editForm" data-id="${esc(p.id)}">
       <div class="form-group">
         <label for="fld-availability_status">Availability</label>
         <select id="fld-availability_status" name="availability_status">
@@ -418,7 +418,11 @@ router.get('/green-finance/admin/products/:id/edit', adminOnly, wrap(async (req,
         ev.preventDefault();
         var body = {};
         new FormData(form).forEach(function (v, k) { body[k] = v; });
-        fetch('/api/finance-products/${esc(p.id)}', {
+        // The id travels as an ATTRIBUTE, not spliced into this script. esc()
+        // escapes the quote characters that bound an attribute; it does not
+        // escape the single quote that would bound a JS string literal. The
+        // value is a uuid today and that is not a property of the renderer.
+        fetch('/api/finance-products/' + encodeURIComponent(form.getAttribute('data-id')), {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify(body),

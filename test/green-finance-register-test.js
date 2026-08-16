@@ -396,8 +396,10 @@ const MEMBER = { id: 'u-member', name: 'M', email: 'm@example.test', role: 'comp
     assert.strictEqual(edit.status, 200, `admin edit returned ${edit.status}`);
     const html = await edit.text();
     assert.ok(html.includes('name="last_verified"'), 'the edit form cannot set a verification date');
-    assert.ok(html.includes("fetch('/api/finance-products/"),
+    assert.ok(html.includes("fetch('/api/finance-products/'"),
       'the edit form posts nowhere — a control that renders must change something (UI Contract §4.3c)');
+    assert.ok(html.includes(`data-id="${FULL.id}"`),
+      'the row id is not carried as an attribute, so the form cannot know what it is editing');
     await admin.close();
   });
 
