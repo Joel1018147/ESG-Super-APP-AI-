@@ -90,15 +90,23 @@ if (MODUS_CSS && !MODUS_CSS.includes('[data-platform="esg"]')) {
 }
 
 // One entry per requirement section, grouped. `group` drives the sidebar
-// headings; ORDER WITHIN THE ARRAY IS THE ORDER RENDERED, so the groups must
-// stay contiguous.
-const GROUPS = ['ASSESS', 'EVIDENCE', 'INTELLIGENCE', 'ADMINISTRATION'];
+// headings, and GROUPS decides the order the headings appear in.
+//
+// CONTIGUITY IS NOT LOAD-BEARING, and this comment said it was until Run 47.
+// The renderer below is `GROUPS.map(g => MODULES.filter(m => m.group === g))` —
+// it FILTERS, so an entry sitting anywhere in this array renders under its own
+// heading regardless of what surrounds it. Keeping the groups contiguous is
+// still worth doing because it makes the array readable, but a future edit that
+// breaks contiguity breaks nothing, and a comment that overstates a constraint
+// is the kind of thing someone later designs around. The artefact wins.
+const GROUPS = ['ASSESS', 'FINANCE', 'EVIDENCE', 'INTELLIGENCE', 'ADMINISTRATION'];
 
 const MODULES = [
   { key: 'dashboard',    group: 'ASSESS',         icon: '⊞',  label: 'Dashboard',       path: '/dashboard' },
   { key: 'company',      group: 'ASSESS',         icon: '🏢', label: 'Company Profile', path: '/company' },
   { key: 'assessment',   group: 'ASSESS',         icon: '📋', label: 'ESG Assessment',  path: '/assessment' },
   { key: 'carbon',       group: 'ASSESS',         icon: '🌱', label: 'Carbon',          path: '/carbon' },
+  { key: 'greenFinance', group: 'FINANCE',        icon: '💰', label: 'Green Finance',   path: '/green-finance' },
   { key: 'documents',    group: 'EVIDENCE',       icon: '📁', label: 'Evidence',        path: '/documents' },
   { key: 'frameworks',   group: 'EVIDENCE',       icon: '📚', label: 'Frameworks',      path: '/frameworks' },
   { key: 'reports',      group: 'EVIDENCE',       icon: '📄', label: 'Reports',         path: '/reports' },

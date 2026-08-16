@@ -263,17 +263,20 @@ const json = (method, o) => ({ method, headers: { 'Content-Type': 'application/j
                      '/api/emission-factors', '/api/verra/status', '/api/documents',
                      '/api/analytics', '/api/kpis', '/api/assistant',
                      '/api/workflow', '/api/users', '/api/integrations',
+                     '/api/finance-products', '/api/project-types',
+                     '/api/taxonomy/CCPT', '/api/taxonomy/ASEAN',
                      `/api/assessments/${assessmentId}/extractions`]) {
       const r = await A(p, { headers: { Accept: 'application/json' } });
       assert.strictEqual(r.status, 200, `${p} returned ${r.status}`);
     }
   });
 
-  await check('every one of the 14 navigable screens renders signed-in', async () => {
+  await check('every one of the 15 navigable screens renders signed-in', async () => {
     // The demo is "one navigable screen per requirement section". A 500 or a
     // redirect on any of them is the whole thing failing in front of someone.
+    // 14 until Run 47 added Green Finance.
     const { MODULES } = require('../src/utils/layout');
-    assert.strictEqual(MODULES.length, 14, `expected 14 nav entries, found ${MODULES.length}`);
+    assert.strictEqual(MODULES.length, 15, `expected 15 nav entries, found ${MODULES.length}`);
     for (const m of MODULES) {
       const r = await A(m.path);
       assert.strictEqual(r.status, 200, `${m.path} returned ${r.status}`);
@@ -316,7 +319,19 @@ const json = (method, o) => ({ method, headers: { 'Content-Type': 'application/j
     assert.strictEqual(b.counts.pillars.E, 17, 'E count');
     assert.strictEqual(b.counts.pillars.S, 11, 'S count');
     assert.strictEqual(b.counts.pillars.G, 10, 'G count');
-    assert.strictEqual(b.implemented, false, 'the API claims SEDG is implemented');
+    // STALE SINCE RUN 23, found by running this suite in Run 47. `8479e65`
+    // ("SEDG: answerable in the UI") flipped api.js:59 to `implemented: true`
+    // because the 38 disclosures genuinely became answerable and scored; this
+    // assertion kept demanding `false` and has been the only red line in this
+    // suite ever since. RULE 3 — the artefact wins and the document gets fixed.
+    //
+    // The claim that must NOT be upgraded is a different one: SEDG-ALIGNED
+    // (DRAFT) rather than SEDG-compliant. That is asserted on its own, in
+    // sedg-ui-test.js, and is unaffected.
+    assert.strictEqual(b.implemented, true, 'the API no longer reports SEDG as implemented');
+    assert.strictEqual(b.scored_on, 'completeness_of_disclosure',
+      'the API does not say WHAT it scores the disclosures on');
+    assert.strictEqual(b.is_default_framework, false, 'SEDG has silently become the default framework');
   });
 
   stop();

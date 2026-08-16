@@ -407,4 +407,261 @@ router.post('/extractions/:id/reject', wrap(async (req, res) => {
   res.json(await ex.rejectProposal(req.params.id, req.user.id, (req.body || {}).reason));
 }));
 
+// ═══════════════════════════════════════════════════════════════════════════
+// GREEN FINANCE                                                     (Run 47)
+//
+// The JSON half of routes/greenFinance.js, and it lives HERE rather than in
+// that router on purpose: checklist #17. `requireAuth` decides page-vs-fetch on
+// the `/api/` prefix, and that test is only as good as its premise — a JSON
+// endpoint served from a router mounted at `/` would get the 302 meant for a
+// page navigation, and the caller would parse the login HTML and report the
+// feature as unavailable.
+//
+// The register is REFERENCE DATA, not company data, so these reads are not
+// scoped by company_id. Everything under /api already requires a session.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const fin = require('../services/financeCopy');
+const { requireRoles } = require('../middleware/auth');
+
+// The register's column list is written out IN FULL at each of the four
+// queries below rather than held in a constant and interpolated. It is a
+// constant and it would be safe — but test/no-model-figures-test.js bans `${}`
+// inside a SQL literal outright, and carving an exception for "this one is
+// fine" is how the rule stops being a rule. server.js:87-92 makes the same
+// trade for the same reason. Four repetitions cost nothing.
+
+/** An enum value the schema's CHECK would reject is rejected HERE, by name, so
+ *  the caller reads which field was wrong instead of a Postgres constraint
+ *  string. Keys come from services/financeCopy.js — one vocabulary, asserted
+ *  against schema.sql in the suite. */
+function badEnum(field, value, labels) {
+  if (Object.prototype.hasOwnProperty.call(labels, value)) return null;
+  return { error: `invalid ${field}`, detail: `expected one of: ${Object.keys(labels).join(', ')}` };
+}
+
+/** last_verified is not optional on any write. A correction that leaves the old
+ *  date in place is a lie with a date on it — the register's whole value is
+ *  that every row carries the age of its own source. Enforced in the handler,
+ *  not by convention. */
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+function badVerifiedDate(value) {
+  if (!value || !DATE_RE.test(String(value))) {
+    return { error: 'last_verified is required', detail: 'Pass the date the source was read, as YYYY-MM-DD.' };
+  }
+  const d = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return { error: 'last_verified is not a real date' };
+  // One day of tolerance, and exactly one: the server keeps UTC and this
+  // platform's users are on UTC+8, so their "today" is legitimately tomorrow in
+  // UTC for eight hours of every day. Anything beyond that is a typo or a
+  // deliberate future-dating, and either way it must not be recorded.
+  if (d.getTime() - Date.now() > 36 * 3600 * 1000) {
+    return { error: 'last_verified is in the future', detail: 'A source cannot have been read tomorrow.' };
+  }
+  return null;
+}
+
+router.get('/finance-products', wrap(async (req, res) => {
+  const q = req.query || {};
+  for (const [field, value, labels] of [
+    ['financing_type', q.type, fin.FINANCING_TYPE_LABELS],
+    ['borrower_scope', q.scope, fin.BORROWER_SCOPE_LABELS],
+    ['availability_status', q.status, fin.AVAILABILITY_LABELS],
+  ]) {
+    if (value) { const bad = badEnum(field, String(value), labels); if (bad) return res.status(400).json(bad); }
+  }
+  const { rows } = await query(
+    `SELECT id, institution_name, institution_kind, product_name,
+            financing_type, borrower_scope, max_financing_myr, min_financing_myr,
+            amount_note, tenure_note, rate_note, documentation_note, eligibility_note,
+            availability_status, status_note, source_url, source_publisher,
+            last_verified, is_active, updated_by,
+            (CURRENT_DATE - last_verified) AS days_since_verified
+       FROM esg_finance_products
+      WHERE ($1::text IS NULL OR financing_type      = $1)
+        AND ($2::text IS NULL OR borrower_scope      = $2)
+        AND ($3::text IS NULL OR availability_status = $3)
+      ORDER BY institution_name, product_name`,
+    [q.type || null, q.scope || null, q.status || null]);
+  res.json({
+    products: rows,
+    stale_after_days: fin.STALE_AFTER_DAYS,
+    disclaimer: fin.DISCLAIMER,
+  });
+}));
+
+router.get('/finance-products/:id', wrap(async (req, res) => {
+  const { rows } = await query(
+    `SELECT id, institution_name, institution_kind, product_name,
+            financing_type, borrower_scope, max_financing_myr, min_financing_myr,
+            amount_note, tenure_note, rate_note, documentation_note, eligibility_note,
+            availability_status, status_note, source_url, source_publisher,
+            last_verified, is_active, updated_by,
+            (CURRENT_DATE - last_verified) AS days_since_verified
+       FROM esg_finance_products WHERE id = $1`, [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ error: 'Not found' });
+  res.json({ product: rows[0], stale_after_days: fin.STALE_AFTER_DAYS, disclaimer: fin.DISCLAIMER });
+}));
+
+router.get('/taxonomy/:schemeCode', wrap(async (req, res) => {
+  const code = String(req.params.schemeCode || '').toUpperCase();
+  const { rows: schemes } = await query(
+    `SELECT id, code, version, publisher, source_url, effective_from, is_current
+       FROM esg_taxonomy_schemes WHERE code = $1 ORDER BY is_current DESC, effective_from DESC`, [code]);
+  if (!schemes[0]) return res.status(404).json({ error: 'Unknown taxonomy', detail: 'Known taxonomies: CCPT, ASEAN.' });
+  const current = schemes[0];
+  const { rows: categories } = await query(
+    `SELECT code, label_en, definition_en, kind, sort_order
+       FROM esg_taxonomy_categories WHERE scheme_id = $1 ORDER BY sort_order, code`, [current.id]);
+  res.json({ scheme: current, revisions: schemes, categories });
+}));
+
+router.get('/project-types', wrap(async (req, res) => {
+  const { rows } = await query(
+    `SELECT code, label_en, label_bm, label_zh, sort_order, is_active,
+            default_ccpt_category_id, default_asean_objective_id
+       FROM esg_project_types ORDER BY sort_order, code`);
+  res.json({
+    project_types: rows.map((r) => ({
+      ...r,
+      // NOT a missing translation to be filled in by whoever notices. No source
+      // publishes these terms in BM or Chinese, and a machine-translated
+      // financial term is a wrong term in two more languages. Stated as a
+      // state, so a client renders it rather than falling back silently.
+      translation_status: (r.label_bm === null && r.label_zh === null) ? 'pending_no_official_source' : 'partial',
+    })),
+  });
+}));
+
+// ── The writers ────────────────────────────────────────────────────────────
+// seed.sql is the legitimate writer for esg_taxonomy_schemes,
+// esg_taxonomy_categories and esg_project_types — those are published reference
+// data and change only when a publisher issues a revision. esg_finance_products
+// needs a second one, because last_verified goes stale between deploys and a
+// register nobody can correct stops being a register.
+//
+// super_admin only, and a denied caller gets a 403 — rendered in place for a
+// page, JSON for a fetch, decided by the one wantsJson() in middleware/auth.js.
+const superAdminOnly = requireRoles('super_admin');
+
+router.post('/finance-products', superAdminOnly, wrap(async (req, res) => {
+  const b = req.body || {};
+  const required = ['institution_name', 'product_name', 'status_note', 'source_url'];
+  for (const f of required) {
+    if (!String(b[f] || '').trim()) return res.status(400).json({ error: `${f} is required` });
+  }
+  for (const [field, labels] of [
+    ['institution_kind', fin.INSTITUTION_KIND_LABELS],
+    ['financing_type', fin.FINANCING_TYPE_LABELS],
+    ['borrower_scope', fin.BORROWER_SCOPE_LABELS],
+    ['availability_status', fin.AVAILABILITY_LABELS],
+    ['source_publisher', fin.SOURCE_PUBLISHER_LABELS],
+  ]) {
+    const bad = badEnum(field, String(b[field] || ''), labels);
+    if (bad) return res.status(400).json(bad);
+  }
+  const badDate = badVerifiedDate(b.last_verified);
+  if (badDate) return res.status(400).json(badDate);
+
+  const { rows } = await query(
+    `INSERT INTO esg_finance_products
+       (institution_name, institution_kind, product_name, financing_type, borrower_scope,
+        max_financing_myr, min_financing_myr, amount_note, tenure_note, rate_note,
+        documentation_note, eligibility_note, availability_status, status_note,
+        source_url, source_publisher, last_verified, is_active, updated_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::date,$18,$19)
+     RETURNING id, institution_name, institution_kind, product_name,
+               financing_type, borrower_scope, max_financing_myr, min_financing_myr,
+               amount_note, tenure_note, rate_note, documentation_note, eligibility_note,
+               availability_status, status_note, source_url, source_publisher,
+               last_verified, is_active, updated_by,
+               (CURRENT_DATE - last_verified) AS days_since_verified`,
+    [String(b.institution_name).trim(), b.institution_kind, String(b.product_name).trim(),
+     b.financing_type, b.borrower_scope,
+     num(b.max_financing_myr), num(b.min_financing_myr),
+     b.amount_note || null, b.tenure_note || null, b.rate_note || null,
+     b.documentation_note || null, b.eligibility_note || null,
+     b.availability_status, String(b.status_note).trim(),
+     String(b.source_url).trim(), b.source_publisher, b.last_verified,
+     b.is_active === false ? false : true, req.user.id]);
+  res.status(201).json({ product: rows[0] });
+}));
+
+/* PATCH carries a jsonb PATCH DOCUMENT rather than a SET clause built in JS.
+   Two reasons, and the second is the one that matters:
+
+     1. no `${}` inside a SQL literal — test/no-model-figures-test.js bans that
+        shape outright and carving an exception for "this one is safe" is how a
+        rule stops being a rule;
+     2. a key that is ABSENT and a key that is PRESENT AND EMPTY mean different
+        things. Absent leaves the column alone; present-and-empty CLEARS it, and
+        clearing is how an editor records that an institution has stopped
+        publishing a term. COALESCE cannot express that difference, which is
+        why the /company handler's shape is wrong for this table. */
+router.patch('/finance-products/:id', superAdminOnly, wrap(async (req, res) => {
+  const b = req.body || {};
+  const badDate = badVerifiedDate(b.last_verified);
+  if (badDate) return res.status(400).json(badDate);
+
+  for (const [field, labels] of [
+    ['institution_kind', fin.INSTITUTION_KIND_LABELS],
+    ['financing_type', fin.FINANCING_TYPE_LABELS],
+    ['borrower_scope', fin.BORROWER_SCOPE_LABELS],
+    ['availability_status', fin.AVAILABILITY_LABELS],
+    ['source_publisher', fin.SOURCE_PUBLISHER_LABELS],
+  ]) {
+    if (b[field] !== undefined) {
+      const bad = badEnum(field, String(b[field]), labels);
+      if (bad) return res.status(400).json(bad);
+    }
+  }
+  // NOT NULL columns may be changed but never emptied.
+  for (const f of ['status_note', 'source_url', 'institution_name', 'product_name']) {
+    if (b[f] !== undefined && !String(b[f]).trim()) {
+      return res.status(400).json({ error: `${f} cannot be emptied`, detail: 'It is required on every row.' });
+    }
+  }
+
+  const patch = {};
+  for (const f of ['institution_name', 'institution_kind', 'product_name', 'financing_type',
+                   'borrower_scope', 'max_financing_myr', 'min_financing_myr', 'amount_note',
+                   'tenure_note', 'rate_note', 'documentation_note', 'eligibility_note',
+                   'availability_status', 'status_note', 'source_url', 'source_publisher', 'is_active']) {
+    if (b[f] !== undefined) patch[f] = b[f] === null ? null : String(b[f]);
+  }
+
+  const { rows } = await query(
+    `UPDATE esg_finance_products SET
+       institution_name = CASE WHEN jsonb_exists($2::jsonb,'institution_name') THEN $2::jsonb->>'institution_name' ELSE institution_name END,
+       institution_kind = CASE WHEN jsonb_exists($2::jsonb,'institution_kind') THEN $2::jsonb->>'institution_kind' ELSE institution_kind END,
+       product_name = CASE WHEN jsonb_exists($2::jsonb,'product_name') THEN $2::jsonb->>'product_name' ELSE product_name END,
+       financing_type = CASE WHEN jsonb_exists($2::jsonb,'financing_type') THEN $2::jsonb->>'financing_type' ELSE financing_type END,
+       borrower_scope = CASE WHEN jsonb_exists($2::jsonb,'borrower_scope') THEN $2::jsonb->>'borrower_scope' ELSE borrower_scope END,
+       max_financing_myr = CASE WHEN jsonb_exists($2::jsonb,'max_financing_myr') THEN NULLIF($2::jsonb->>'max_financing_myr','')::numeric(18,2) ELSE max_financing_myr END,
+       min_financing_myr = CASE WHEN jsonb_exists($2::jsonb,'min_financing_myr') THEN NULLIF($2::jsonb->>'min_financing_myr','')::numeric(18,2) ELSE min_financing_myr END,
+       amount_note = CASE WHEN jsonb_exists($2::jsonb,'amount_note') THEN NULLIF($2::jsonb->>'amount_note','') ELSE amount_note END,
+       tenure_note = CASE WHEN jsonb_exists($2::jsonb,'tenure_note') THEN NULLIF($2::jsonb->>'tenure_note','') ELSE tenure_note END,
+       rate_note = CASE WHEN jsonb_exists($2::jsonb,'rate_note') THEN NULLIF($2::jsonb->>'rate_note','') ELSE rate_note END,
+       documentation_note = CASE WHEN jsonb_exists($2::jsonb,'documentation_note') THEN NULLIF($2::jsonb->>'documentation_note','') ELSE documentation_note END,
+       eligibility_note = CASE WHEN jsonb_exists($2::jsonb,'eligibility_note') THEN NULLIF($2::jsonb->>'eligibility_note','') ELSE eligibility_note END,
+       availability_status = CASE WHEN jsonb_exists($2::jsonb,'availability_status') THEN $2::jsonb->>'availability_status' ELSE availability_status END,
+       status_note = CASE WHEN jsonb_exists($2::jsonb,'status_note') THEN $2::jsonb->>'status_note' ELSE status_note END,
+       source_url = CASE WHEN jsonb_exists($2::jsonb,'source_url') THEN $2::jsonb->>'source_url' ELSE source_url END,
+       source_publisher = CASE WHEN jsonb_exists($2::jsonb,'source_publisher') THEN $2::jsonb->>'source_publisher' ELSE source_publisher END,
+       is_active = CASE WHEN jsonb_exists($2::jsonb,'is_active') THEN ($2::jsonb->>'is_active') IN ('true','on','1') ELSE is_active END,
+       last_verified = $3::date,
+       updated_by    = $4
+     WHERE id = $1
+     RETURNING id, institution_name, institution_kind, product_name,
+               financing_type, borrower_scope, max_financing_myr, min_financing_myr,
+               amount_note, tenure_note, rate_note, documentation_note, eligibility_note,
+               availability_status, status_note, source_url, source_publisher,
+               last_verified, is_active, updated_by,
+               (CURRENT_DATE - last_verified) AS days_since_verified`,
+    [req.params.id, JSON.stringify(patch), b.last_verified, req.user.id]);
+
+  if (!rows[0]) return res.status(404).json({ error: 'Not found' });
+  res.json({ product: rows[0], last_verified: rows[0].last_verified });
+}));
+
 module.exports = router;

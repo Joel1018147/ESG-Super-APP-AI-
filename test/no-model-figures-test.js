@@ -393,16 +393,21 @@ atest('no rendered page shows an internal or registry brand in visible text', as
       user: { id: 'u1', name: 'Joel', email: 'j@example.com', role: 'company_admin', company_id: 'c1' },
       query: {}, params: {},
     };
+    // Two nav paths are served by their own routers rather than by pages.js.
+    // They are rendered below, individually, so the denominator at the bottom
+    // still covers every entry in MODULES.
+    const ELSEWHERE = { '/documents': '../src/routes/documents', '/green-finance': '../src/routes/greenFinance' };
     for (const m of MODULES) {
-      if (m.path === '/documents') continue;   // lives in routes/documents.js, below
+      if (ELSEWHERE[m.path]) continue;
       const { html, failed } = await renderRoute(pages, m.path, req);
       assert.ok(!failed, `${m.path}: ${failed}`);
       assertClean(`page: ${m.path}`, html);
     }
-    const docs = require('../src/routes/documents');
-    const { html, failed } = await renderRoute(docs, '/documents', req);
-    assert.ok(!failed, `/documents: ${failed}`);
-    assertClean('page: /documents', html);
+    for (const [routePath, mod] of Object.entries(ELSEWHERE)) {
+      const { html, failed } = await renderRoute(require(mod), routePath, req);
+      assert.ok(!failed, `${routePath}: ${failed}`);
+      assertClean(`page: ${routePath}`, html);
+    }
   } finally {
     require.cache[dbPath] = realDb;
     for (const k of Object.keys(require.cache)) {
@@ -411,10 +416,11 @@ atest('no rendered page shows an internal or registry brand in visible text', as
   }
 
   // A loop that covered nothing passes every assertion inside it. Assert the
-  // DENOMINATOR: 14 nav paths + 14 signed-in shells + 1 signed-out shell.
-  assert.strictEqual(MODULES.length, 14, `expected 14 nav entries, found ${MODULES.length}`);
-  assert.strictEqual(checked.length, 29,
-    `expected 29 rendered surfaces checked, got ${checked.length}: ${checked.join(', ')}`);
+  // DENOMINATOR: 15 nav paths + 15 signed-in shells + 1 signed-out shell.
+  // 14 until Run 47 added Green Finance.
+  assert.strictEqual(MODULES.length, 15, `expected 15 nav entries, found ${MODULES.length}`);
+  assert.strictEqual(checked.length, 31,
+    `expected 31 rendered surfaces checked, got ${checked.length}: ${checked.join(', ')}`);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

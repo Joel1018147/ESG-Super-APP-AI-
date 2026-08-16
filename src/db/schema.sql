@@ -802,3 +802,171 @@ BEGIN
   ALTER TABLE esg_indicators ADD CONSTRAINT chk_esg_indicators_response_type
     CHECK (response_type IN ('yes_no','yes_partial_no','maturity_0_4','quantitative','multi_select','disclosure'));
 END $$;
+
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 11. GREEN FINANCE — THE TAXONOMIES AND THE FINANCING PRODUCT REGISTER
+--                                                     (Run 47, 2026-08-16)
+--
+-- A REFERENCE LAYER. Nothing here scores, matches or recommends anything. It
+-- records which Malaysian green and sustainability financing programmes exist,
+-- classified against the two taxonomies a Malaysian bank actually uses, with
+-- every row carrying its source and the date that source was last read.
+--
+-- WHY TWO TAXONOMIES AND NOT ONE ENUM. BNM's CCPT and the ASEAN Taxonomy are
+-- different axes, not competing versions of one axis. Their overlap is
+-- deliberate — CCPT GP3/GP4 map onto ASEAN's Do No Significant Harm and
+-- Remedial Measures to Transition — and collapsing them loses the distinction a
+-- bank's credit paper will ask about. See docs/GREEN_FINANCE_REGISTER_SOURCES.md
+-- Part D.
+--
+-- WHAT IS DELIBERATELY ABSENT: the product -> project-type junction. Deciding
+-- that a given facility covers SOLAR_PV and ENERGY_STORAGE but not
+-- GREEN_BUILDING is judgement about eligibility, not transcription. It ships in
+-- the routing run, where a wrong mapping is visible because it produces a wrong
+-- route. Shipping the table here would be a table with no writer
+-- (recurring-bugs-checklist.md #22).
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- One row per PUBLISHED REVISION of a taxonomy. Never edited in place: a
+-- classification recorded against CCPT 2021-04-30 must keep resolving to that
+-- revision's categories forever — the same rule as esg_frameworks above.
+CREATE TABLE IF NOT EXISTS esg_taxonomy_schemes (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  code           text NOT NULL,          -- 'CCPT', 'ASEAN'
+  version        text NOT NULL,          -- '2021-04-30', 'V4-2025-11-06'
+  publisher      text NOT NULL,
+  source_url     text NOT NULL,
+  effective_from date,
+  is_current     boolean NOT NULL DEFAULT false,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  updated_at     timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_esg_taxonomy_schemes
+  ON esg_taxonomy_schemes (code, version);
+-- Covers: the rows where is_current is true — at most one per taxonomy code.
+-- Superseded revisions (ASEAN V3) carry is_current = false and may pile up
+-- freely. Same shape as uq_esg_weighting_one_active; a plain UNIQUE on
+-- (code, is_current) would also forbid a second SUPERSEDED revision, which is
+-- wrong.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_esg_taxonomy_schemes_current
+  ON esg_taxonomy_schemes (code) WHERE is_current;
+
+-- The classification VALUES of a scheme. `kind` keeps the axes apart inside one
+-- table: a CCPT classification (C1..C5) and a CCPT guiding principle (GP1..GP5)
+-- are both CCPT and are not interchangeable.
+CREATE TABLE IF NOT EXISTS esg_taxonomy_categories (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  scheme_id     uuid NOT NULL REFERENCES esg_taxonomy_schemes(id) ON DELETE CASCADE,
+  code          text NOT NULL,
+  label_en      text NOT NULL,
+  definition_en text,
+  kind          text NOT NULL
+                CHECK (kind IN ('classification','principle','objective','criterion','tier')),
+  sort_order    integer NOT NULL DEFAULT 0,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_esg_taxonomy_categories
+  ON esg_taxonomy_categories (scheme_id, code);
+CREATE INDEX IF NOT EXISTS idx_esg_taxonomy_categories_kind
+  ON esg_taxonomy_categories (scheme_id, kind, sort_order);
+
+-- The PRODUCT's own presentation layer: twelve plain-language project types an
+-- SME recognises, mapping ONTO the taxonomies rather than replacing them.
+CREATE TABLE IF NOT EXISTS esg_project_types (
+  id        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  code      text NOT NULL,
+  label_en  text NOT NULL,
+  -- NULL, and they stay NULL. No source publishes these terms in Bahasa
+  -- Malaysia or Chinese, and this repo already carries the ruling for exactly
+  -- this situation in seed.sql's SEDG block: "question_bm NULL, and question_zh
+  -- NULL ... Inventing one would be precisely what mapping_status exists to
+  -- prevent." The UI renders the English label with an explicit
+  -- translation-pending state. A machine-translated financial term is a wrong
+  -- term in two more languages.
+  label_bm  text,
+  label_zh  text,
+  -- A DEFAULT, NOT A DETERMINATION. The actual classification of a real project
+  -- is decided per project and STAMPED on that project's row as a text code —
+  -- never joined from here at read time. Same rule as SST on a Commerce
+  -- transaction, and as the emission factor on esg_carbon_entries.
+  --
+  -- The FK targets id, not code: esg_taxonomy_categories is unique on
+  -- (scheme_id, code), so code alone cannot be an FK target.
+  --
+  -- Both seed NULL in Run 47. Nothing in docs/GREEN_FINANCE_REGISTER_SOURCES.md
+  -- states a default classification per project type, and inventing one is the
+  -- enrichment that file exists to prevent. The writer is the routing run.
+  default_ccpt_category_id   uuid REFERENCES esg_taxonomy_categories(id),
+  default_asean_objective_id uuid REFERENCES esg_taxonomy_categories(id),
+  sort_order integer NOT NULL DEFAULT 0,
+  is_active  boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_esg_project_types_code
+  ON esg_project_types (code);
+
+-- THE REGISTER.
+--
+-- THREE AMOUNT COLUMNS, because four of these products cannot be reduced to one
+-- number. GTFS 4.0, Maybank's LCTF, Bank Islam's ECO and CGC's BizJamin all
+-- publish caps that vary by borrower or project category — for those,
+-- max_financing_myr is NULL and amount_note carries the tiers verbatim. Picking
+-- one tier is enrichment.
+--
+-- min_financing_myr exists for exactly one row and it is the important one:
+-- Maybank's Sustainability-Linked Loan Programme has a RM50,000,000 MINIMUM. It
+-- sits in Maybank's SME section and is a corporate product. Without that column
+-- an SME gets routed to it.
+--
+-- NULL IS THE CORRECT VALUE FOR AN UNDISCLOSED TERM, and it must stay
+-- distinguishable from zero. HSBC Malaysia, AmBank and Public Bank publish no
+-- amounts, tenures or rates for any green product. That is
+-- INSTRUMENTED-BUT-EMPTY, not GENUINELY ZERO, and the register renders the two
+-- differently.
+CREATE TABLE IF NOT EXISTS esg_finance_products (
+  id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  institution_name   text NOT NULL,
+  institution_kind   text NOT NULL
+                     CHECK (institution_kind IN ('bank','regulator','agency','development_fi','guarantee_corp')),
+  product_name       text NOT NULL,
+  financing_type     text NOT NULL
+                     CHECK (financing_type IN ('use_of_proceeds_green','sustainability_linked','guarantee','grant_or_subsidy','unclear')),
+  borrower_scope     text NOT NULL
+                     CHECK (borrower_scope IN ('sme','corporate','both','retail','unstated')),
+  max_financing_myr  numeric(18,2),
+  min_financing_myr  numeric(18,2),
+  amount_note        text,
+  tenure_note        text,
+  rate_note          text,
+  documentation_note text,
+  eligibility_note   text,
+  -- Not decoration. Telling an SME that a retired facility is open is the most
+  -- expensive error this module can make, because they act on it.
+  availability_status text NOT NULL
+                      CHECK (availability_status IN ('open','closed','superseded','unclear')),
+  status_note        text NOT NULL,
+  source_url         text NOT NULL,
+  source_publisher   text NOT NULL
+                     CHECK (source_publisher IN ('institution_own','regulator','agency','news')),
+  -- The whole point of this column is that it goes stale between deploys, which
+  -- is why the register has an admin writer as well as the seed.
+  last_verified      date NOT NULL,
+  is_active          boolean NOT NULL DEFAULT true,
+  updated_by         uuid REFERENCES esg_users(id) ON DELETE SET NULL,
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  updated_at         timestamptz NOT NULL DEFAULT now()
+);
+-- Covers: ACTIVE rows only. A superseded scheme and its successor carry the
+-- same institution and near-identical names (GTFS 4.0 / GTFS 5.0), so scoping
+-- the index to is_active is what lets both coexist while still stopping a
+-- second live copy of one live product.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_esg_finance_products_live
+  ON esg_finance_products (lower(institution_name), lower(product_name))
+  WHERE is_active;
+CREATE INDEX IF NOT EXISTS idx_esg_finance_products_filter
+  ON esg_finance_products (availability_status, financing_type, borrower_scope);
+CREATE INDEX IF NOT EXISTS idx_esg_finance_products_verified
+  ON esg_finance_products (last_verified);
