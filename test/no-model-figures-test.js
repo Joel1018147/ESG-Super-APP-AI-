@@ -242,12 +242,15 @@ test('a signed-out page renders no navigation and no sign-out link', () => {
   const { layout } = require('../src/utils/layout');
   const out = layout('Sign in', '<form></form>', null, '');
   assert.ok(!/Sign out/i.test(out), 'signed-out page offers a sign-out link');
-  assert.ok(!/class="nav-item/.test(out), 'signed-out page renders the sidebar');
-  assert.ok(!/class="bottom-nav/.test(out), 'signed-out page renders the bottom nav');
+  // The class names are the design system's since Run 53 — .sidebar-item and
+  // .app-bottom-nav, not the hand-rolled .nav-item / .bottom-nav this repo
+  // used to declare in an inline <style> block of its own.
+  assert.ok(!/class="sidebar-item/.test(out), 'signed-out page renders the sidebar');
+  assert.ok(!/class="app-bottom-nav/.test(out), 'signed-out page renders the bottom nav');
   assert.ok(/data-platform="esg"/.test(out), 'signed-out page lost the platform accent');
 
   const signedIn = layout('Dashboard', '<div></div>', { name: 'Joel', role: 'company_admin' }, '/dashboard');
-  assert.ok(/class="nav-item/.test(signedIn), 'signed-in page lost its sidebar');
+  assert.ok(/class="sidebar-item/.test(signedIn), 'signed-in page lost its sidebar');
 });
 
 test('an asset 404 does not render the HTML shell', () => {
@@ -686,7 +689,13 @@ test('every design token layout.js uses actually exists in the stylesheet', () =
 
   const used = new Set();
   for (const m of layoutSrc.matchAll(/var\((--[a-z0-9-]+)\)/gi)) used.add(m[1]);
-  assert.ok(used.size >= 10, `expected layout.js to consume the design system, found ${used.size} tokens`);
+  // The floor was 10 until Run 53, when the hand-rolled app shell — about forty
+  // lines of local geometry that read a dozen tokens — was replaced by the
+  // design system's own .app-layout / .app-sidebar / .app-topbar components.
+  // FEWER tokens here is the improvement, not a regression: the ones layout.js
+  // still names are the ones it genuinely owns. The stronger guard against a
+  // sync now lives in dashboard-test.js, which pins the whole file's md5.
+  assert.ok(used.size >= 3, `expected layout.js to consume the design system, found ${used.size} tokens`);
 
   const defined = new Set();
   for (const m of css.matchAll(/^\s*(--[a-z0-9-]+)\s*:/gim)) defined.add(m[1]);

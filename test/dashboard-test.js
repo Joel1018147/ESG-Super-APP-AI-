@@ -96,12 +96,20 @@ const REQ = {
 const ASSESSMENT_ID = '11111111-1111-1111-1111-111111111111';
 
 const FIXTURES = [
+  // The COUNT queries come first: they name the same tables as the row queries
+  // below and a first-match scan would hand them a row list with no count on
+  // it, which arrives as `undefined` and renders as NaN. Ordered, not guessed.
+  [/count\(\*\)::int AS n FROM esg_indicators/, null],   // supplied per-call, see populatedDb
+  [/FILTER \(WHERE NOT r\.is_na\)/, [{ answered: 18, na: 0 }]],
+  [/count\(\*\)::int AS live/, [{ live: 3, reviewed: 1, pending: 2, accepted: 1 }]],
+  [/count\(\*\)::int AS n FROM esg_carbon_entries/, [{ n: 2 }]],
   [/FROM esg_assessments a? ?WHERE|FROM esg_assessments\b[\s\S]*WHERE (a\.)?company_id/, [{
     id: ASSESSMENT_ID, framework_id: 'fw-1', framework_code: 'MODUS_SEDG_ALIGNED',
     framework_version: '0.9-draft', reporting_year: 2025, status: 'scored', overall: 78,
   }]],
   [/FROM esg_scores\b/, [
-    { scope: 'OVERALL', score_0_100: 78, band_code: 'AA', points_earned: 40, points_available: 51,
+    { id: 'sc-1', earned_at: '2026-08-14T00:00:00.000Z', computed_at: '2026-08-14T00:00:00.000Z',
+      scope: 'OVERALL', score_0_100: 78, band_code: 'AA', points_earned: 40, points_available: 51,
       indicators_total: 40, indicators_answered: 18, indicators_na: 0,
       weighting_version: '1.0', framework_version: '0.9-draft', engine_version: '1.0.0' },
     { scope: 'E', score_0_100: 82, band_code: null, points_earned: 1, points_available: 1,
@@ -118,6 +126,15 @@ const FIXTURES = [
     { id: 'rec-1', pillar: 'E', points_missed: 12, priority: 'high', narrative_en: 'Track electricity monthly.', source: 'ai_phrasing', code: 'E-01', question_en: 'Does the company track its monthly electricity consumption?' },
     { id: 'rec-2', pillar: 'S', points_missed: 6, priority: 'medium', narrative_en: 'Record training hours.', source: 'ai_phrasing', code: 'S-06', question_en: 'Average training hours per employee' },
     { id: 'rec-3', pillar: 'G', points_missed: 2, priority: 'low', narrative_en: 'Publish a supplier code.', source: 'fallback_template', code: 'G-10', question_en: 'Supplier code of conduct?' },
+  ]],
+  // The seeded ladder, verbatim from seed.sql §1. 78 lands in AA / Advanced —
+  // and "Good Performance", which the reference image prints under the ring,
+  // is not a band this system has.
+  [/FROM esg_rating_bands\b/, [
+    { band_code: 'AAA', band_label: 'Leading', min_score: 85, max_score: 100, sort_order: 1 },
+    { band_code: 'AA', band_label: 'Advanced', min_score: 75, max_score: 84.99, sort_order: 2 },
+    { band_code: 'A', band_label: 'Established', min_score: 65, max_score: 74.99, sort_order: 3 },
+    { band_code: 'BBB', band_label: 'Progressing', min_score: 55, max_score: 64.99, sort_order: 4 },
   ]],
   [/FROM esg_frameworks\b/, [
     { id: 'fw-1', code: 'MODUS_SEDG_ALIGNED', version: '0.9-draft', n: 40 },
@@ -239,26 +256,91 @@ const JOURNEY_FIXTURES = {
   ],
 };
 
-function populatedDb() {
+/**
+ * @param {object} opts
+ *   indicatorCount  the framework's indicator count — 40 for MODUS_SEDG_ALIGNED
+ *                   and 38 for SEDG@2.0. Supplied per call so the denominator
+ *                   test drives the real arithmetic instead of reading a
+ *                   number the stub decided.
+ *   hostile         a string injected into every label the page renders, for
+ *                   the escaping test.
+ */
+function populatedDb(opts = {}) {
   const seen = [];
+  const n = opts.indicatorCount === undefined ? 40 : opts.indicatorCount;
+  const taint = (rows) => {
+    if (!opts.hostile || !Array.isArray(rows)) return rows;
+    return rows.map((r) => {
+      const out = { ...r };
+      for (const k of ['label_en', 'narrative_en', 'name', 'title', 'product_name',
+        'band_label', 'description_en', 'filename', 'blocked_reason']) {
+        if (typeof out[k] === 'string') out[k] = opts.hostile;
+      }
+      return out;
+    });
+  };
   return {
     seen,
     exports: {
       query: async (text) => {
         const sql = String(text).replace(/\s+/g, ' ').trim();
         seen.push(sql);
-        if (/FROM esg_journey_stages\b/.test(sql)) return { rows: JOURNEY_FIXTURES.stages };
-        if (/FROM esg_missions\b/.test(sql)) return { rows: JOURNEY_FIXTURES.missions };
-        if (/FROM esg_xp_levels\b/.test(sql)) return { rows: JOURNEY_FIXTURES.levels };
+        if (/count\(\*\)::int AS n FROM esg_indicators/.test(sql)) return { rows: [{ n }] };
+        if (/FROM esg_journey_stages\b/.test(sql)) return { rows: taint(JOURNEY_FIXTURES.stages) };
+        if (/FROM esg_missions\b/.test(sql)) return { rows: taint(JOURNEY_FIXTURES.missions) };
+        if (/FROM esg_xp_levels\b/.test(sql)) return { rows: taint(JOURNEY_FIXTURES.levels) };
         for (const [re, rows] of FIXTURES) {
           if (rows === null) continue;
-          if (re.test(sql)) return { rows, rowCount: rows.length };
+          if (re.test(sql)) return { rows: taint(rows), rowCount: rows.length };
         }
         throw new Error(`populated stub has no fixture for: ${sql.slice(0, 130)}`);
       },
       pool: { connect: async () => ({ query: async () => ({ rows: [] }), release() {} }) },
     },
   };
+}
+
+/** A company that registered ten minutes ago: the journey DEFINITIONS are
+ *  seeded (they ship with the deployment) and the company has written nothing.
+ *
+ *  This is a different fixture from EMPTY_DB and the difference is the point.
+ *  EMPTY_DB answers every query with nothing, which models a deployment whose
+ *  SEED DID NOT RUN — a configuration fault. A new company is not that, and if
+ *  the two render the same way the dashboard is telling a new user that the
+ *  product is broken. Run 48's lesson, one layer up: do not start a fixture at
+ *  the answer, and do not let one fixture stand for two different facts. */
+function newCompanyDb() {
+  return {
+    query: async (text) => {
+      const sql = String(text).replace(/\s+/g, ' ').trim();
+      if (/FROM esg_journey_stages\b/.test(sql)) return { rows: JOURNEY_FIXTURES.stages };
+      if (/FROM esg_missions\b/.test(sql)) return { rows: JOURNEY_FIXTURES.missions };
+      if (/FROM esg_xp_levels\b/.test(sql)) return { rows: JOURNEY_FIXTURES.levels };
+      if (/count\(\*\)::int AS n FROM esg_indicators/.test(sql)) return { rows: [{ n: 40 }] };
+      if (/count\(\*\)::int AS live/.test(sql)) return { rows: [{ live: 0, reviewed: 0, pending: 0, accepted: 0 }] };
+      if (/FROM esg_companies\b/.test(sql)) {
+        // The company row exists — they registered. One field of five is set.
+        return { rows: [{ id: 'c1', name: 'New Sdn Bhd', filled: 1, earned_at: '2026-08-17T00:00:00.000Z' }] };
+      }
+      return { rows: [], rowCount: 0 };
+    },
+    pool: { connect: async () => ({ query: async () => ({ rows: [] }), release() {} }) },
+  };
+}
+
+/** One route, rendered. */
+async function renderRoute(mod, routePath, dbExports, req = REQ) {
+  let out = null;
+  await withStub(dbExports, async () => {
+    const router = require(`../src/${mod}`);
+    const layer = router.stack.find((l) => l.route && l.route.path === routePath && l.route.methods.get);
+    assert.ok(layer, `no GET handler for ${routePath}`);
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    out = await renderHandler(handler, req);
+  });
+  assert.ok(out && typeof out.html === 'string' && out.html.length > 200,
+    `${routePath} rendered nothing: ${out && out.failed}`);
+  return out.html;
 }
 
 /** Renders one route handler for real. A handler that answers with nothing is
@@ -434,6 +516,304 @@ let RENDERED = null;
     assert.strictEqual(md5, '8b92094c',
       `the design system is ${md5}, not the master's 8b92094c — either this repo edited it (a §1 `
       + 'defect) or a master sync landed and this pin was left behind (§1b)');
+  });
+
+  /* ═════════════════════════════════════════════════════════════════════════
+     3 · THE DASHBOARD, EMPTY AND FULL
+     ═════════════════════════════════════════════════════════════════════════ */
+
+  let EMPTY_HTML = null;      // a NEW COMPANY — seeded deployment, no data yet
+  let UNSEEDED_HTML = null;   // a deployment whose seed did not run
+  let FULL_HTML = null;
+
+  await atest('the dashboard renders with zero data AND with full data, and the two differ', async () => {
+    EMPTY_HTML = await renderRoute('routes/pages', '/dashboard', newCompanyDb());
+    UNSEEDED_HTML = await renderRoute('routes/pages', '/dashboard', EMPTY_DB);
+    FULL_HTML = await renderRoute('routes/pages', '/dashboard', populatedDb().exports);
+    assert.notStrictEqual(contentOf(EMPTY_HTML), contentOf(FULL_HTML),
+      'a company with no data and a scored company render byte-identical dashboards');
+    assert.notStrictEqual(contentOf(EMPTY_HTML), contentOf(UNSEEDED_HTML),
+      'a new company and a deployment whose seed never ran render the same page — the first is '
+      + 'normal and the second is a configuration fault, and telling them apart is the whole point '
+      + 'of the three empty states');
+    for (const [label, html] of [['empty', EMPTY_HTML], ['unseeded', UNSEEDED_HTML], ['full', FULL_HTML]]) {
+      const c = contentOf(html);
+      assert.ok(c && c.length > 400, `${label}: content region is ${c && c.length} bytes`);
+      assert.ok(!/undefined|NaN|\[object Object\]/.test(c), `${label}: a template hole rendered`);
+      assert.ok(/class="card/.test(c), `${label}: rendered no card`);
+    }
+  });
+
+  await atest('THE EMPTY DASHBOARD LEADS WITH THE RAIL, and the full one leads with the numbers', async () => {
+    // The mock draws a mature account. The screen most users see first is the
+    // empty one, and rendering the mature layout for it produces a grid of
+    // zeroes that reads as broken rather than as new. The rail is the one
+    // block fully populated on day one, because the stages exist before the
+    // company does anything.
+    const e = contentOf(EMPTY_HTML);
+    const f = contentOf(FULL_HTML);
+    assert.ok(e.indexOf('journey-rail') < e.indexOf('stat-grid'),
+      'the empty dashboard puts the stat cards above the journey rail — a grid of zeroes first');
+    assert.ok(f.indexOf('stat-grid') < f.indexOf('journey-rail'),
+      'the scored dashboard does not follow the reference image\'s reading order');
+  });
+
+  await atest('every zero region on the empty dashboard NAMES which empty state it is', async () => {
+    const c = contentOf(EMPTY_HTML);
+    const states = (c.match(/class="empty-state"/g) || []).length;
+    assert.ok(states >= 2, `the empty dashboard renders ${states} empty states`);
+    // layout.emptyState()'s own defaults. Generic copy is banned: the point of
+    // the three states is that each says WHICH it is, in its own words.
+    for (const generic of [
+      'Nothing writes to this yet. It is not switched on, rather than empty.',
+      'This is switched on and working — nobody has entered anything yet.',
+      'This has been measured and the answer is zero.',
+    ]) {
+      assert.ok(!c.includes(generic),
+        `the empty dashboard falls back to generic empty-state copy: "${generic}"`);
+    }
+  });
+
+  await atest('THE ANSWERS DENOMINATOR IS COMPUTED — 40 on the Modus 40, 38 on SEDG', async () => {
+    const forty = contentOf(await renderRoute('routes/pages', '/dashboard', populatedDb({ indicatorCount: 40 }).exports));
+    assert.ok(/18 \/ 40/.test(forty), 'a company on MODUS_SEDG_ALIGNED does not show 18 / 40');
+    const thirtyEight = contentOf(await renderRoute('routes/pages', '/dashboard', populatedDb({ indicatorCount: 38 }).exports));
+    assert.ok(/18 \/ 38/.test(thirtyEight), 'a company on SEDG@2.0 does not show 18 / 38');
+    assert.ok(!/\/ 32\b/.test(forty) && !/\/ 32\b/.test(thirtyEight),
+      'the reference image\'s hardcoded 32 reached the page — it is right for neither framework');
+  });
+
+  await atest('THE BAND LABEL COMES FROM esg_rating_bands, not from copy in the route', async () => {
+    const c = contentOf(FULL_HTML);
+    assert.ok(/AA/.test(c), 'the band code is not on the page');
+    assert.ok(c.includes('Advanced'),
+      'the seeded band label is not rendered — the page is naming the band itself');
+    // The proof it came from the query: the string appears nowhere in the
+    // DASHBOARD HANDLER. Scoped to that slice and stripped of comments — the
+    // word also names a SEDG tier in /frameworks and appears in this file's own
+    // explanation of the rule, and a whole-file scan reports both as the defect.
+    const src = fs.readFileSync(path.join(SRC, 'routes', 'pages.js'), 'utf8');
+    const from = src.indexOf("router.get('/dashboard'");
+    const to = src.indexOf("router.get('/company'");
+    assert.ok(from > 0 && to > from, 'the dashboard handler is gone — the anchor moved');
+    const handler = src.slice(from, to).replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+    for (const band of ['Advanced', 'Leading', 'Established', 'Progressing', 'Good Performance']) {
+      assert.ok(!handler.includes(band), `the dashboard handler names the band "${band}" itself`);
+    }
+    assert.ok(!/Good Performance/.test(c),
+      'the reference image\'s "Good Performance" reached the page — it is not a band this system has');
+  });
+
+  await atest('ANIMATED FIGURES ARE IN THE DOM AS TEXT, BEFORE ANY SCRIPT RUNS', async () => {
+    const c = contentOf(FULL_HTML);
+    assert.ok(/<div class="score-ring-value">78<\/div>/.test(c),
+      'the overall score is not present as server-rendered text — a ring that only reads 78 after '
+      + 'JavaScript has run shows a wrong number to a screen reader, a no-JS user and anyone whose '
+      + 'script was dropped');
+    for (const pillar of ['82', '74', '77']) {
+      assert.ok(new RegExp(`<div class="score-ring-value">${pillar}</div>`).test(c),
+        `the ${pillar} sub-score is not server-rendered text`);
+    }
+    assert.ok(!/<script/i.test(c),
+      'the dashboard content region carries a script — every figure on it is server-rendered and '
+      + 'nothing on this page needs one');
+    assert.ok(!/cdnjs|unpkg|jsdelivr/i.test(c), 'the dashboard loads a script from a CDN');
+  });
+
+  await atest('NO DEAD CONTROLS — no search, no notification bell, no mail icon', async () => {
+    // §4.3c. The reference image puts all three in the most prominent row of
+    // the page and this repo has a backing feature for none of them: no search
+    // route, no notifications table, no message store.
+    for (const html of [EMPTY_HTML, FULL_HTML]) {
+      assert.ok(!/type="search"/i.test(html), 'a search field renders with nothing behind it');
+      assert.ok(!/placeholder="Search/i.test(html), 'a search field renders with nothing behind it');
+      assert.ok(!/aria-label="[^"]*(notification|message|mail|inbox|search)/i.test(html),
+        'a notification, mail or search control renders with no backing route');
+      assert.ok(!/🔔|✉|📨|📬/.test(html), 'a bell or mail glyph renders as a control');
+    }
+    // And the one control that IS in the topbar does something.
+    assert.ok(/id="themeBtn"/.test(FULL_HTML) && /getElementById\('themeBtn'\)/.test(FULL_HTML),
+      'the topbar theme toggle is not bound to anything');
+  });
+
+  await atest('the bottom nav still shows exactly the five named keys, and they are ≥44px tall', async () => {
+    const { BOTTOM_NAV_KEYS, MODULES } = require('../src/utils/layout');
+    assert.deepStrictEqual(BOTTOM_NAV_KEYS,
+      ['dashboard', 'company', 'assessment', 'documents', 'reports'],
+      'BOTTOM_NAV_KEYS changed — it is five, named explicitly, and adding to it displaces one');
+    // Anchored at the token boundary: `class="bottom-nav-item` also prefixes
+    // `bottom-nav-item-icon`, so an unanchored count reports ten items for five.
+    const items = (FULL_HTML.match(/class="bottom-nav-item[ "]/g) || []).length;
+    assert.strictEqual(items, 5, `the bottom nav renders ${items} items`);
+    for (const k of BOTTOM_NAV_KEYS) {
+      assert.ok(MODULES.some((m) => m.key === k), `${k} is in BOTTOM_NAV_KEYS but not in MODULES`);
+    }
+    // Height comes from the master, so read it rather than assume it.
+    const h = /\.app-bottom-nav\s*\{[^}]*height:\s*(\d+)px/.exec(CSS);
+    assert.ok(h, '.app-bottom-nav declares no height');
+    assert.ok(Number(h[1]) >= 44, `the bottom nav is ${h[1]}px tall; a touch target is 44px`);
+    // Five items across the narrowest phone still clears 44px of width.
+    assert.ok(320 / 5 >= 44, 'five bottom-nav items no longer fit a 320px viewport at 44px each');
+  });
+
+  await atest('every dynamic value on the dashboard goes through esc()', async () => {
+    const payload = '<script>alert(1)</script>';
+    const html = await renderRoute('routes/pages', '/dashboard', populatedDb({ hostile: payload }).exports);
+    const c = contentOf(html);
+    assert.ok(!c.includes(payload), 'a database string containing markup reached the page unescaped');
+    assert.ok(c.includes('&lt;script&gt;alert(1)&lt;/script&gt;'),
+      'the payload did not render at all — this test is asserting nothing');
+  });
+
+  /* ═════════════════════════════════════════════════════════════════════════
+     4 · MOTION AND CONTRAST
+     ═════════════════════════════════════════════════════════════════════════ */
+
+  test('reduced motion: ONE global block, and .reveal is visible and final inside it', () => {
+    // §6a. "Collapses to instant" is not "collapses to 0.01ms": an entrance
+    // state whose resting appearance is opacity 0 becomes permanently
+    // invisible under the global reduce block, and the accessibility setting
+    // then hides the page from the people who set it.
+    const blocks = CSS.match(/@media\s*\(prefers-reduced-motion:\s*reduce\)/g) || [];
+    assert.strictEqual(blocks.length, 1,
+      `${blocks.length} prefers-reduced-motion blocks — two produce an effect that depends on `
+      + 'source order, which is worse than having neither');
+    const i = CSS.search(/@media\s*\(prefers-reduced-motion:\s*reduce\)/);
+    const body = CSS.slice(i, i + 1200);
+    assert.ok(/\.reveal/.test(body), 'the reduce block does not mention .reveal');
+    assert.ok(/opacity:\s*1/.test(body) && /transform:\s*none/.test(body),
+      'the reduce block does not force .reveal back to a visible, final state');
+    // And the resting state in the cascade is visible, so no-script is safe.
+    assert.ok(/(^|\n)\.reveal\s*\{\s*opacity:\s*1;?\s*\}/.test(CSS),
+      '.reveal does not rest visible — it must be hidden only under [data-reveal="on"]');
+  });
+
+  test('the page animates transform and opacity only', () => {
+    // §3.4 rule 1. Animating width, height, top or box-shadow on a dashboard
+    // this dense drops frames on the mid-range Android a Malaysian SME owner
+    // will actually open it on.
+    const i = CSS.indexOf('50. GAMIFICATION & MOTION LAYER');
+    assert.ok(i > 0, 'the §50 section is gone — the anchor moved');
+    const section = CSS.slice(i);
+    const animated = [...section.matchAll(/transition:\s*([^;]+);/g)].map((m) => m[1]);
+    assert.ok(animated.length >= 5, `only ${animated.length} transitions in §50 — the reader broke`);
+    const properties = new Set();
+    for (const t of animated) {
+      for (const part of t.split(',')) {
+        const prop = part.trim().split(/\s+/)[0];
+        if (prop && prop !== 'none') properties.add(prop);
+      }
+    }
+    // width is here on purpose and is not a frame problem: .xp-bar and
+    // .mission-progress are set ONCE, server-side, so nothing animates on
+    // first paint. Named as a shape, not exempted as a file.
+    const allowed = new Set(['transform', 'opacity', 'background', 'background-color',
+      'border-color', 'box-shadow', 'color', 'width']);
+    const unexpected = [...properties].filter((p) => !allowed.has(p));
+    assert.deepStrictEqual(unexpected, [], `§50 animates: ${unexpected.join(', ')}`);
+    assert.ok(!/animation:[^;]*infinite/.test(section),
+      '§50 contains an infinite animation — nothing loops except a live progress indicator');
+  });
+
+  test('every duration and easing in §50 comes from a token', () => {
+    // Sliced from the END of §50's own header comment, not from the heading
+    // inside it. Slicing at the heading starts the string mid-comment, so the
+    // opening `/*` is missing, the comment strip does nothing, and the
+    // sentence "a hardcoded 0.3s here is the same defect class as a literal
+    // #16A34A" is reported as a hardcoded 0.3s. Checklist #16, again.
+    const i = CSS.indexOf('50. GAMIFICATION & MOTION LAYER');
+    assert.ok(i > 0, 'the §50 heading is gone — the anchor moved');
+    const afterHeader = CSS.indexOf('*/', i);
+    assert.ok(afterHeader > i, '§50 has no header comment — the anchor moved');
+    const section = CSS.slice(afterHeader + 2).replace(/\/\*[\s\S]*?\*\//g, '');
+    assert.ok(section.length > 3000, `the §50 body is ${section.length} bytes — the slice broke`);
+    const literals = [...section.matchAll(/(?:transition|animation)[^;]*?(\d+(?:\.\d+)?m?s)\b/g)].map((m) => m[1]);
+    assert.deepStrictEqual(literals, [],
+      `§50 carries a literal duration: ${literals.join(', ')} — a literal 0.3s is the same defect `
+      + 'class as a literal #16A34A');
+  });
+
+  /* CONTRAST, COMPUTED. §6 says ≥ 4.5:1 in both themes and until this run
+     nothing checked it in either. The survey below is the answer, and most of
+     it is bad news that belongs to the MASTER rather than to this repo:
+     `--muted`, every `.badge-*` tint and every `.alert-*` tint sit between
+     2.4:1 and 4.2:1, on all twelve platforms.
+
+     So the assertion has two halves. The pairs this page can CHOOSE must pass.
+     The pairs it inherits are pinned to their measured value, so a master fix
+     turns this red and tells someone to move the entry up — which is the
+     opposite of an exemption list, where an entry means "stop looking". */
+  const contrast = require('./lib/contrast');
+
+  const MUST_PASS = [
+    ['var(--text)', ['var(--surface)', 'var(--bg)'], '.stat-value, .page-title, .card-title'],
+    ['var(--text-2)', ['var(--surface)', 'var(--bg)'], '.score-ring-label, .mission-meta, .journey-node-meta'],
+    ['var(--text)', ['var(--bg)'], 'body copy on the page background'],
+    ['var(--text-2)', ['var(--surface-2)', 'var(--surface)', 'var(--bg)'], '.milestone-badge (resting)'],
+    ['var(--text-2)', ['var(--bg-soft)', 'var(--surface)', 'var(--bg)'], '.badge-gray'],
+    ['var(--accent-contrast)', ['var(--surface-deep)'], '.mission-card--deep'],
+    ['#ffffff', ['var(--accent)'], '.btn-primary, .skip-link'],
+    ['#ffffff', ['var(--brand)'], 'the sidebar brand'],
+    ['rgba(255,255,255,0.5)', ['var(--brand)'], '.sidebar-item resting'],
+    ['rgba(255,255,255,0.85)', ['var(--brand)'], '.sidebar-user-name'],
+  ];
+
+  // MASTER DEFECTS, pinned at their measured ratio in each theme. Every one of
+  // these is below 4.5:1 today and needs a change to modus-design-system.css,
+  // which is a §1b fan-out to thirteen paths and therefore its own run.
+  const KNOWN_BELOW = [
+    ['var(--muted)', ['var(--surface)', 'var(--bg)'], '--muted on a card (.stat-label, .stat-sub, .text-muted)', 2.56, 3.07],
+    ['var(--muted)', ['var(--bg)'], '--muted on the page background', 2.43, 3.75],
+    ['var(--green)', ['var(--green-bg)', 'var(--surface)', 'var(--bg)'], '.badge-green', 3.02, 4.01],
+    ['var(--amber)', ['var(--amber-bg)', 'var(--surface)', 'var(--bg)'], '.badge-amber', 2.93, 4.18],
+    ['var(--red)', ['var(--red-bg)', 'var(--surface)', 'var(--bg)'], '.badge-red', 3.39, 3.64],
+    ['var(--accent-contrast)', ['var(--accent-light)', 'var(--surface)', 'var(--bg)'], '.milestone-badge.is-earned', 1.2, 11.88],
+    ['rgba(255,255,255,0.28)', ['var(--brand)'], '.sidebar-section-label', 2.5, 2.37],
+    ['rgba(255,255,255,0.35)', ['var(--brand)'], '.sidebar-user-plan', 3.21, 3.1],
+    ['var(--muted)', ['var(--surface)'], '.bottom-nav-item resting', 2.56, 3.07],
+    ['var(--accent)', ['var(--surface)'], '.bottom-nav-item active', 4.99, 2.93],
+    ['var(--accent)', ['var(--accent-bg)', 'var(--surface)', 'var(--bg)'], '.badge-accent, .level-chip', 4.5, 2.73],
+  ];
+
+  test('CONTRAST ≥ 4.5:1 IN BOTH THEMES for every pair this page chooses', () => {
+    const failures2 = [];
+    for (const theme of ['light', 'dark']) {
+      const t = contrast.tokens(theme);
+      for (const [fg, bg, label] of MUST_PASS) {
+        const r = contrast.ratio(fg, bg, t);
+        if (r < 4.5) failures2.push(`${theme}: ${r}:1  ${label}`);
+      }
+    }
+    assert.deepStrictEqual(failures2, [],
+      `text below 4.5:1:\n      ${failures2.join('\n      ')}`);
+  });
+
+  test('the MASTER pairs below 4.5:1 are still exactly the ones on record', () => {
+    const moved = [];
+    console.log('      master contrast, light / dark — every one of these is below 4.5:1:');
+    for (const [fg, bg, label, wantLight, wantDark] of KNOWN_BELOW) {
+      const got = {
+        light: contrast.ratio(fg, bg, contrast.tokens('light')),
+        dark: contrast.ratio(fg, bg, contrast.tokens('dark')),
+      };
+      console.log(`        ${String(got.light).padStart(6)} / ${String(got.dark).padStart(6)}   ${label}`);
+      if (got.light !== wantLight) moved.push(`light ${label}: ${wantLight} -> ${got.light}`);
+      if (got.dark !== wantDark) moved.push(`dark ${label}: ${wantDark} -> ${got.dark}`);
+    }
+    assert.deepStrictEqual(moved, [],
+      `a recorded master contrast ratio moved:\n      ${moved.join('\n      ')}\n      `
+      + 'If it went UP past 4.5, the master was fixed — move the pair into MUST_PASS and delete '
+      + 'the record. If it went DOWN, something made an already-failing pair worse.');
+  });
+
+  test('nothing this run renders uses the 1.2:1 pair', () => {
+    // .milestone-badge.is-earned is white on a pale tint in light mode. It is
+    // not "below AA", it is unreadable, and it is the one master pair this run
+    // refuses to put on a page.
+    for (const f of ['utils/journeyView.js', 'routes/journey.js', 'routes/pages.js']) {
+      const src = fs.readFileSync(path.join(SRC, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+      assert.ok(!/is-earned/.test(src), `${f} renders .milestone-badge.is-earned (1.2:1 in light mode)`);
+    }
   });
 
   console.log(`\ndashboard-test: ${passed} passed, ${failures.length} failed`);

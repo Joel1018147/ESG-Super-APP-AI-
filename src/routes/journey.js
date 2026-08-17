@@ -46,61 +46,14 @@ const companyIdOf = (req) => req.user && req.user.company_id;
 
 const DAY_MS = 24 * 3600 * 1000;
 
-/** §50 gives three state classes and no fourth. A blocked node deliberately
- *  carries none of them: it is not pending, and dressing it as pending is the
- *  error this whole run is about. */
-const NODE_CLASS = Object.freeze({
-  completed: 'journey-node is-done',
-  in_progress: 'journey-node is-active',
-  pending: 'journey-node is-pending',
-  blocked: 'journey-node',
-});
+// The rail, the nodes, the mission card and the XP block are rendered by
+// utils/journeyView.js. They used to live here, and then the dashboard needed
+// the same rail — two renderings of one set of four states is how the two end
+// up disagreeing, and a user would see a stage marked done on one page and in
+// progress on the other before we did.
+const view = require('../utils/journeyView');
 
-/** The text half of every state. §50's own header says it: a done node says
- *  "Done", a mission at 3 of 8 says "3 of 8". A green ring that says nothing is
- *  not an accessible progress indicator. */
-function stateWords(s) {
-  if (s.state === 'completed') return 'Done';
-  if (s.state === 'blocked') return 'Blocked';
-  if (s.total > 1) return `${s.done} of ${s.total}`;
-  return s.state === 'in_progress' ? 'In progress' : 'Not started yet';
-}
-
-function stageNode(s) {
-  const blocked = s.state === 'blocked';
-  const badge = blocked
-    ? '<span class="milestone-badge is-locked">Blocked</span>'
-    : `<span class="milestone-badge${s.state === 'completed' ? ' is-earned' : ''}">${esc(stateWords(s))}</span>`;
-  const reason = blocked
-    ? `<p class="text-sm">${esc(s.blocked_reason || 'No reason recorded.')}</p>`
-    : '';
-  const ratio = (!blocked && s.total > 1)
-    ? `<div class="mission-progress"><span style="width:${Math.round((s.done / s.total) * 100)}%"></span></div>`
-    : '';
-  return `<div class="${NODE_CLASS[s.state]}">
-    <div>
-      <div class="journey-node-label">${esc(s.label_en)} ${badge}</div>
-      <div class="journey-node-meta">${esc(s.group_code)} · ${esc(stateWords(s))}</div>
-      ${s.description_en ? `<p class="text-sm">${esc(s.description_en)}</p>` : ''}
-      ${reason}
-      ${ratio}
-    </div>
-  </div>`;
-}
-
-/* The only inline style in this file is a computed WIDTH on a progress bar,
-   which is a data value and not a theme choice — the same shape as §50's
-   `--score` on .score-ring. No inline colour, spacing or typography: the gaps
-   come from the shell's `.grid`, which is layout geometry and not a token. */
-function missionCard(m, deep) {
-  const pct = m.total > 0 ? Math.round((m.done / m.total) * 100) : 0;
-  return `<div class="mission-card${deep ? ' mission-card--deep' : ''}${m.state === 'completed' ? ' is-complete' : ''}">
-    <div class="mission-title">${esc(m.label_en)}</div>
-    <div class="mission-meta">${esc(stateWords(m))} · ${esc(m.xp_award)} XP</div>
-    ${m.description_en ? `<p class="text-sm">${esc(m.description_en)}</p>` : ''}
-    <div class="mission-progress"><span style="width:${pct}%"></span></div>
-  </div>`;
-}
+const { stateWords, stageNode, missionCard } = view;
 
 router.get('/journey', wrap(async (req, res) => {
   const companyId = companyIdOf(req);
@@ -127,12 +80,12 @@ router.get('/journey', wrap(async (req, res) => {
   // week filter applies to each award's own source-row timestamp.
   const weekXp = journey.xpSince(xp.awards, new Date(Date.now() - 7 * DAY_MS).toISOString());
 
-  const pct = xp.max_xp > 0 ? Math.round((xp.total / xp.max_xp) * 100) : 0;
   const active = j.stages.find((s) => s.stage_code === j.active_stage_code) || null;
   const activeMissions = active ? m.missions.filter((x) => x.stage_code === active.stage_code) : [];
 
-  const milestones = m.missions.map((x) => `<span class="milestone-badge${
-    x.state === 'completed' ? ' is-earned' : ' is-locked'}">${esc(x.label_en)} · ${esc(x.xp_award)} XP</span>`).join(' ');
+  const milestones = m.missions.map((x) => (x.state === 'completed'
+    ? `<span class="milestone-badge">✓ ${esc(x.label_en)} · ${esc(x.xp_award)} XP</span>`
+    : `<span class="badge badge-gray">${esc(x.label_en)} · ${esc(x.xp_award)} XP</span>`)).join(' ');
 
   res.send(layout('ESG Journey', `
     <h2 class="page-title">Your ESG journey</h2>
@@ -169,49 +122,46 @@ router.get('/journey', wrap(async (req, res) => {
     </div>
 
     <div class="card reveal">
-      <h3 class="section-title">Level ${esc(xp.level)} · ${esc(xp.label)}</h3>
-      <div class="xp-bar"><span style="width:${pct}%"></span></div>
-      <p class="text-sm">${esc(xp.total)} XP of ${esc(xp.max_xp)}. ${xp.next_level_min_xp === null
-    ? 'This is the highest level in the ladder.'
-    : `Next level at ${esc(xp.next_level_min_xp)} XP.`}</p>
-      <p class="text-muted text-sm">The level names are a choice this product made. They are not a
-         rating, nobody outside this platform defines them, and your ESG band — which is a rating —
-         is a completely separate thing computed by the scoring engine.</p>
+      <div class="card-header"><h3 class="card-title">Level ${esc(xp.level)} · ${esc(xp.label)}</h3></div>
+      ${view.xpBlock(xp, weekXp)}
     </div>
 
     ${active ? `<div class="card reveal">
-      <h3 class="section-title">What to do next</h3>
+      <div class="card-header"><h3 class="card-title">What to do next</h3></div>
+      <div class="card-body">
       <p><strong>${esc(active.label_en)}</strong>${active.description_en ? ` — ${esc(active.description_en)}` : ''}</p>
       ${activeMissions.length
-    ? `<div class="grid">${activeMissions.map((x) => missionCard(x, true)).join('')}</div>`
+    ? `<div class="grid">${activeMissions.map((x) => missionCard(x, { deep: true })).join('')}</div>`
     : emptyState('instrumented_but_empty', {
       title: 'No mission on this stage',
       body: 'This stage carries no mission, so there is no XP attached to it. The stage still has to happen.' })}
+      </div>
     </div>` : `<div class="card reveal">
-      <h3 class="section-title">What to do next</h3>
-      ${emptyState('zero', {
+      <div class="card-header"><h3 class="card-title">What to do next</h3></div>
+      <div class="card-body">${emptyState('zero', {
     title: 'Nothing is waiting on you',
-    body: 'Every stage that can be reached today is done. The remaining ones are blocked, and each says why.' })}
+    body: 'Every stage that can be reached today is done. The remaining ones are blocked, and each says why.' })}</div>
     </div>`}
 
     <h3 class="section-title">The journey</h3>
     <div class="card reveal">
-      <div class="journey"><div class="journey-rail">
-        ${j.stages.map(stageNode).join('')}
-      </div></div>
+      <div class="card-body">${view.rail(j.stages)}</div>
     </div>
 
     <h3 class="section-title">Missions</h3>
     <div class="card reveal">
-      <p class="text-muted text-sm">Every mission is the same fact its stage is measured on, with an
+      <div class="card-body">
+      <p class="text-sm">Every mission is the same fact its stage is measured on, with an
          XP price attached. There is no separate mission to complete and nothing to claim — doing the
          work is what completes it.</p>
       <p>${milestones}</p>
-      <div class="grid">${m.missions.map((x) => missionCard(x, false)).join('')}</div>
+      <div class="grid">${m.missions.map((x) => missionCard(x)).join('')}</div>
+      </div>
     </div>
 
     <h3 class="section-title">Not built, and why</h3>
     <div class="card">
+      <div class="card-body">
       <p class="text-sm">There is deliberately <strong>no leaderboard</strong> here. A cross-company
          leaderboard exposes one company's ESG progress to another, an SME's score is commercially
          sensitive, and a safe version needs opt-in, anonymised handles and a minimum cohort size.
@@ -219,30 +169,10 @@ router.get('/journey', wrap(async (req, res) => {
          existing in a form that leaks.</p>
       <p class="text-sm">There are <strong>no rewards</strong> either. XP buys nothing, and saying so
          is more honest than a screen implying it might.</p>
-    </div>
-
-    <script>
-    /* §50's .reveal RESTS VISIBLE and is hidden only under [data-reveal="on"],
-       which is set here AFTER confirming there is an IntersectionObserver to
-       turn it back on again. If this script never runs, never loads, or throws,
-       the content is simply visible. The opposite arrangement — hide in CSS,
-       reveal in JS — makes the page depend on a script it cannot check, and
-       fails silently to exactly the users least able to report it. */
-    (function () {
-      if (!('IntersectionObserver' in window)) return;
-      var nodes = document.querySelectorAll('.reveal');
-      if (!nodes.length) return;
-      document.documentElement.setAttribute('data-reveal', 'on');
-      var io = new IntersectionObserver(function (entries) {
-        entries.forEach(function (e) {
-          if (!e.isIntersecting) return;
-          e.target.classList.add('is-visible');
-          io.unobserve(e.target);
-        });
-      }, { rootMargin: '0px 0px -40px 0px' });
-      nodes.forEach(function (n) { io.observe(n); });
-    })();
-    </script>`, req.user, NAV));
+      </div>
+    </div>`, req.user, NAV));
+    /* The .reveal observer used to live here. It is in the shell now — one
+       definition, so a second page cannot ship a copy that drifts. */
 }));
 
 module.exports = router;

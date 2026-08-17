@@ -531,11 +531,19 @@ const USER_B = { id: 'u-b', name: 'B', email: 'b@x.test', role: 'company_admin',
 /** The content region only. The shell's own classes are layout.js's business
  *  and predate this run; asserting on them would report a pre-existing gap as
  *  this run's regression. */
+/** The page's own region. Both shell markers are accepted: `.content` was this
+ *  repo's hand-rolled shell and `.app-main` is the design system's, which Run
+ *  53 moved to. A helper that knows only one goes silently vacuous the moment
+ *  the other is in place — which is the failure it exists to catch. */
 function contentOf(html) {
-  const i = html.indexOf('<main class="content">');
-  const j = html.lastIndexOf('</main>');
-  assert.ok(i > -1 && j > i, 'the rendered page has no content region — the shell changed');
-  return html.slice(i + '<main class="content">'.length, j);
+  for (const marker of ['<main class="app-main"', '<main class="content"']) {
+    const i = html.indexOf(marker);
+    if (i < 0) continue;
+    const j = html.lastIndexOf('</main>');
+    if (j > i) return html.slice(html.indexOf('>', i) + 1, j);
+  }
+  assert.fail('the rendered page has no content region — the shell changed');
+  return '';
 }
 
 /** The journey rail on its own. The milestone STRIP further down the page also
@@ -597,8 +605,14 @@ function countNodes(html) {
       + 'error class as a failed AI call rendering like an empty one');
     const blockedRail = railOf(blockedHtml);
     const pendingRail = railOf(pendingHtml);
-    assert.ok(blockedRail.includes('milestone-badge is-locked'), 'the blocked node carries no locked badge');
-    assert.ok(!pendingRail.includes('milestone-badge is-locked'), 'the pending node carries a locked badge');
+    // The blocked badge was `.milestone-badge.is-locked` until Run 53 measured
+    // it at ~3.2:1 and the earned variant at 1.2:1. `.badge.badge-gray` is
+    // 6.76:1 light / 5.71:1 dark and carries the same word. The state is still
+    // never colour alone — the badge says "Blocked".
+    assert.ok(blockedRail.includes('badge badge-gray'), 'the blocked node carries no badge');
+    assert.ok(!pendingRail.includes('badge badge-gray'), 'the pending node carries the blocked badge');
+    assert.ok(!blockedRail.includes('is-locked') && !blockedRail.includes('is-earned'),
+      'the rail uses a §50 badge modifier that fails the 4.5:1 contrast rule');
     assert.ok(blockedRail.includes('>Blocked<'), 'the blocked node never says the word');
     assert.ok(pendingRail.includes('Not started yet'), 'the pending node does not say it has not started');
     // The state class is the other half: §50 has no blocked modifier, so a

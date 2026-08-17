@@ -213,22 +213,37 @@ function layout(title, content, user, activePath = '') {
 
   const initials = (user?.name?.[0] || user?.email?.[0] || 'U').toUpperCase();
 
-  // Contract §4.3: brand → nav (GROUPED) → footer.
+  // ── THE SHELL IS THE DESIGN SYSTEM'S, NOT THIS REPO'S ────────────────────
+  //
+  // This function used to hand-roll the entire app shell — .app, .sidebar,
+  // .nav-item, .main, .topbar, .content, .bottom-nav — in an inline <style>
+  // block of about forty lines, while the design system shipped .app-layout /
+  // .app-sidebar / .app-topbar / .app-main / .app-bottom-nav and a full
+  // .sidebar-* component set that MODUS_UI_CONTRACT §4.3 already specifies as
+  // the contract. Two shells, one of them local, is the divergence the whole
+  // contract exists to remove, and it is why three classes (.nav-icon,
+  // .nav-label, .bn-label) existed here that nothing anywhere defined.
+  //
+  // Using the master's components buys three things beyond conformance: the
+  // responsive behaviour at ≤768px comes with them, both themes are already
+  // authored (the sidebar reads --brand, which is dark in BOTH themes — that
+  // is the command-centre surface, deliberately), and this file no longer has
+  // an opinion about colour or spacing at all.
   const nav = GROUPS.map((g) => {
     const items = MODULES.filter((m) => m.group === g);
     if (!items.length) return '';
     const links = items.map((m) => {
       const active = activePath === m.path ? ' active' : '';
-      return `<a class="nav-item${active}" href="${esc(m.path)}">
-      <span>${m.icon}</span><span>${esc(m.label)}</span></a>`;
+      return `<a class="sidebar-item${active}" href="${esc(m.path)}"${activePath === m.path ? ' aria-current="page"' : ''}>
+        <span class="sidebar-item-icon" aria-hidden="true">${m.icon}</span>${esc(m.label)}</a>`;
     }).join('');
-    return `<div class="nav-group"><div class="nav-group-label text-sm">${esc(g)}</div>${links}</div>`;
+    return `<div class="sidebar-section-label">${esc(g)}</div>${links}`;
   }).join('');
 
   const bottomNav = BOTTOM_NAV_KEYS.map((k) => MODULES.find((m) => m.key === k)).filter(Boolean).map((m) => {
     const active = activePath === m.path ? ' active' : '';
-    return `<a class="bn-item${active}" href="${esc(m.path)}">
-      <span class="bn-icon">${m.icon}</span><span>${esc(m.label)}</span></a>`;
+    return `<a class="bottom-nav-item${active}" href="${esc(m.path)}"${activePath === m.path ? ' aria-current="page"' : ''}>
+      <span class="bottom-nav-item-icon" aria-hidden="true">${m.icon}</span>${esc(m.label)}</a>`;
   }).join('');
 
   return `<!DOCTYPE html>
@@ -240,65 +255,46 @@ function layout(title, content, user, activePath = '') {
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
 <style>${TOKENS_CSS}</style>
 <link rel="stylesheet" href="${CSS_HREF}">
 <style>
-/* Shell geometry only. No colours, no fonts — those come from the tokens. */
-.app{display:flex;min-height:100vh}
-.sidebar{width:var(--sidebar-w);background:var(--brand);color:#fff;display:flex;flex-direction:column;position:fixed;inset:0 auto 0 0;overflow-y:auto}
-.sb-brand{padding:18px 20px;font-weight:700;letter-spacing:.2px;display:flex;align-items:center;gap:10px}
-.sb-dot{width:10px;height:10px;border-radius:50%;background:var(--accent)}
-.sb-brand-sub{display:block;font-weight:500;color:#cbd5e1;letter-spacing:0;margin-top:2px}
-.nav-item{display:flex;align-items:center;gap:12px;padding:10px 20px;color:#cbd5e1;text-decoration:none;font-size:14px}
-.nav-item:hover{background:var(--brand-3);color:#fff}
-.nav-item.active{background:var(--accent-bg);color:#fff;box-shadow:inset 3px 0 0 var(--accent)}
-.nav-group{padding-top:6px}
-.nav-group-label{padding:8px 20px 4px;color:#94a3b8;letter-spacing:.08em}
-.main{flex:1;margin-left:var(--sidebar-w);display:flex;flex-direction:column;min-width:0}
-.topbar{height:var(--topbar-h);display:flex;align-items:center;justify-content:space-between;padding:0 24px;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:5}
-.avatar{width:32px;height:32px;border-radius:50%;background:var(--accent);color:var(--accent-contrast);display:grid;place-items:center;font-weight:600;font-size:13px}
-.content{padding:24px;max-width:1200px;width:100%}
-.topbar-system{font-size:11px;color:var(--muted);line-height:1.2;margin-top:1px}
-@media (max-width:768px){.topbar-system{display:none}}
-.bottom-nav{display:none}
-@media (max-width:768px){
-  .sidebar{display:none}
-  .main{margin-left:0}
-  .content{padding:16px 14px 84px}
-  .bottom-nav{display:flex;position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--border);z-index:20}
-  .bn-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 0;color:var(--text-2);text-decoration:none;font-size:10px}
-  .bn-item.active{color:var(--accent)}
-  .bn-icon{font-size:18px}
-}
+/* Two layout utilities and one state border. Nothing themeable: every value
+   below is geometry or a token, and there is no colour literal in this file. */
 .grid{display:grid;gap:16px}
 .grid-3{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
 .provisional{border-left:3px solid var(--amber)}
 </style>
 </head>
 <body>
-<div class="app">
-  <aside class="sidebar">
-    <div class="sb-brand"><span class="sb-dot"></span>
-      <span>Malaysia SMEs ESG e-Reporting System
-        <span class="sb-brand-sub text-sm">Governance &amp; Recognition</span></span></div>
-    <nav>${nav}</nav>
+<a class="skip-link" href="#main-content">Skip to content</a>
+<div class="app-layout">
+  <aside class="app-sidebar">
+    <a class="sidebar-logo" href="/dashboard">
+      <span class="sidebar-brand-dot" aria-hidden="true">ESG</span>
+      <span class="sidebar-brand">Malaysia SMEs ESG e-Reporting System<em>Governance &amp; Recognition</em></span>
+    </a>
+    <nav class="sidebar-nav" aria-label="Sections">${nav}</nav>
+    <div class="sidebar-footer">
+      <a class="sidebar-user" href="/company">
+        <span class="sidebar-user-avatar" aria-hidden="true">${esc(initials)}</span>
+        <span class="sidebar-user-info">
+          <span class="sidebar-user-name">${esc(user?.name || user?.email || 'Your company')}</span>
+          <span class="sidebar-user-plan">${esc(user?.email || '')}</span>
+        </span>
+      </a>
+      <a class="sidebar-logout" href="/auth/logout">Sign out</a>
+    </div>
   </aside>
-  <div class="main">
-    <header class="topbar">
-      <div>
-        <strong>${esc(title)}</strong>
-        <div class="topbar-system">Malaysia SMEs ESG e-Reporting System</div>
-      </div>
-      <div style="display:flex;align-items:center;gap:12px">
-        <button class="btn btn-outline" id="themeBtn" type="button" aria-label="Toggle theme">◐</button>
-        <div class="avatar" title="${esc(user?.email || '')}">${esc(initials)}</div>
-        <a class="btn btn-outline" href="/auth/logout">Sign out</a>
-      </div>
-    </header>
-    <main class="content">${content}</main>
-  </div>
+  <header class="app-topbar">
+    <h1 class="topbar-title">${esc(title)}</h1>
+    <div class="topbar-right">
+      <button class="btn btn-outline btn-sm" id="themeBtn" type="button" aria-label="Switch between light and dark">◐</button>
+    </div>
+  </header>
+  <main class="app-main" id="main-content">${content}</main>
 </div>
-<nav class="bottom-nav">${bottomNav}</nav>
+<nav class="app-bottom-nav" aria-label="Sections"><div class="bottom-nav-inner">${bottomNav}</div></nav>
 <script>
 (function(){
   var KEY='modus-theme';
@@ -311,6 +307,27 @@ function layout(title, content, user, activePath = '') {
     document.documentElement.setAttribute('data-theme',next);
     try{localStorage.setItem(KEY,next);}catch(e){console.warn('theme preference not saved:',e&&e.message);}
   });
+})();
+(function(){
+  /* §50's .reveal RESTS VISIBLE and is hidden only under [data-reveal="on"],
+     which is set here AFTER confirming there is an IntersectionObserver to turn
+     it back on again. If this script never runs, never loads, or throws, the
+     content is simply visible — the opposite arrangement makes the page depend
+     on a script it cannot check and fails silently to exactly the users least
+     able to report it. ONE definition, in the shell, so no page carries a
+     second copy of it. */
+  if(!('IntersectionObserver' in window))return;
+  var nodes=document.querySelectorAll('.reveal');
+  if(!nodes.length)return;
+  document.documentElement.setAttribute('data-reveal','on');
+  var io=new IntersectionObserver(function(entries){
+    entries.forEach(function(e){
+      if(!e.isIntersecting)return;
+      e.target.classList.add('is-visible');
+      io.unobserve(e.target);
+    });
+  },{rootMargin:'0px 0px -40px 0px'});
+  nodes.forEach(function(n){io.observe(n);});
 })();
 </script>
 </body></html>`;

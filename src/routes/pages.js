@@ -8,109 +8,296 @@ const { scoreAssessment, loadActiveScheme } = require('../services/scoringEngine
 const { generateRecommendations } = require('../services/aiAdvisor');
 const { electricityToCo2e, fuelToCo2e } = require('../services/carbonEngine');
 const { mirrorStatus } = require('../services/verraService');
+const journey = require('../services/journeyEngine');
+const view = require('../utils/journeyView');
 
 const router = express.Router();
 
 const companyIdOf = (req) => req.user && req.user.company_id;
 const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
+const DAY_MS = 24 * 3600 * 1000;
 
-// ── Dashboard ──────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// THE DASHBOARD                                                      (Run 53)
+//
+// Built from docs/design/reference-dashboard.png, and from
+// docs/design/UI_REFERENCE_ANNOTATED.md, which OUTRANKS it. About a third of
+// the figures on that mock are things this system cannot honestly know; §1 of
+// the annotation names five that must never ship as drawn, and every one of
+// them is either absent here or rendered as a named empty state that says why.
+//
+// EVERY NUMBER TRACES TO A ROW. The score, the sub-scores and the band come
+// from esg_scores and esg_rating_bands. The journey, the missions and the XP
+// come from journeyEngine, which derives them from committed facts and stores
+// nothing. There is no counter anywhere on this page.
+//
+// TWO ORDERS, ONE PAGE. The mock draws a mature account, and its reading order
+// — stat cards, score, journey, panels — is right for one: the score answers
+// "where am I" and the rail answers "what next". A company that registered ten
+// minutes ago has no score, and rendering that layout for them produces a grid
+// of zeroes and an empty ring, which reads as BROKEN rather than as NEW. So
+// when there is no score the rail leads instead, because it is the one
+// component that is fully populated on day one — the stages exist before the
+// company does anything.
+//
+// WHAT WAS DROPPED FROM THE MOCK, deliberately:
+//   the five stars under the score   a second rating scale competing with the
+//                                    band, mapping to nothing
+//   the peer percentile              annotation §1.1 — no cohort exists, and it
+//                                    is a cross-tenant surface. Rendered as a
+//                                    named uninstrumented state, not hidden.
+//   AI confidence %                  §1.2 — there is deliberately no confidence
+//                                    column; quote_verified is the real fact
+//   4 Pillars contribution           §1.3 — no published methodology
+//   certification / consultation     §1.4, §1.5
+//   the 0% / 25% roadmap bars        nothing tracks progress against a
+//                                    recommendation; 0% would be a claim
+//   the topbar search, bell and mail three dead controls in the most prominent
+//                                    row of the page (§4.3c)
+//   the radar chart                  200 KB of Chart.js from a CDN for what the
+//                                    three .score-ring components already say
+// ═══════════════════════════════════════════════════════════════════════════
+
+const PILLAR_NAME = Object.freeze({ E: 'Environmental', S: 'Social', G: 'Governance' });
+
+/** A ring with its number in the DOM as TEXT. §3.4 rule 4: if a figure ever
+ *  animates, the final value is present before any script runs — a number that
+ *  is only correct once JavaScript has finished is a wrong number to a screen
+ *  reader, to a no-JS user, and to anyone whose script was dropped. */
+function scoreRing(value, label, aria) {
+  const n = Number(value);
+  const safe = Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 0;
+  return `<div class="score-ring" style="--score:${safe}" role="img" aria-label="${esc(aria)}">
+    <div class="score-ring-value">${Number.isFinite(n) ? esc(value) : '—'}</div>
+    <div class="score-ring-label">${esc(label)}</div>
+  </div>`;
+}
+
+function statCard(label, value, sub, glow) {
+  return `<div class="stat-card${glow ? ' stat-card--glow' : ''}">
+    <div class="stat-label">${esc(label)}</div>
+    <div class="stat-value">${esc(value)}</div>
+    <div class="stat-sub">${sub}</div>
+  </div>`;
+}
+
 router.get('/dashboard', async (req, res, next) => {
   try {
     const cid = companyIdOf(req);
-    const { rows: assess } = await query(
-      `SELECT id, reporting_year, status, framework_code, framework_version
-         FROM esg_assessments WHERE company_id = $1 AND status <> 'archived'
-        ORDER BY reporting_year DESC LIMIT 1`, [cid]);
+    const [{ stages, missions, levels }, facts] = await Promise.all([
+      journey.loadDefinitions(),
+      journey.gatherFacts(cid),
+    ]);
 
-    if (!assess[0]) {
-      return res.send(layout('Dashboard', `
-        ${emptyState('instrumented_but_empty', {
-          title: 'No assessment yet',
-          body: 'Your ESG score is calculated from an assessment. Start one to see it.' })}
-        <div style="text-align:center"><a class="btn btn-primary" href="/assessment">Start an assessment</a></div>`,
-        req.user, '/dashboard'));
+    // The journey is DEFINED in seed.sql. No rows means the seed did not run,
+    // which is a deployment fault and not a company that has done nothing —
+    // and those two must never render the same way.
+    const journeyReady = stages.length > 0 && missions.length > 0 && levels.length > 0;
+    const j = journeyReady ? journey.computeJourney(facts, stages) : null;
+    const m = journeyReady ? journey.computeMissions(facts, missions) : null;
+    const xp = journeyReady ? journey.computeXp(facts, missions, levels) : null;
+    // The clock lives here, not in the engine: computeXp stays pure, and the
+    // week filter applies to each award's own source-row timestamp.
+    const weekXp = xp ? journey.xpSince(xp.awards, new Date(Date.now() - 7 * DAY_MS).toISOString()) : 0;
+
+    const a = facts.assessment;
+    let by = {};
+    let bandLabel = null;
+    let recs = [];
+    if (a) {
+      const [{ rows: scores }, { rows: bands }, { rows: recRows }] = await Promise.all([
+        query(
+          `SELECT s.scope, s.score_0_100, s.band_code, s.indicators_total,
+                  s.indicators_answered, s.indicators_na, s.weighting_version,
+                  s.framework_version, s.engine_version, s.computed_at
+             FROM esg_scores s
+             JOIN esg_assessments asm ON asm.id = s.assessment_id
+            WHERE asm.company_id = $1 AND s.assessment_id = $2`, [cid, a.id]),
+        // THE BAND LABEL COMES FROM esg_rating_bands, never from copy in this
+        // file. 78 is 'AA' and the seeded label is 'Advanced'; "Good
+        // Performance", which the mock prints, is not a band this system has.
+        query(
+          `SELECT b.band_code, b.band_label
+             FROM esg_rating_bands b
+             JOIN esg_assessments asm ON asm.weighting_scheme_id = b.scheme_id
+            WHERE asm.id = $1 AND asm.company_id = $2
+            ORDER BY b.sort_order`, [a.id, cid]),
+        query(
+          `SELECT r.pillar, r.points_missed, r.priority, r.narrative_en, r.source
+             FROM esg_recommendations r
+             JOIN esg_assessments asm ON asm.id = r.assessment_id
+            WHERE asm.company_id = $1 AND r.assessment_id = $2 AND r.source <> 'engine'
+            ORDER BY r.points_missed DESC LIMIT 6`, [cid, a.id]),
+      ]);
+      by = Object.fromEntries(scores.map((s) => [s.scope, s]));
+      recs = recRows;
+      const overallBand = by.OVERALL && by.OVERALL.band_code;
+      const band = bands.find((b) => b.band_code === overallBand);
+      bandLabel = band ? band.band_label : null;
     }
+    const overall = by.OVERALL || null;
+    const answers = facts.predicates.assessment_answered;
 
-    const a = assess[0];
-    const { rows: scores } = await query(
-      `SELECT scope, score_0_100, band_code, points_earned, points_available,
-              indicators_total, indicators_answered, indicators_na,
-              weighting_version, framework_version, engine_version
-         FROM esg_scores WHERE assessment_id = $1`, [a.id]);
-    const by = Object.fromEntries(scores.map((s) => [s.scope, s]));
-    const overall = by.OVERALL;
+    /* ── the four stat cards ────────────────────────────────────────────── */
+    const reachable = j ? j.total_stages - j.counts.blocked : 0;
+    const journeyPct = reachable > 0 ? Math.round((j.counts.completed / reachable) * 100) : 0;
+    const active = j ? j.stages.find((s) => s.stage_code === j.active_stage_code) : null;
+    const activeMission = (m && active)
+      ? m.missions.find((x) => x.stage_code === active.stage_code) : null;
 
-    if (!overall) {
-      return res.send(layout('Dashboard',
-        emptyState('instrumented_but_empty', {
-          title: 'Assessment started, not scored yet',
-          body: 'Answer the questionnaire and submit it — the score is computed from your answers, not estimated.' })
-        + `<div style="text-align:center"><a class="btn btn-primary" href="/assessment/${esc(a.id)}">Continue</a></div>`,
-        req.user, '/dashboard'));
-    }
+    const statCards = journeyReady ? `<div class="stat-grid reveal">
+      ${statCard('Journey progress', `${journeyPct}%`,
+    `${esc(j.counts.completed)} of ${esc(reachable)} stages you can reach${
+      j.counts.blocked ? ` · ${esc(j.counts.blocked)} blocked` : ''}`)}
+      ${statCard('Answers completed',
+    a ? `${esc(answers.done)} / ${esc(answers.total)}` : '—',
+    a ? esc(frameworkLabel(a.framework_code, a.framework_version))
+      : 'No assessment started yet, so there is no denominator to count against')}
+      ${statCard('XP earned', esc(xp.total),
+    `${weekXp > 0 ? `${esc(weekXp)} in the last 7 days · ` : ''}Level ${esc(xp.level)} · ${esc(xp.label)}`)}
+      ${statCard('Next milestone', active ? esc(active.label_en) : 'Nothing waiting',
+    active
+      ? (activeMission ? `${esc(view.stateWords(activeMission))} · ${esc(activeMission.xp_award)} XP` : 'No mission on this stage')
+      : 'Every stage you can reach is done',
+    Boolean(active))}
+    </div>` : emptyState('uninstrumented', {
+      title: 'The journey has not been set up on this deployment',
+      body: 'No stage, mission or level is defined, so there is nothing to measure your position '
+          + 'against. That is a configuration gap, not an empty account.' });
 
-    const cards = ['E', 'S', 'G'].map((p) => {
+    /* ── the score block ────────────────────────────────────────────────── */
+    const pillarRings = ['E', 'S', 'G'].map((p) => {
       const s = by[p] || {};
-      const label = { E: 'Environmental', S: 'Social', G: 'Governance' }[p];
-      const unanswered = s.indicators_answered === 0;
+      const unanswered = !s.indicators_answered;
       return `<div class="stat-card">
-        <div class="stat-label">${label}</div>
-        <div class="stat-value">${unanswered ? '—' : esc(s.score_0_100)}</div>
-        <div class="stat-sub text-muted">${esc(s.indicators_answered)} of ${esc(s.indicators_total)} answered${
-          s.indicators_na > 0 ? ` · ${esc(s.indicators_na)} N/A` : ''}</div>
+        <div class="stat-label">${esc(PILLAR_NAME[p])}</div>
+        ${scoreRing(unanswered ? null : s.score_0_100, 'of 100',
+    `${PILLAR_NAME[p]} score ${unanswered ? 'not yet available' : `${s.score_0_100} out of 100`}`)}
+        <div class="stat-sub">${esc(s.indicators_answered || 0)} of ${esc(s.indicators_total || 0)} answered${
+  s.indicators_na > 0 ? ` · ${esc(s.indicators_na)} N/A` : ''}</div>
       </div>`;
     }).join('');
 
-    const { rows: recs } = await query(
-      `SELECT pillar, points_missed, priority, narrative_en, source
-         FROM esg_recommendations WHERE assessment_id = $1 AND source <> 'engine'
-        ORDER BY points_missed DESC LIMIT 6`, [a.id]);
-
-    const recHtml = recs.length ? recs.map((r) => `
-      <div class="ai-insight">
-        <span class="badge badge-${r.priority === 'high' ? 'red' : r.priority === 'medium' ? 'amber' : 'gray'}">${esc(r.priority)}</span>
-        <p>${esc(r.narrative_en)}</p>
-        <small class="text-muted">${esc(r.pillar)} · ${esc(r.points_missed)} points available${
-          r.source === 'fallback_template' ? ' · written offline (AI unavailable)' : ''}</small>
-      </div>`).join('')
-      : emptyState('instrumented_but_empty', { title: 'No recommendations generated yet',
-          body: 'Submit the assessment to generate them.' });
-
-    res.send(layout('Dashboard', `
-      <div class="card">
-        <div style="display:flex;align-items:baseline;gap:16px;flex-wrap:wrap">
-          <div><div class="text-muted">Overall ESG score</div>
-            <div style="font-size:48px;font-weight:700;line-height:1">${esc(overall.score_0_100)}</div></div>
-          <div><span class="badge badge-accent" style="font-size:16px">${esc(overall.band_code || 'Not banded')}</span></div>
-        </div>
-        <p class="text-muted" style="margin-top:12px">
-          ${esc(frameworkLabel(a.framework_code, a.framework_version))} ·
-          weighting v${esc(overall.weighting_version)} ·
-          engine v${esc(overall.engine_version)} ·
-          reporting year ${esc(a.reporting_year)}
-        </p>
-        <p class="text-muted">Every figure here is computed from your answers by the scoring engine. No part of it is generated by AI.</p>
+    const scoreBlock = overall ? `<div class="card reveal">
+      <div class="card-header">
+        <h3 class="card-title">ESG score</h3>
+        <span class="badge badge-accent">${esc(overall.band_code || 'Not banded')}${
+  bandLabel ? ` · ${esc(bandLabel)}` : ''}</span>
       </div>
-      <div class="grid grid-3" style="margin:16px 0">${cards}</div>
-      <div class="card"><h3>ESG profile</h3><canvas id="radar" height="240"></canvas></div>
-      <h3 style="margin:24px 0 12px">🤖 Recommendations</h3>
-      ${recHtml}
-      <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-      <script>
-      (function(){
-        var css = getComputedStyle(document.documentElement);
-        var accent = css.getPropertyValue('--accent').trim();
-        new Chart(document.getElementById('radar'), {
-          type: 'radar',
-          data: { labels: ['Environmental','Social','Governance'],
-                  datasets: [{ label: 'Score', data: ${JSON.stringify(['E','S','G'].map((p) => Number((by[p] || {}).score_0_100) || 0))},
-                    borderColor: accent, backgroundColor: css.getPropertyValue('--accent-bg').trim(), pointBackgroundColor: accent }] },
-          options: { scales: { r: { min: 0, max: 100, ticks: { stepSize: 25 } } },
-                     plugins: { legend: { display: false } }, responsive: true }
-        });
-      })();
-      </script>`, req.user, '/dashboard'));
+      <div class="card-body">
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="stat-label">Overall</div>
+            ${scoreRing(overall.score_0_100, 'of 100', `Overall ESG score ${overall.score_0_100} out of 100`)}
+            <div class="stat-sub">${esc(overall.indicators_answered)} of ${esc(overall.indicators_total)} answered</div>
+          </div>
+          ${pillarRings}
+        </div>
+        <p class="text-sm">${esc(frameworkLabel(a.framework_code, a.framework_version))} ·
+           weighting v${esc(overall.weighting_version)} · engine v${esc(overall.engine_version)} ·
+           reporting year ${esc(a.reporting_year)}. Every figure here is arithmetic over your own
+           answers. No part of it is generated by AI, and the band above is the one seeded in
+           esg_rating_bands — this page does not name it itself.</p>
+        ${emptyState('uninstrumented', {
+    title: 'No industry comparison',
+    body: 'Nothing writes a peer cohort, so there is no industry to compare you against. This is '
+        + 'not switched on, rather than empty — and a percentile built from other companies\' '
+        + 'scores needs opt-in and a minimum cohort size before it could ever be shown.' })}
+      </div>
+    </div>` : `<div class="card reveal">
+      <div class="card-header"><h3 class="card-title">ESG score</h3></div>
+      <div class="card-body">${a
+    ? emptyState('instrumented_but_empty', {
+      title: 'Assessment started, not scored yet',
+      body: 'The score is computed from your answers when you submit the assessment. Nothing is '
+          + 'estimated in the meantime, so there is no provisional figure to show you.' })
+      + `<p style="text-align:center"><a class="btn btn-primary" href="/assessment/${esc(a.id)}">Continue the assessment</a></p>`
+    : emptyState('instrumented_but_empty', {
+      title: 'No assessment yet',
+      body: 'This is switched on and working — you have not started one. Your ESG score is '
+          + 'calculated from an assessment, so it begins there.' })
+      + '<p style="text-align:center"><a class="btn btn-primary" href="/assessment">Start an assessment</a></p>'}
+      </div>
+    </div>`;
+
+    /* ── the improvement roadmap ────────────────────────────────────────── */
+    const priorityBadge = (p) => `<span class="badge badge-${
+      p === 'high' ? 'red' : p === 'medium' ? 'amber' : 'gray'}">${esc(p || 'unrated')}</span>`;
+
+    const roadmap = `<div class="card reveal">
+      <div class="card-header"><h3 class="card-title">🤖 Improvement roadmap</h3>${
+  recs.length ? `<span class="badge badge-gray">${esc(recs.length)} shown</span>` : ''}</div>
+      <div class="card-body">${recs.length
+    ? `<div class="grid">${recs.map((r) => `<div class="mission-card">
+          <div class="mission-title">${esc(PILLAR_NAME[r.pillar] || r.pillar || 'General')} · ${esc(r.points_missed)} points available</div>
+          <div class="mission-meta">${priorityBadge(r.priority)}${
+  r.source === 'fallback_template' ? ' written offline — the model was unavailable' : ''}</div>
+          <p class="text-sm">${esc(r.narrative_en)}</p>
+        </div>`).join('')}</div>
+        <p class="text-sm">The points are computed by the scoring engine. The model writes the
+           sentence around them and never the number. There is deliberately no progress bar on a
+           recommendation — nothing in this system tracks whether you have acted on one, and a 0%
+           bar would be a claim that it does.</p>`
+    : (overall
+      ? emptyState('zero', {
+        title: 'No gaps worth listing',
+        body: 'The engine found nothing above the reporting threshold for this assessment. That '
+            + 'is a measured result, not a missing one.' })
+      : emptyState('instrumented_but_empty', {
+        title: 'Nothing to improve yet',
+        body: 'The roadmap is produced when the assessment is scored. It is switched on and '
+            + 'working — there is no scored assessment to build it from.' }))}
+      </div>
+    </div>`;
+
+    /* ── the journey rail ───────────────────────────────────────────────── */
+    const railBlock = journeyReady ? `<div class="card reveal">
+      <div class="card-header">
+        <h3 class="card-title">Your ESG journey</h3>
+        <a class="btn btn-outline btn-sm" href="/journey">Open the journey</a>
+      </div>
+      <div class="card-body">
+        ${view.rail(j.stages, { compact: true })}
+        <p class="text-sm">${esc(j.counts.completed)} of ${esc(j.total_stages)} stages complete.
+           A blocked stage is not waiting on you — it says what is missing and who has to publish it.</p>
+      </div>
+    </div>` : '';
+
+    /* ── what the mock shows and this page will not ─────────────────────── */
+    const notShown = `<div class="card">
+      <div class="card-header"><h3 class="card-title">On the design, not on this page</h3></div>
+      <div class="card-body">
+        <div class="table-wrap"><table>
+          <thead><tr><th>Element</th><th>Why it is not here</th></tr></thead>
+          <tbody>
+            <tr><td>Your impact on the four pillars</td>
+                <td>No published methodology maps company activity to a pillar. Claiming a
+                    contribution level would attribute a mapping to an organisation that has
+                    authored none.</td></tr>
+            <tr><td>AI confidence percentage</td>
+                <td>There is deliberately no confidence column. What exists is stronger: a verbatim
+                    quote checked against the document, or the proposal is discarded before you
+                    see it.</td></tr>
+            <tr><td>ESG certification</td>
+                <td>No certification scheme is published. This platform assesses; it does not
+                    certify, and it will not render a downloadable certificate.</td></tr>
+            <tr><td>Expert consultation</td>
+                <td>Not built. A button that opens nothing is worse than an absent feature, because
+                    you would believe the capability exists and stop looking.</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </div>`;
+
+    // THE ORDER IS THE DESIGN DECISION. With a score, the mock's order stands.
+    // Without one, the rail leads — it is the only block that is fully
+    // populated on day one, and it answers both "where am I" and "what next"
+    // when nothing else can.
+    const body = overall
+      ? `${statCards}${scoreBlock}${railBlock}${roadmap}${notShown}`
+      : `${railBlock}${statCards}${scoreBlock}${roadmap}${notShown}`;
+
+    res.send(layout('Dashboard', body, req.user, '/dashboard'));
   } catch (err) { next(err); }
 });
 
