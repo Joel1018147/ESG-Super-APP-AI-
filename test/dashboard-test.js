@@ -119,6 +119,32 @@ const REQ = {
    empty one, which is the whole failure this harness exists to close. */
 const ASSESSMENT_ID = '11111111-1111-1111-1111-111111111111';
 
+/* Named rather than inlined into FIXTURES, because Run 56's rounding test needs
+   the SAME four rows with fractional scores on them. Reaching into FIXTURES by
+   regex source to find them would make the fixture list order-sensitive in a way
+   nothing declares. */
+const SCORE_ROWS = [
+  { id: 'sc-1', earned_at: '2026-08-14T00:00:00.000Z', computed_at: '2026-08-14T00:00:00.000Z',
+    scope: 'OVERALL', score_0_100: 78, band_code: 'AA', points_earned: 40, points_available: 51,
+    indicators_total: 40, indicators_answered: 18, indicators_na: 0,
+    weighting_version: '1.0', framework_version: '0.9-draft', engine_version: '1.0.0' },
+  { scope: 'E', score_0_100: 82, band_code: null, points_earned: 1, points_available: 1,
+    indicators_total: 14, indicators_answered: 8, indicators_na: 0,
+    weighting_version: '1.0', framework_version: '0.9-draft', engine_version: '1.0.0' },
+  { scope: 'S', score_0_100: 74, band_code: null, points_earned: 1, points_available: 1,
+    indicators_total: 13, indicators_answered: 6, indicators_na: 1,
+    weighting_version: '1.0', framework_version: '0.9-draft', engine_version: '1.0.0' },
+  { scope: 'G', score_0_100: 77, band_code: null, points_earned: 1, points_available: 1,
+    indicators_total: 13, indicators_answered: 4, indicators_na: 0,
+    weighting_version: '1.0', framework_version: '0.9-draft', engine_version: '1.0.0' },
+];
+
+/* What a real numeric(6,2) looks like. The staging row that prompted §3.-0 read
+   34.47, and every one of these is chosen so rounding is VISIBLE and so the
+   three rounding directions are exercised: down, up, and the .5 boundary. */
+const FRACTIONAL_SCORES = Object.freeze({ OVERALL: 34.47, E: 41.62, S: 28.5, G: 33.4 });
+const FRACTIONAL_SHOWN = Object.freeze({ 34.47: '34', 41.62: '42', 28.5: '29', 33.4: '33' });
+
 const FIXTURES = [
   // The COUNT queries come first: they name the same tables as the row queries
   // below and a first-match scan would hand them a row list with no count on
@@ -142,34 +168,24 @@ const FIXTURES = [
     id: ASSESSMENT_ID, framework_id: 'fw-1', framework_code: 'MODUS_SEDG_ALIGNED',
     framework_version: '0.9-draft', reporting_year: 2025, status: 'scored', overall: 78,
   }]],
-  [/FROM esg_scores\b/, [
-    { id: 'sc-1', earned_at: '2026-08-14T00:00:00.000Z', computed_at: '2026-08-14T00:00:00.000Z',
-      scope: 'OVERALL', score_0_100: 78, band_code: 'AA', points_earned: 40, points_available: 51,
-      indicators_total: 40, indicators_answered: 18, indicators_na: 0,
-      weighting_version: '1.0', framework_version: '0.9-draft', engine_version: '1.0.0' },
-    { scope: 'E', score_0_100: 82, band_code: null, points_earned: 1, points_available: 1,
-      indicators_total: 14, indicators_answered: 8, indicators_na: 0,
-      weighting_version: '1.0', framework_version: '0.9-draft', engine_version: '1.0.0' },
-    { scope: 'S', score_0_100: 74, band_code: null, points_earned: 1, points_available: 1,
-      indicators_total: 13, indicators_answered: 6, indicators_na: 1,
-      weighting_version: '1.0', framework_version: '0.9-draft', engine_version: '1.0.0' },
-    { scope: 'G', score_0_100: 77, band_code: null, points_earned: 1, points_available: 1,
-      indicators_total: 13, indicators_answered: 4, indicators_na: 0,
-      weighting_version: '1.0', framework_version: '0.9-draft', engine_version: '1.0.0' },
-  ]],
+  [/FROM esg_scores\b/, SCORE_ROWS],
   [/FROM esg_recommendations\b/, [
     { id: 'rec-1', pillar: 'E', points_missed: 12, priority: 'high', narrative_en: 'Track electricity monthly.', source: 'ai_phrasing', code: 'E-01', question_en: 'Does the company track its monthly electricity consumption?' },
     { id: 'rec-2', pillar: 'S', points_missed: 6, priority: 'medium', narrative_en: 'Record training hours.', source: 'ai_phrasing', code: 'S-06', question_en: 'Average training hours per employee' },
     { id: 'rec-3', pillar: 'G', points_missed: 2, priority: 'low', narrative_en: 'Publish a supplier code.', source: 'fallback_template', code: 'G-10', question_en: 'Supplier code of conduct?' },
   ]],
-  // The seeded ladder, verbatim from seed.sql §1. 78 lands in AA / Advanced —
-  // and "Good Performance", which the reference image prints under the ring,
-  // is not a band this system has.
+  // The seeded ladder, verbatim from seed.sql §1 — ALL SEVEN rows, because Run
+  // 56 renders the whole ladder and a four-row fixture would have photographed
+  // the fixture. 78 lands in AA / Advanced, and "Good Performance", which the
+  // reference image prints under the ring, is not a band this system has.
   [/FROM esg_rating_bands\b/, [
     { band_code: 'AAA', band_label: 'Leading', min_score: 85, max_score: 100, sort_order: 1 },
     { band_code: 'AA', band_label: 'Advanced', min_score: 75, max_score: 84.99, sort_order: 2 },
     { band_code: 'A', band_label: 'Established', min_score: 65, max_score: 74.99, sort_order: 3 },
     { band_code: 'BBB', band_label: 'Progressing', min_score: 55, max_score: 64.99, sort_order: 4 },
+    { band_code: 'BB', band_label: 'Developing', min_score: 45, max_score: 54.99, sort_order: 5 },
+    { band_code: 'B', band_label: 'Emerging', min_score: 30, max_score: 44.99, sort_order: 6 },
+    { band_code: 'CCC', band_label: 'Starting Out', min_score: 0, max_score: 29.99, sort_order: 7 },
   ]],
   [/FROM esg_frameworks\b/, [
     { id: 'fw-1', code: 'MODUS_SEDG_ALIGNED', version: '0.9-draft', n: 40 },
@@ -299,6 +315,11 @@ const JOURNEY_FIXTURES = {
  *                   number the stub decided.
  *   hostile         a string injected into every label the page renders, for
  *                   the escaping test.
+ *   fractionalScores  the four esg_scores rows come back with two decimal
+ *                   places, which is what numeric(6,2) actually holds. The
+ *                   OVERALL row also loses its band code, because 34 is not
+ *                   AA on the seeded ladder and a fixture that pairs them
+ *                   would be asserting a wrong band in order to test rounding.
  */
 function populatedDb(opts = {}) {
   const seen = [];
@@ -321,6 +342,14 @@ function populatedDb(opts = {}) {
         const sql = String(text).replace(/\s+/g, ' ').trim();
         seen.push(sql);
         if (/count\(\*\)::int AS n FROM esg_indicators/.test(sql)) return { rows: [{ n }] };
+        if (opts.fractionalScores && /FROM esg_scores\b/.test(sql)) {
+          const rows = SCORE_ROWS.map((r) => ({
+            ...r,
+            score_0_100: FRACTIONAL_SCORES[r.scope],
+            band_code: r.scope === 'OVERALL' ? null : r.band_code,
+          }));
+          return { rows: taint(rows), rowCount: rows.length };
+        }
         if (/FROM esg_journey_stages\b/.test(sql)) return { rows: taint(JOURNEY_FIXTURES.stages) };
         if (/FROM esg_missions\b/.test(sql)) return { rows: taint(JOURNEY_FIXTURES.missions) };
         if (/FROM esg_xp_levels\b/.test(sql)) return { rows: taint(JOURNEY_FIXTURES.levels) };
@@ -786,7 +815,13 @@ let RENDERED = null;
     const to = src.indexOf("router.get('/company'");
     assert.ok(from > 0 && to > from, 'the dashboard handler is gone — the anchor moved');
     const handler = src.slice(from, to).replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
-    for (const band of ['Advanced', 'Leading', 'Established', 'Progressing', 'Good Performance']) {
+    // DERIVED FROM THE FIXTURE, not a list written once (#24). Run 56 renders
+    // the whole ladder, so three more labels became reachable — and a hand-kept
+    // list of five would have gone green about all three of them.
+    const seededLabels = FIXTURES.find(([re]) => re.test('FROM esg_rating_bands'))[1]
+      .map((b) => b.band_label);
+    assert.ok(seededLabels.length >= 7, `only ${seededLabels.length} band labels found in the fixture`);
+    for (const band of [...seededLabels, 'Good Performance']) {
       assert.ok(!handler.includes(band), `the dashboard handler names the band "${band}" itself`);
     }
     assert.ok(!/Good Performance/.test(c),
@@ -818,6 +853,109 @@ let RENDERED = null;
       'the dashboard content region carries a script — every figure on it is server-rendered and '
       + 'nothing on this page needs one');
     assert.ok(!/cdnjs|unpkg|jsdelivr/i.test(c), 'the dashboard loads a script from a CDN');
+  });
+
+  await atest('THE SCORE IS SHOWN AS A WHOLE NUMBER — and the arc agrees with the numeral', async () => {
+    /* Run 56, §3.-0. `score_0_100` is numeric(6,2) and stays that way; staging
+       reads 34.47 and the hero ring was printing all four characters, which is
+       a spreadsheet cell rather than a headline figure.
+
+       THE NORMAL FIXTURE CANNOT TEST THIS. Its four scores are 78/82/74/77 and
+       Math.round() is a no-op on every one, so the guard would have shipped
+       green against a fixture that could not tell rounded from unrounded — a
+       test that cannot fail. Hence a second fixture whose scores have decimals,
+       covering rounding down, up, and the .5 boundary. */
+    const c = contentOf(await renderRoute('routes/pages', '/dashboard',
+      populatedDb({ fractionalScores: true }).exports));
+    const rendered = [...c.matchAll(/class="score-ring-value"[^>]*>([^<]*)</g)].map((x) => x[1].trim());
+    assert.strictEqual(rendered.length, 4,
+      `${rendered.length} ring values rendered, not the overall ring plus three pillars — the `
+      + 'reader broke, so this check would pass by finding nothing');
+    assert.deepStrictEqual(rendered.filter((v) => v.includes('.')), [],
+      `a score renders with decimal places: ${rendered.join(', ')}`);
+    for (const [raw, shown] of Object.entries(FRACTIONAL_SHOWN)) {
+      assert.ok(rendered.includes(shown),
+        `${raw} is not displayed as ${shown}. Rendered: ${rendered.join(', ')}`);
+      assert.ok(!c.includes(raw),
+        `the unrounded ${raw} is still somewhere on the page — the aria-label and the numeral must `
+        + 'agree, or a screen reader hears a figure nobody else can see');
+    }
+    // ROUNDED ONCE. --score drives §50's conic-gradient, so an unrounded value
+    // there draws a 34.47% arc underneath the number 34 — two statements of one
+    // fact that disagree, which is the whole reason journeyView exists.
+    assert.ok(!/--score:\s*\d+\.\d/.test(c),
+      'the ring arc is set from an unrounded score while the numeral is rounded');
+  });
+
+  await atest('THE RATING LADDER IS THE SEEDED ONE, and exactly one rung says "You are here"', async () => {
+    /* Run 56. The band query already returned the whole ladder and the page was
+       using one row of it, so the ladder costs no query and invents nothing —
+       which is the only reason it is allowed to fill the space that deleting the
+       methodology paragraphs left.
+
+       TWO WAYS THIS COULD GO WRONG SILENTLY, and both are asserted: a ladder
+       built from a hardcoded list rather than from the rows (caught by the band
+       test above, which now derives its banned labels from the fixture), and a
+       "you are here" mark that lands on the wrong rung or on none. A ladder with
+       no current rung renders as seven identical rows and says nothing. */
+    const c = contentOf(FULL_HTML);
+    const items = [...c.matchAll(/<div class="checklist-item ([^"]*)">([\s\S]*?)<\/div>/g)];
+    const seeded = FIXTURES.find(([re]) => re.test('FROM esg_rating_bands'))[1];
+    assert.strictEqual(items.length, seeded.length,
+      `the ladder renders ${items.length} rungs for ${seeded.length} seeded bands`);
+    for (const b of seeded) {
+      assert.ok(c.includes(`${b.band_code} · ${b.band_label}`),
+        `the seeded band ${b.band_code} is missing from the ladder`);
+    }
+    const here = items.filter(([, cls]) => cls.includes('is-active'));
+    assert.strictEqual(here.length, 1,
+      `${here.length} rungs are marked as the company's current band — exactly one is`);
+    assert.ok(here[0][2].includes('AA · Advanced') && here[0][2].includes('You are here'),
+      `the current rung is not the scored band AA: ${here[0][2].replace(/<[^>]*>/g, ' ').trim()}`);
+    // The three states are stated in WORDS, not by mark alone (§6).
+    for (const word of ['You are here', 'Cleared', 'Not reached']) {
+      assert.ok(c.includes(word), `the ladder never renders the state "${word}"`);
+    }
+    // And it is absent, not zeroed, when there is no score to place on it.
+    assert.ok(!/checklist-item/.test(contentOf(EMPTY_HTML)),
+      'the ladder renders for a company with no score, so every rung reads "not reached" — which '
+      + 'is a claim about a company that has not been assessed');
+  });
+
+  await atest('THE SCORE PANEL STATES THE SCORE — at most one sentence of prose under the number', async () => {
+    /* Run 56, §3.-1. This panel used to end with two paragraphs: the weighting
+       and engine versions plus "every figure here is arithmetic over your own
+       answers, no part of it is generated by AI", and a note about the absent
+       peer cohort. Both true, both engineering justification, both sitting
+       directly under the most important number in the product — and between
+       them the single biggest reason the page read as unfinished.
+
+       A RULE, NOT A LIST OF BANNED PHRASES (checklist #24). Counting sentences
+       catches the paragraph nobody has written yet; a regex for "arithmetic"
+       catches only the two that were already deleted. Scoped to Row B's WIDE
+       column on the scored render, and the slice asserts it found the hero ring
+       before it counts anything — a scope that has silently moved reports zero
+       sentences and passes. */
+    const c = contentOf(FULL_HTML);
+    const from = c.indexOf('col-7');
+    const to = c.indexOf('col-5');
+    assert.ok(from > 0 && to > from, 'Row B is gone from the scored dashboard — this check has no scope');
+    const wide = c.slice(from, to);
+    assert.ok(wide.includes('score-ring--hero'),
+      'the wide column of Row B does not hold the hero ring, so this slice is measuring the wrong panel');
+    const prose = [...wide.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/g)]
+      .map((m) => m[1].replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim())
+      .filter(Boolean);
+    const sentences = prose.join(' ').split(/[.!?](?=\s|$)/).map((s) => s.trim()).filter(Boolean);
+    assert.ok(sentences.length <= 1,
+      `the score panel carries ${sentences.length} sentences of prose under the number:\n      `
+      + `${sentences.join('\n      ')}\n      At most one, and it says what to do next — never how `
+      + 'the platform computes. Provenance goes in the header metadata; methodology is /governance.');
+    // The inverse, so this cannot pass by deleting the panel: the absence it
+    // used to apologise for is still NAMED, as a real empty state, further down.
+    assert.ok(/class="empty-state"[\s\S]{0,400}No industry comparison/.test(c),
+      'the peer-comparison absence left the score panel and is not a named empty state anywhere '
+      + 'else — a hidden card teaches nothing, which is annotation §1.1');
   });
 
   await atest('NO DEAD CONTROLS — no search, no notification bell, no mail icon', async () => {
@@ -963,6 +1101,58 @@ let RENDERED = null;
       + 'class as a literal #16A34A');
   });
 
+  test('THE CONTENT COLUMN IS CAPPED AND CENTRED, and the cap is waiting on the master', () => {
+    /* §3.0. A dashboard that stretches to 2560px is not a dashboard: a .col-4
+       panel becomes 700px wide and the twelve-column grid stops being a
+       composition. The MASTER HAS NO CONTAINER — no .container, no max-width
+       utility, no width token beyond --sidebar-w and --topbar-h — so the cap
+       lives in layout.js's existing local geometry block and reads a token that
+       does not exist yet.
+
+       BOTH HALVES ARE ASSERTED, and the first is a PIN rather than a guard: it
+       goes red the day the master declares --content-max or a container, which
+       is the signal to move the rule upstream and delete the local half. That
+       is the same arrangement as the contrast pins above — an entry here means
+       "still owed", never "stop looking". */
+    assert.ok(!/--content-max\s*:|^\.container\s*\{/m.test(CSS),
+      'the master now declares --content-max or a .container — move the cap out of layout.js into '
+      + 'the master (a thirteen-path fan-out) and delete the local half of this test');
+    const html = require('../src/utils/layout').layout('Dashboard',
+      '<div class="card"></div>', { name: 'Joel', email: 'j@x.test' }, '/dashboard');
+    const inline = [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((m) => m[1]).join('\n');
+    const rule = /\.app-main\s*>\s*\*\s*\{([^}]*)\}/.exec(inline);
+    assert.ok(rule, 'the content column is uncapped — the page stretches to the width of the monitor');
+    assert.ok(/max-width:\s*var\(--content-max,\s*\d+px\)/.test(rule[1]),
+      `the cap does not read --content-max with a fallback, so a master token would not win: ${rule[1]}`);
+    assert.ok(/margin-inline:\s*auto/.test(rule[1]),
+      'the content column is capped but not centred, so a wide monitor pins the page to the left');
+  });
+
+  test('THE RING THICKNESS IS THE MASTER\'S, and the hero arc is recorded as too thin', () => {
+    /* §3.-0's second half, reported rather than fixed. --ring-thickness is ONE
+       value used at three ring sizes, so the arc is 12.5% of the 64px inline
+       ring and 5.3% of the 152px hero — the hero, the most important figure in
+       the product, reads THINNEST of the three. The reference image's hero arc
+       is roughly 9% of its diameter.
+
+       Fixing it means a per-size thickness in the master and a thirteen-path
+       fan-out, which §3.5 makes its own run, so this repo does not override the
+       token locally — it pins the measurement so the fix turns this red. */
+    const t = /--ring-thickness:\s*(\d+)px/.exec(CSS);
+    assert.ok(t, '--ring-thickness is gone from the master');
+    assert.strictEqual(Number(t[1]), 8,
+      `--ring-thickness moved to ${t[1]}px — re-measure the three ring sizes and update this record`);
+    const sizes = {};
+    for (const m of CSS.matchAll(/\.score-ring--(hero|inline)\s*\{\s*width:\s*(\d+)px/g)) {
+      if (!(m[1] in sizes)) sizes[m[1]] = Number(m[2]);   // first = the desktop rule
+    }
+    assert.deepStrictEqual(sizes, { hero: 152, inline: 64 },
+      `the ring sizes moved to ${JSON.stringify(sizes)} — re-measure and update this record`);
+    assert.ok(!/\.score-ring--(hero|inline)[^{]*\{[^}]*--ring-thickness/.test(CSS),
+      'a per-size ring thickness landed in the master — the hero arc is fixed, so delete this record '
+      + 'and stop reporting it as owed');
+  });
+
   /* CONTRAST, COMPUTED. §6 says ≥ 4.5:1 in both themes and until this run
      nothing checked it in either. The survey below is the answer, and most of
      it is bad news that belongs to the MASTER rather than to this repo:
@@ -1014,6 +1204,12 @@ let RENDERED = null;
     ['var(--accent-text)', ['var(--accent-bg)', 'var(--surface)', 'var(--bg)'], '.tag-accent'],
     ['var(--amber-text)', ['var(--amber-bg)', 'var(--surface)', 'var(--bg)'], '.tag-amber'],
     ['var(--text-2)', ['var(--surface)', 'var(--bg)'], '.tag resting'],
+    // ── the §52 checklist, which Run 56's rating ladder is the first consumer of ──
+    ['var(--text)', ['var(--surface)', 'var(--bg)'], '.checklist-item'],
+    ['var(--text-2)', ['var(--surface)', 'var(--bg)'], '.checklist-item.is-pending'],
+    ['var(--muted)', ['var(--surface)', 'var(--bg)'], '.checklist-status, .checklist-mark resting'],
+    ['var(--accent-contrast)', ['var(--accent)'], '.checklist-item.is-done .checklist-mark'],
+    ['var(--muted)', ['var(--accent-bg)', 'var(--surface)'], '.checklist-item.is-active .checklist-mark'],
   ];
 
   test('CONTRAST ≥ 4.5:1 IN BOTH THEMES for every pair this page chooses', () => {

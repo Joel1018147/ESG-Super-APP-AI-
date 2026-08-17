@@ -84,6 +84,21 @@ const PANEL_STAGE = Object.freeze({
 
 const pad2 = (n) => String(n).padStart(2, '0');
 
+/** A SCORE IS SHOWN AS A WHOLE NUMBER (Run 56). `esg_scores.score_0_100` stays
+ *  `numeric(6,2)` and the engine keeps computing it to two places — this is a
+ *  RENDERING choice and nothing about what is stored or recomputed changes.
+ *  `34.47` under a hero ring reads as a spreadsheet cell; `34` reads as a figure
+ *  a company puts in front of a bank.
+ *
+ *  Rounded ONCE, here, and the same value drives both the numeral and the arc,
+ *  so a ring can never be drawn at 34.47% underneath the number 34. Returns
+ *  null rather than 0 for an absent score, because scoreRing() renders null as
+ *  "—" and 0 as a measured zero, and those are different facts. */
+function wholeScore(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.round(n) : null;
+}
+
 /** Bytes as a human size. Not a fallback: a byte count that is not a number is
  *  a bug upstream, and printing "—" says so rather than printing "0 KB", which
  *  is a claim that the files are empty. */
@@ -158,6 +173,7 @@ router.get('/dashboard', async (req, res, next) => {
     const a = facts.assessment;
     let by = {};
     let bandLabel = null;
+    let bandList = [];
     let recs = [];
     if (a) {
       const [{ rows: scores }, { rows: bands }, { rows: recRows }] = await Promise.all([
@@ -171,8 +187,10 @@ router.get('/dashboard', async (req, res, next) => {
         // THE BAND LABEL COMES FROM esg_rating_bands, never from copy in this
         // file. 78 is 'AA' and the seeded label is 'Advanced'; "Good
         // Performance", which the mock prints, is not a band this system has.
+        // min_score / max_score added in Run 56: the whole ladder was already
+        // being fetched and six of its seven rows thrown away.
         query(
-          `SELECT b.band_code, b.band_label
+          `SELECT b.band_code, b.band_label, b.min_score, b.max_score
              FROM esg_rating_bands b
              JOIN esg_assessments asm ON asm.weighting_scheme_id = b.scheme_id
             WHERE asm.id = $1 AND asm.company_id = $2
@@ -185,6 +203,7 @@ router.get('/dashboard', async (req, res, next) => {
             ORDER BY r.points_missed DESC LIMIT 6`, [cid, a.id]),
       ]);
       by = Object.fromEntries(scores.map((s) => [s.scope, s]));
+      bandList = bands;
       recs = recRows;
       const overallBand = by.OVERALL && by.OVERALL.band_code;
       const band = bands.find((b) => b.band_code === overallBand);
@@ -296,13 +315,53 @@ router.get('/dashboard', async (req, res, next) => {
     const pillarRings = ['E', 'S', 'G'].map((p) => {
       const s = by[p] || {};
       const unanswered = !s.indicators_answered;
+      const shown = unanswered ? null : wholeScore(s.score_0_100);
       return ringWrap(
-        scoreRing(unanswered ? null : s.score_0_100, p,
-          `${PILLAR_NAME[p]} score ${unanswered ? 'not yet available' : `${s.score_0_100} out of 100`}`,
+        scoreRing(shown, p,
+          `${PILLAR_NAME[p]} score ${shown === null ? 'not yet available' : `${shown} out of 100`}`,
           { size: 'inline' }),
         `${esc(PILLAR_NAME[p])}<br>${esc(s.indicators_answered || 0)} of ${esc(s.indicators_total || 0)} answered${
           s.indicators_na > 0 ? ` · ${esc(s.indicators_na)} N/A` : ''}`);
     }).join('');
+
+    const overallShown = overall ? wholeScore(overall.score_0_100) : null;
+
+    /* ── THE SEEDED RATING LADDER (Run 56) ────────────────────────────────
+       THE ROWS WERE ALREADY IN HAND AND SIX OF SEVEN WERE BEING DISCARDED.
+       The band query returns the whole ladder ordered by sort_order; the page
+       used one row of it for the chip and dropped Leading, Advanced,
+       Established, Progressing, Developing and Starting Out on the floor. This
+       costs no query, invents nothing, and answers what a single number cannot
+       — what 34 MEANS, and what the next band would take.
+
+       It is also what fills the left column of Row B. Deleting the two
+       methodology paragraphs left a 250px panel beside a 900px journey rail,
+       and a hole that size reads as unfinished rather than as calm. The answer
+       is not to put the prose back: it is to put something TRUE there, and the
+       ladder was already loaded.
+
+       §52's .checklist is the component, and its three states are exactly a
+       ladder read top-down — bands above you are not reached, yours is where
+       you are, bands below are cleared. Each states its status in WORDS as
+       well as by mark (§6: state is never colour alone). `cleared` is computed
+       from the seeded min_score, not from the ordering, so a reseeded ladder
+       stays correct. */
+    const ladder = (overall && bandList.length) ? `
+        <div class="stat-label">Rating ladder</div>
+        <div class="checklist">${bandList.map((b) => {
+    const lo = num(b.min_score);
+    const hi = num(b.max_score);
+    const here = Boolean(overall.band_code) && b.band_code === overall.band_code;
+    const cleared = !here && lo !== null && overallShown !== null && overallShown >= lo;
+    const state = here ? 'is-active' : (cleared ? 'is-done' : 'is-pending');
+    const word = here ? 'You are here' : (cleared ? 'Cleared' : 'Not reached');
+    return `<div class="checklist-item ${state}">
+            <span class="checklist-mark" aria-hidden="true">${cleared ? '✓' : ''}</span>
+            <span>${esc(b.band_code)} · ${esc(b.band_label)}</span>
+            <span class="checklist-status">${lo === null || hi === null
+    ? esc(word) : `${esc(lo)}–${esc(hi)} · ${esc(word)}`}</span>
+          </div>`;
+  }).join('')}</div>` : '';
 
     const scorePanel = overall ? `<div class="panel">
       <div class="panel-head">
@@ -313,32 +372,34 @@ router.get('/dashboard', async (req, res, next) => {
       <div class="panel-body">
         <div class="flex flex-wrap items-center gap-5">
           ${ringWrap(
-    scoreRing(overall.score_0_100, null,
-      `Overall ESG score ${overall.score_0_100} out of 100`, { size: 'hero', den: '100' }),
+    scoreRing(overallShown, null,
+      `Overall ESG score ${overallShown} out of 100`, { size: 'hero', den: '100' }),
     `${esc(overall.indicators_answered)} of ${esc(overall.indicators_total)} indicators answered`,
     `<span class="badge badge-accent">${esc(overall.band_code || 'Not banded')}${
       bandLabel ? ` · ${esc(bandLabel)}` : ''}</span>`)}
           <div class="flex flex-wrap gap-4 items-start">${pillarRings}</div>
         </div>
-        <p class="text-sm">Weighting v${esc(overall.weighting_version)} · engine v${esc(overall.engine_version)}.
-           Every figure here is arithmetic over your own answers. No part of it is generated by AI,
-           and the band above is the one seeded in esg_rating_bands — this page does not name it
-           itself.</p>
-        <!-- A SENTENCE, NOT A FULL EMPTY STATE, AND THE DIFFERENCE IS MEASURED.
-             The first version of this panel used emptyState() here; the
-             screenshot showed the resulting block — big centred icon, three
-             lines of centred prose — taking up MORE of the panel than the
-             score did. The panel's job is to present the score, and the
-             loudest thing in it had become an apology for a feature that does
-             not exist. Annotation §1.1 requires this to be named rather than
-             hidden, and it is: named here in one line, explained in full in
-             "On the design, not on this page" below, which is the page's own
-             place for absent features. emptyState() is still used wherever the
-             REGION is empty — a panel with nothing in it is a different fact
-             from a panel that is full and lacks a neighbour. -->
-        <p class="text-sm text-muted">No industry comparison: nothing writes a peer cohort, so
-           there is no industry to compare you against. It is not switched on rather than empty —
-           see the table at the foot of this page.</p>
+        ${ladder}
+        <!-- NO PROSE FOLLOWS THE RINGS, AND THAT IS THE CHANGE (Run 56).
+             This panel ended with two paragraphs: the weighting and engine
+             versions plus "every figure here is arithmetic over your own
+             answers, no part of it is generated by AI", and a note that there
+             is no peer cohort to compare against. Both were true and both were
+             ENGINEERING JUSTIFICATION, sitting directly under the most
+             important number in the product — which is most of why the page
+             read as unfinished. Honesty is structural: a real number with a
+             real source, and an empty state that names which of the three it
+             is. A paragraph about having been honest is a different thing, and
+             it costs the panel its hierarchy.
+             Where each half went instead:
+               provenance   the panel header's metadata line already names the
+                            framework and the reporting year, and /governance
+                            exists for the methodology in full
+               peer cohort  a named emptyState('uninstrumented') at the foot of
+                            the page, in the card that registers absences
+             Run 55 had already cut the peer note from a full empty state down
+             to one line here for the same reason, measured off a screenshot;
+             this run finishes the move rather than shortening it again. -->
       </div>
     </div>` : `<div class="panel">
       <div class="panel-head"><h3 class="panel-title">ESG score overview</h3></div>
@@ -363,8 +424,10 @@ router.get('/dashboard', async (req, res, next) => {
       </div>
       <div class="panel-body">
         ${view.rail(j.stages, { compact: true })}
-        <p class="text-sm">A blocked stage is not waiting on you — it says what is missing and who
-           has to publish it.</p>
+        <!-- No sentence explaining what "Blocked" means. journeyView renders
+             each blocked stage's own reason on the node itself, which says it
+             at the place it applies to instead of in a general note above the
+             fold. Run 56, §3.-1. -->
         <p><a class="btn btn-outline btn-sm" href="/journey">Open the journey</a></p>
       </div>
     </div>` : '';
@@ -388,9 +451,10 @@ router.get('/dashboard', async (req, res, next) => {
         <span class="tag">Unanswered indicators <b class="chip-count">${esc(missing)}</b></span>
       </div>
       ${props.proposals_live > 0
-    ? `<p class="text-sm">Each proposal carries a verbatim quote checked against the document it
-         came from. There is no confidence percentage here and there never will be — an unquotable
-         claim is discarded before you see it, which is a stronger guarantee than a number.</p>
+    // ONE SENTENCE, AND IT TELLS THE USER WHAT THEY WILL SEE when they follow
+    // the link. The argument for why there is no confidence percentage is a
+    // methodology point and it lives in "On the design, not on this page".
+    ? `<p class="text-sm">Each proposal carries a verbatim quote from the document it came from.</p>
        <p><a class="btn btn-outline btn-sm" href="/documents">Open evidence to review</a></p>`
     : emptyState(docs.n > 0 ? 'instrumented_but_empty' : 'uninstrumented', {
       title: docs.n > 0 ? 'Nothing waiting for you' : 'No documents to read yet',
@@ -412,10 +476,12 @@ router.get('/dashboard', async (req, res, next) => {
         </div>
         <p class="text-sm">${esc(r.narrative_en)}${
   r.source === 'fallback_template' ? ' — written offline; the model was unavailable.' : ''}</p>`).join('')}
-      <p class="text-sm">The points are computed by the scoring engine. The model writes the sentence
-         around them and never the number. There is deliberately no progress bar on a recommendation
-         — nothing in this system tracks whether you have acted on one, and a 0% bar would be a claim
-         that it does.</p>
+      <!-- The paragraph that stood here explained that the engine computes the
+           points, that the model never writes a number, and that there is
+           deliberately no progress bar. All three are true, none of them is
+           something the owner of this company needs to read above a list of
+           three actions, and the last one is an argument with a design nobody
+           on this screen can see. /governance carries the methodology. -->
       <p><a class="btn btn-outline btn-sm" href="/reports">See every recommendation</a></p>`
       : (overall
         ? emptyState('zero', {
@@ -448,9 +514,8 @@ router.get('/dashboard', async (req, res, next) => {
     // Same judgement as the score panel. With projects on file the panel is
     // populated, so the missing MATCHING is a footnote; with none it is the
     // whole state of the region and gets the full named empty state.
-    ? `<p class="text-sm text-muted">Nothing matches you to a product yet. The register is a public
-         reference list and the projects are yours — readiness is not built, so nothing joins the
-         two, and a match shown now would be a guess.</p>`
+    ? `<p class="text-sm text-muted">Nothing matches you to a product yet — readiness is not built,
+         so a match shown now would be a guess.</p>`
     : emptyState('uninstrumented', {
       title: 'Nothing matches you to a product yet',
       body: 'The register is a public reference list and the projects are yours. Nothing joins the '
@@ -505,9 +570,8 @@ router.get('/dashboard', async (req, res, next) => {
       </div>
       <p class="text-sm">Covering ${esc(String(carbon.period_from).slice(0, 10))} to
          ${esc(String(carbon.period_to).slice(0, 10))}.${carbon.provisional > 0
-    ? ' A provisional entry used a factor that was not verified at the time it was recorded; the'
-      + ' factor version is stamped on the row, so it can be recomputed rather than guessed at.'
-    : ' Every entry used a verified factor, stamped on the row at the time it was recorded.'}</p>
+    ? ' A provisional entry used an unverified factor and can be recomputed.'
+    : ' Every entry used a verified factor.'}</p>
       <p><a class="btn btn-outline btn-sm" href="/carbon">Open carbon</a></p>`
       : emptyState('instrumented_but_empty', {
         title: 'No energy or fuel data yet',
@@ -516,19 +580,28 @@ router.get('/dashboard', async (req, res, next) => {
             + 'standing in for one.' })
         + '<p><a class="btn btn-primary" href="/carbon">Record a period</a></p>');
 
-    /* ── what the mock shows and this page will not ─────────────────────── */
+    /* ── what the mock shows and this page will not ───────────────────────
+       THE INDUSTRY COMPARISON IS THE FIRST THING IN HERE, and it is a full
+       named empty state rather than a table row or a line under the score.
+       Annotation §1.1 calls it the most dangerous element on the mock and
+       requires it NAMED rather than hidden — emptyState('uninstrumented') is
+       exactly the instrument for that, and this card is the page's own register
+       of absences, so the block is the right size for what it says here in a
+       way it was not in the score panel. The other five stay as table rows:
+       they are shorter facts and a wall of five empty states would be the same
+       mistake at five times the volume. */
     const notShown = `<div class="card">
       <div class="card-header"><h3 class="card-title">On the design, not on this page</h3></div>
       <div class="card-body">
+        ${emptyState('uninstrumented', {
+    title: 'No industry comparison',
+    body: 'Nothing writes a peer cohort and no industry group is recorded, so there is no industry '
+        + 'to compare you against — it is not switched on rather than empty. Even once it exists, a '
+        + 'percentile must never be computable back to one competitor\'s score, so it needs opt-in '
+        + 'and a minimum cohort size before it could be shown at all.' })}
         <div class="table-wrap"><table>
           <thead><tr><th>Element</th><th>Why it is not here</th></tr></thead>
           <tbody>
-            <tr><td>Comparison to your industry</td>
-                <td>There is no peer cohort in this database — nothing aggregates across companies
-                    and no industry group is recorded. It is also a cross-tenant surface: even once
-                    the data exists, a percentile must never be computable back to one competitor's
-                    score, so it needs opt-in and a minimum cohort size before it could be shown at
-                    all.</td></tr>
             <tr><td>Your impact on the four pillars</td>
                 <td>No published methodology maps company activity to a pillar. Claiming a
                     contribution level would attribute a mapping to an organisation that has

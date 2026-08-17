@@ -275,10 +275,33 @@ function layout(title, content, user, activePath = '') {
 <style>${TOKENS_CSS}</style>
 <link rel="stylesheet" href="${CSS_HREF}">
 <style>
-/* Two layout utilities and one state border. Nothing themeable: every value
-   below is geometry or a token, and there is no colour literal in this file. */
+/* Three layout utilities and one state border. Nothing themeable: every value
+   below is geometry or a token, and there is no colour literal in this file.
+
+   THE CONTENT CAP IS HERE BECAUSE THE MASTER HAS NO CONTAINER (Run 56). Checked
+   before writing it, which is the lesson of Run 53 finding a whole app shell
+   this repo had been hand-rolling past: modus-design-system.css declares no
+   .container, no max-width utility and no width token beyond --sidebar-w /
+   --topbar-h, and .app-main is padding-only and uncapped. So a twelve-column
+   dashboard stretches to whatever the monitor is, and a .col-4 panel on a
+   2560px screen is 700px wide — which is what makes a dense grid read as
+   amateur rather than as infrastructure.
+
+   The right home for this is a --content-max beside --sidebar-w in the master's
+   "Layout dimensions" block, which is a thirteen-path fan-out and its own run.
+   Until then it reads that token and carries the fallback, so the DAY the token
+   ships the master wins with no edit here — and test/dashboard-test.js fails
+   the moment it does, telling whoever lands it to delete this rule. The 1320px
+   is the ONE length literal in Run 56's diff and it is deliberate: there is no
+   spacing or width token in the master that could stand in for it.
+
+   Applied to the CHILDREN, not to .app-main itself: .app-main is the scroll
+   container and the grid cell that paints --bg, so capping it would leave the
+   page background ending mid-monitor. Capping and centring each block instead
+   keeps the surface full-bleed and the reading column fixed. */
 .grid{display:grid;gap:16px}
 .grid-3{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.app-main > *{max-width:var(--content-max,1320px);margin-inline:auto}
 .provisional{border-left:3px solid var(--amber)}
 </style>
 </head>
