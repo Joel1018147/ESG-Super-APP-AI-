@@ -172,19 +172,22 @@ async function scanCompany(companyId, opts = {}) {
   try {
     text = await generateWithGroq(prompt, { maxTokens: 600 });
   } catch (err) {
+    // camelCase, because that is what logInteraction READS. See the note on
+    // logOrReport below — this shape is load-bearing and looks like a style
+    // choice.
     await logOrReport({
-      company_id: companyId, user_id: opts.userId || null, feature: JOB_TYPE, model,
-      prompt_chars: prompt.length, response_chars: 0, latency_ms: Date.now() - started,
-      ok: false, error_message: err.message,
+      companyId, userId: opts.userId || null, feature: JOB_TYPE, model,
+      promptChars: prompt.length, responseChars: 0, latencyMs: Date.now() - started,
+      ok: false, error: err.message,
     });
     // The message a human reads, and the one stored on the job row.
     throw new Error(`Green opportunity analysis did not run: ${err.message}`);
   }
 
   await logOrReport({
-    company_id: companyId, user_id: opts.userId || null, feature: JOB_TYPE, model,
-    prompt_chars: prompt.length, response_chars: (text || '').length,
-    latency_ms: Date.now() - started, ok: true, error_message: null,
+    companyId, userId: opts.userId || null, feature: JOB_TYPE, model,
+    promptChars: prompt.length, responseChars: (text || '').length,
+    latencyMs: Date.now() - started, ok: true, error: null,
   });
 
   const { proposals, dropped } = parseProposals(text, validCodes);
@@ -204,7 +207,20 @@ async function scanCompany(companyId, opts = {}) {
 }
 
 /** A log write that fails must not take the scan down with it, and must not
- *  vanish either. Same shape as carbonImportService.logOrReport() (RULE 6). */
+ *  vanish either. Same shape as carbonImportService.logOrReport() (RULE 6).
+ *
+ *  THE KEYS MUST BE camelCase. `groqService.logInteraction()` reads
+ *  `row.companyId`, `row.userId`, `row.promptChars`, `row.responseChars`,
+ *  `row.latencyMs` and `row.error` — a snake_case object writes a row whose
+ *  every column is NULL except feature, model and ok, and NOTHING THROWS,
+ *  because logInteraction swallows its own errors. The mismatch is therefore
+ *  silent in both directions.
+ *
+ *  That shipped in Run 48 and was found by the first real model call: the
+ *  failure row recorded ok=false with error_message NULL, so the log that
+ *  proves what happened knew a scan had failed and not why. The suite asserts
+ *  the key names now (green-projects-test), because reading them back off a
+ *  row is the only way this class of bug is visible at all. */
 async function logOrReport(row) {
   try {
     await logInteraction(row);
@@ -309,11 +325,42 @@ async function queueScan(companyId, userId) {
  *  from "ran and found nothing". Read, never inferred from an empty list. */
 async function lastScan(companyId) {
   const { rows } = await query(
-    `SELECT id, status, last_error, attempts, run_at, updated_at
+    `SELECT id, status, last_error, attempts, max_attempts, run_at, updated_at
        FROM esg_scheduled_jobs
       WHERE job_type = $1 AND payload->>'dedupe_key' = $2
       ORDER BY updated_at DESC LIMIT 1`, [JOB_TYPE, companyId]);
   return rows[0] || null;
+}
+
+/** What the last scan actually DID, in one definition shared by the page and
+ *  the API. Four states, and the third is the one Run 48 shipped without.
+ *
+ *  jobRunner retries: on failure it sets status='failed' only once
+ *  `attempts >= max_attempts`, and leaves it 'pending' before that. A page
+ *  keying on status==='failed' alone therefore says NOTHING about the first
+ *  two failures of three — the user sees an ordinary page while the analysis
+ *  has already failed twice, which is a narrower version of the exact shape
+ *  RULE 6 bans. Found by driving a real 401 to exhaustion:
+ *
+ *    attempt 1: status=pending attempts=2/3  page said nothing
+ *    attempt 2: status=failed  attempts=3/3  page said it failed
+ *
+ *  'retrying' and 'failed' are kept apart rather than merged, because they are
+ *  different facts and the user can act on the difference: one will resolve
+ *  itself, the other will not. */
+function scanState(scan) {
+  if (!scan) return { state: 'none', message: null, attempts: 0, maxAttempts: 0 };
+  const attempts = Number(scan.attempts) || 0;
+  const maxAttempts = Number(scan.max_attempts) || 0;
+  const base = { message: scan.last_error || null, attempts, maxAttempts };
+  if (scan.status === 'failed') return { state: 'failed', ...base };
+  // A pending job that has already burned an attempt and recorded an error has
+  // failed at least once, whatever its status column says.
+  if (scan.status === 'pending' && attempts > 0 && scan.last_error) {
+    return { state: 'retrying', ...base };
+  }
+  if (scan.status === 'done') return { state: 'ok', ...base };
+  return { state: scan.status === 'running' ? 'running' : 'pending', ...base };
 }
 
 // Registered by side-effect, exactly as extractionService.js does it. The
@@ -326,7 +373,7 @@ register(JOB_TYPE, async (payload) => {
 });
 
 module.exports = {
-  JOB_TYPE, scanCompany, queueScan, lastScan,
+  JOB_TYPE, scanCompany, queueScan, lastScan, scanState,
   acceptOpportunity, rejectOpportunity,
   parseProposals, buildPrompt, buildContext, employeeBand,
   resolveDefaultClassification,

@@ -724,13 +724,25 @@ router.get('/green-finance/opportunities', wrap(async (req, res) => {
   // RULE 6, the user-facing half. A scan that FAILED must never be presented as
   // a scan that found nothing — that is pixel-identical output for two
   // completely different facts, and it is the carbonImportService defect.
-  const failed = scan && scan.status === 'failed';
-  const notice = failed
+  //
+  // 'retrying' is reported as well as 'failed'. jobRunner leaves a job pending
+  // between attempts, so keying on 'failed' alone said nothing about the first
+  // two failures of three — the user saw an ordinary page while the analysis
+  // had already failed twice. The two are worded differently because they are
+  // different facts: one resolves itself, the other does not.
+  const st = opp.scanState(scan);
+  const failed = st.state === 'failed';
+  const retrying = st.state === 'retrying';
+  const notice = (failed || retrying)
     ? `<div class="alert alert-warning" role="alert"><div class="alert-body">
-         <strong>The AI suggestion run did not complete.</strong> Nothing below is missing because
-         your company has no options — the analysis itself did not run, so there is nothing to show
-         from it. Your projects and data are unaffected.
-         <br><small class="text-muted">${esc(scan.last_error || 'no message recorded')}</small>
+         <strong>${failed
+    ? 'The AI suggestion run did not complete.'
+    : `The last AI suggestion run failed and is being retried (attempt ${esc(st.attempts)} of ${esc(st.maxAttempts)}).`}</strong>
+         Nothing below is missing because your company has no options — the analysis itself did not
+         run, so there is nothing to show from it. Your projects and data are unaffected.${failed
+    ? ''
+    : ' Reload in a few minutes; if it keeps failing it will stop retrying and say so.'}
+         <br><small class="text-muted">${esc(st.message || 'no message recorded')}</small>
        </div></div>`
     : '';
 
@@ -744,7 +756,7 @@ router.get('/green-finance/opportunities', wrap(async (req, res) => {
           <button class="btn btn-sm btn-primary" type="submit">Accept — create a project</button>
         </form>` : ''}
       </div>`).join('')
-    : (failed ? '' : emptyState('instrumented_but_empty', {
+    : ((failed || retrying) ? '' : emptyState('instrumented_but_empty', {
       title: 'No suggestions yet',
       body: 'The suggestion run is switched on and working — it has not proposed anything for this '
           + 'company. Run it below, or define a project yourself.' }));

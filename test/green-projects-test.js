@@ -135,6 +135,65 @@ test('every green-project query in api.js is company-scoped, at the SQL', () => 
   }
 });
 
+test('the interaction log is called with the KEYS logInteraction actually reads', () => {
+  // Run 48 passed snake_case to a camelCase reader. Every column except
+  // feature, model and ok landed NULL — including error_message on the failure
+  // path — and NOTHING THREW, because logInteraction swallows its own errors.
+  // Silent in both directions, and only visible by reading a row back.
+  //
+  // Asserted on the SOURCE of both call sites, because the mismatch is a
+  // spelling, and a behavioural test would need a real database to see it.
+  const svcSrc = fs.readFileSync(path.join(SRC, 'services', 'opportunityService.js'), 'utf8');
+  const groqSrc = fs.readFileSync(path.join(SRC, 'services', 'groqService.js'), 'utf8');
+
+  const reader = groqSrc.slice(groqSrc.indexOf('async function logInteraction'));
+  const readKeys = [...reader.matchAll(/row\.([a-zA-Z]+)/g)].map((m) => m[1]);
+  assert.ok(readKeys.length >= 7, `logInteraction reads only ${readKeys.length} keys — the anchor moved`);
+
+  const calls = [...svcSrc.matchAll(/logOrReport\(\{([\s\S]*?)\}\);/g)].map((m) => m[1]);
+  assert.strictEqual(calls.length, 2, `expected 2 logOrReport call sites, found ${calls.length}`);
+  for (const call of calls) {
+    // Split on top-level commas so `x: a || null` yields the key `x`, not `null`.
+    const parts = [];
+    let depth = 0; let cur = '';
+    for (const ch of call) {
+      if ('([{'.includes(ch)) depth++;
+      else if (')]}'.includes(ch)) depth--;
+      if (ch === ',' && depth === 0) { parts.push(cur); cur = ''; } else cur += ch;
+    }
+    parts.push(cur);
+    const written = parts.map((p) => p.trim()).filter(Boolean)
+      .map((p) => (p.match(/^([a-zA-Z_$][\w$]*)\s*(?::|$)/) || [])[1])
+      .filter(Boolean);
+    assert.ok(written.length >= 5, `only parsed ${written.length} keys out of a logOrReport call — the parser broke`);
+    const unread = written.filter((k) => !readKeys.includes(k));
+    assert.deepStrictEqual(unread, [],
+      `logOrReport passes key(s) logInteraction never reads: ${unread.join(', ')} — `
+      + `they land as NULL and nothing throws. It reads: ${[...new Set(readKeys)].join(', ')}`);
+  }
+  // and the two that matter most are actually present
+  for (const k of ['companyId', 'error']) {
+    assert.ok(calls.some((c) => new RegExp(`\\b${k}\\b`).test(c)),
+      `no call site passes ${k} — the log cannot say whose scan failed, or why`);
+  }
+});
+
+test('a scan that failed but is RETRYING is reported, not just a terminal failure', () => {
+  // jobRunner leaves a job 'pending' until attempts >= max_attempts, so keying
+  // on status === 'failed' alone says nothing about the first failures. Proven
+  // against a real 401 driven to exhaustion in the Run 48 addendum.
+  const s = svc.scanState;
+  assert.strictEqual(s(null).state, 'none');
+  assert.strictEqual(s({ status: 'done', attempts: 1, max_attempts: 3, last_error: null }).state, 'ok');
+  assert.strictEqual(s({ status: 'failed', attempts: 3, max_attempts: 3, last_error: 'Groq 401' }).state, 'failed');
+  assert.strictEqual(
+    s({ status: 'pending', attempts: 1, max_attempts: 3, last_error: 'Groq 401' }).state, 'retrying',
+    'a pending job that has already burned an attempt and recorded an error is reported as ok');
+  // A brand-new queued job has not failed and must not be reported as though it had.
+  assert.strictEqual(s({ status: 'pending', attempts: 0, max_attempts: 3, last_error: null }).state, 'pending');
+  assert.strictEqual(s({ status: 'running', attempts: 1, max_attempts: 3, last_error: null }).state, 'running');
+});
+
 test('no setTimeout schedules anything in the new code', () => {
   for (const f of ['services/opportunityService.js', 'services/baselineService.js']) {
     const src = fs.readFileSync(path.join(SRC, f), 'utf8').replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
@@ -427,7 +486,46 @@ const USER_B = { id: 'u-b', name: 'B', email: 'b@x.test', role: 'company_admin',
     assert.ok(failHtml.includes('Groq 503'), 'the failed page does not surface the reason');
     assert.ok(okHtml.includes('No suggestions yet'), 'the empty page does not say it found nothing');
     assert.ok(!okHtml.includes('did not complete'), 'the empty page claims the analysis failed');
+
+    // AND the retrying state, which Run 48 rendered as silence.
+    const retryState = makeState();
+    retryState.scanRow = { id: 'j3', status: 'pending', attempts: 1, max_attempts: 3,
+      updated_at: '2026-08-17', last_error: 'Green opportunity analysis did not run: Groq 401' };
+    const retryApp = serve(USER_A, retryState);
+    const retryHtml = await (await retryApp.get('/green-finance/opportunities')).text();
+    assert.ok(/is being retried/.test(retryHtml),
+      'a scan that has already failed once renders as though nothing had happened');
+    assert.ok(retryHtml.includes('Groq 401'), 'the retrying page hides the reason');
+    assert.ok(!retryHtml.includes('No suggestions yet'),
+      'the retrying page also claims the analysis found nothing');
+    assert.notStrictEqual(retryHtml, okHtml, 'retrying renders identically to a clean empty result');
+    assert.notStrictEqual(retryHtml, failHtml, 'retrying renders identically to a terminal failure');
+    await retryApp.close();
+
     await okApp.close(); await failApp.close();
+  });
+
+  await atest('the API reports the same four scan states the page can (CLAUDE.md §9)', async () => {
+    // Without this the page fix is half a fix: a JSON client keying on
+    // status === 'failed' stays blind to the first failures, which is the
+    // defect the page just stopped having.
+    const cases = [
+      [{ id: 'j1', status: 'done', attempts: 1, max_attempts: 3, last_error: null, updated_at: '2026-08-17' }, 'ok'],
+      [{ id: 'j2', status: 'failed', attempts: 3, max_attempts: 3, last_error: 'Groq 503', updated_at: '2026-08-17' }, 'failed'],
+      [{ id: 'j3', status: 'pending', attempts: 1, max_attempts: 3, last_error: 'Groq 401', updated_at: '2026-08-17' }, 'retrying'],
+      [{ id: 'j4', status: 'pending', attempts: 0, max_attempts: 3, last_error: null, updated_at: '2026-08-17' }, 'pending'],
+      [null, 'none'],
+    ];
+    for (const [row, want] of cases) {
+      const st = makeState();
+      st.scanRow = row;
+      const a = serve(USER_A, st);
+      const body = await (await a.get('/api/green-opportunities')).json();
+      assert.strictEqual(body.scan && body.scan.state, want,
+        `a ${row ? row.status : 'missing'} scan with ${row ? row.attempts : 0} attempt(s) is reported to the API `
+        + `as "${body.scan && body.scan.state}", not "${want}"`);
+      await a.close();
+    }
   });
 
   await atest('the opportunities page states that the model never produces a figure', async () => {

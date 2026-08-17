@@ -866,9 +866,21 @@ router.get('/green-opportunities', wrap(async (req, res) => {
   const scan = await opp.lastScan(cid(req));
   // The scan's own state travels with the list, so a caller can tell an empty
   // list that means "nothing found" from one that means "the analysis failed".
+  //
+  // `state` is the derived answer and is what a client should branch on: the
+  // raw `status` column reads 'pending' between retries, so a caller keying on
+  // status === 'failed' misses the first failures exactly as the page did.
+  const st = opp.scanState(scan);
   res.json({
     opportunities: rows,
-    scan: scan ? { status: scan.status, last_error: scan.last_error, ran_at: scan.updated_at } : null,
+    scan: scan ? {
+      state: st.state,
+      status: scan.status,
+      attempts: st.attempts,
+      max_attempts: st.maxAttempts,
+      last_error: scan.last_error,
+      ran_at: scan.updated_at,
+    } : { state: 'none' },
   });
 }));
 
