@@ -71,8 +71,32 @@ async function withStub(exportsObj, fn) {
   try { return await fn(); } finally { require.cache[dbPath] = cached; clear(); }
 }
 
+/* Every query answers with nothing — the bluntest possible database, used to
+   render every route against no data at all.
+
+   WITH ONE EXCEPTION, ADDED IN RUN 55, AND IT MAKES THE STUB MORE TRUTHFUL
+   RATHER THAN MORE FORGIVING. `SELECT count(*) …` with no GROUP BY returns
+   exactly ONE row in Postgres, always, on an empty table and on a table that
+   does not exist in this company's data — that is what an aggregate IS. A stub
+   answering `rows: []` to it models a database that cannot exist, and the only
+   way a route survives it is by carrying a `rows[0] || {}` fallback for a case
+   that never happens in production — RULE 6, forced on the code by the test.
+   So the aggregate answers one row of zeroes, which is what the real database
+   would say, and the route reads `rows[0].n` directly and would throw on a
+   genuinely broken connection instead of rendering a confident 0. */
+const AGGREGATE_ZEROES = {
+  n: 0, bytes: 0, entries: 0, provisional: 0, projects: 0, products: 0,
+  proposals_live: 0, proposals_pending: 0, period_from: null, period_to: null,
+  live: 0, reviewed: 0, pending: 0, accepted: 0, answered: 0, na: 0, filled: 0,
+};
+const isAggregate = (sql) => /\bcount\(\*\)/i.test(sql) && !/\bGROUP BY\b/i.test(sql);
+
 const EMPTY_DB = {
-  query: async () => ({ rows: [], rowCount: 0 }),
+  query: async (text) => {
+    const sql = String(text).replace(/\s+/g, ' ').trim();
+    if (isAggregate(sql)) return { rows: [{ ...AGGREGATE_ZEROES }], rowCount: 1 };
+    return { rows: [], rowCount: 0 };
+  },
   pool: { connect: async () => ({ query: async () => ({ rows: [] }), release() {} }) },
 };
 
@@ -103,6 +127,17 @@ const FIXTURES = [
   [/FILTER \(WHERE NOT r\.is_na\)/, [{ answered: 18, na: 0 }]],
   [/count\(\*\)::int AS live/, [{ live: 3, reviewed: 1, pending: 2, accepted: 1 }]],
   [/count\(\*\)::int AS n FROM esg_carbon_entries/, [{ n: 2 }]],
+  // Run 55's panel wave. Every one of these is an AGGREGATE and returns exactly
+  // one row in Postgres, so the route reads rows[0] without a guard — which
+  // means a fixture that forgot one would throw here rather than render a blank.
+  // They sit above the row-returning patterns for the same reason the block
+  // above them does.
+  [/AS bytes FROM esg_documents/, [{ n: 4, bytes: 19500000 }]],
+  [/AS proposals_live/, [{ proposals_live: 3, proposals_pending: 2 }]],
+  [/AS entries, min\(period_start\)/, [{
+    entries: 2, period_from: '2026-01-01', period_to: '2026-06-30', provisional: 1 }]],
+  [/AS projects FROM esg_green_projects/, [{ projects: 1 }]],
+  [/AS products FROM esg_finance_products/, [{ products: 1 }]],
   [/FROM esg_assessments a? ?WHERE|FROM esg_assessments\b[\s\S]*WHERE (a\.)?company_id/, [{
     id: ASSESSMENT_ID, framework_id: 'fw-1', framework_code: 'MODUS_SEDG_ALIGNED',
     framework_version: '0.9-draft', reporting_year: 2025, status: 'scored', overall: 78,
@@ -318,6 +353,19 @@ function newCompanyDb() {
       if (/FROM esg_xp_levels\b/.test(sql)) return { rows: JOURNEY_FIXTURES.levels };
       if (/count\(\*\)::int AS n FROM esg_indicators/.test(sql)) return { rows: [{ n: 40 }] };
       if (/count\(\*\)::int AS live/.test(sql)) return { rows: [{ live: 0, reviewed: 0, pending: 0, accepted: 0 }] };
+      // A new company's aggregates are ZERO, not absent. Returning `rows: []`
+      // here would model a database that answered nothing to a count(*), which
+      // cannot happen and would make the route throw for a reason a real new
+      // company never hits — the fixture would then be testing the harness.
+      if (/AS bytes FROM esg_documents/.test(sql)) return { rows: [{ n: 0, bytes: 0 }] };
+      if (/AS proposals_live/.test(sql)) return { rows: [{ proposals_live: 0, proposals_pending: 0 }] };
+      if (/AS entries, min\(period_start\)/.test(sql)) {
+        return { rows: [{ entries: 0, period_from: null, period_to: null, provisional: 0 }] };
+      }
+      if (/AS projects FROM esg_green_projects/.test(sql)) return { rows: [{ projects: 0 }] };
+      // The register is a PUBLIC reference list, not this company's data, so it
+      // is populated on day one. A new company sees products and no match.
+      if (/AS products FROM esg_finance_products/.test(sql)) return { rows: [{ products: 31 }] };
       if (/FROM esg_companies\b/.test(sql)) {
         // The company row exists — they registered. One field of five is set.
         return { rows: [{ id: 'c1', name: 'New Sdn Bhd', filled: 1, earned_at: '2026-08-17T00:00:00.000Z' }] };
@@ -550,12 +598,153 @@ let RENDERED = null;
     // zeroes that reads as broken rather than as new. The rail is the one
     // block fully populated on day one, because the stages exist before the
     // company does anything.
+    //
+    // ANCHORED ON .stat-card, NOT ON THE CONTAINER. This assertion was written
+    // against `.stat-grid` in Run 53 and Run 55 moved the counters into the §52
+    // twelve-column grid, so the container name vanished — `indexOf` returned
+    // -1 and the comparison passed or failed on the wrong fact rather than
+    // saying the anchor was gone. The card is the thing whose POSITION this
+    // test is about; the box around it is not. Both anchors are asserted to
+    // exist first, so a future rename fails loudly here instead of silently
+    // comparing against -1.
     const e = contentOf(EMPTY_HTML);
     const f = contentOf(FULL_HTML);
-    assert.ok(e.indexOf('journey-rail') < e.indexOf('stat-grid'),
+    for (const [label, c] of [['empty', e], ['full', f]]) {
+      for (const anchor of ['journey-rail', 'stat-card']) {
+        assert.ok(c.includes(anchor),
+          `the ${label} dashboard renders no .${anchor} — this test's anchor is gone, so its `
+          + 'verdict means nothing until the anchor is updated');
+      }
+    }
+    assert.ok(e.indexOf('journey-rail') < e.indexOf('stat-card'),
       'the empty dashboard puts the stat cards above the journey rail — a grid of zeroes first');
-    assert.ok(f.indexOf('stat-grid') < f.indexOf('journey-rail'),
+    assert.ok(f.indexOf('stat-card') < f.indexOf('journey-rail'),
       'the scored dashboard does not follow the reference image\'s reading order');
+    // Run 55: the wider column follows the reading order too. The block that
+    // leads gets .col-7, so the empty page does not lead with the rail and then
+    // give the larger half of the row to an empty state.
+    const rowB = (s) => s.slice(s.indexOf('col-7'), s.indexOf('col-5'));
+    assert.ok(rowB(e).includes('journey-rail'), 'the empty dashboard leads with the rail but gives it the narrow column');
+    assert.ok(rowB(f).includes('score-ring--hero'), 'the scored dashboard gives the wide column to something other than the score');
+  });
+
+  await atest('THE DASHBOARD IS A GRID, NOT A STACK — and it collapses on a phone', async () => {
+    // Run 53 got the content right and left it a one-column stack, because the
+    // master had no column system. Run 54 added §52 and Run 55 composed onto
+    // it, so this asserts the SHAPE rather than the appearance: rows that are
+    // .grid-12, children that carry a span, and more than one span width — a
+    // page of nothing but .col-12 is a stack wearing a grid's class name.
+    for (const [label, html] of [['empty', EMPTY_HTML], ['full', FULL_HTML]]) {
+      const c = contentOf(html);
+      const rows = [...c.matchAll(/class="grid-12[^"]*"/g)];
+      assert.ok(rows.length >= 3, `the ${label} dashboard has ${rows.length} grid rows — it is still a stack`);
+      const spans = [...c.matchAll(/class="col-(\d+)"/g)].map((m) => Number(m[1]));
+      assert.ok(spans.length >= 8, `the ${label} dashboard places ${spans.length} columns`);
+      assert.ok(new Set(spans).size >= 3,
+        `the ${label} dashboard uses ${new Set(spans).size} distinct column width(s) — a page of `
+        + 'equal columns is a stack in a grid class');
+      for (const s of spans) {
+        assert.ok(s >= 1 && s <= 12, `.col-${s} is outside the twelve-column grid`);
+      }
+      // Every row must add up to twelve or less, or a child silently wraps and
+      // the composition the brief specified is not what renders.
+      for (const row of c.split('class="grid-12').slice(1)) {
+        const inRow = [...row.slice(0, row.indexOf('</div></div>') + 1).matchAll(/class="col-(\d+)"/g)]
+          .map((m) => Number(m[1]));
+        if (inRow.length) {
+          assert.ok(inRow.reduce((x, y) => x + y, 0) <= 12 || inRow.length > 4,
+            `a ${label} row spans ${inRow.join('+')} = more than twelve columns`);
+        }
+      }
+    }
+    // AND IT COLLAPSES. The span helpers are meaningless on a phone unless the
+    // master reduces them, and this repo cannot add that rule — so it asserts
+    // the master ships it rather than assuming §52 is still what Run 54 wrote.
+    const mobile = CSS.slice(CSS.indexOf('52. COMPOSITION LAYER'));
+    const block = mobile.slice(mobile.indexOf('@media (max-width: 768px)'));
+    assert.ok(block.startsWith('@media'), '§52 has no mobile block — every .col-* stays put on a phone');
+    const body = block.slice(0, block.indexOf('\n}\n') + 2);
+    assert.ok(/\.grid-12\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/.test(body),
+      '§52 no longer collapses .grid-12 to one column at ≤768px');
+    assert.ok(/\.col-1,[\s\S]*?\.col-12\s*\{\s*grid-column:\s*span 1/.test(body),
+      '§52 no longer collapses every .col-* to a single span at ≤768px');
+  });
+
+  test('EVERY PANEL NUMBER IS A REAL SEEDED STAGE', () => {
+    // Run 55 numbers the panels from esg_journey_stages so the number means
+    // something — reorder the seed and they renumber themselves. A code that is
+    // not in the seed renders with no index at all, which is the honest
+    // behaviour and also completely silent, so nothing on screen would tell you
+    // the map had rotted. This is the check that would.
+    //
+    // It is asserted against seed.sql rather than against the suite's own
+    // JOURNEY_FIXTURES, which carry FOUR stages where the product seeds
+    // THIRTEEN: in the screenshots taken this run only one panel showed a
+    // number, and that was the fixture, not the code. A test built on the
+    // fixture would have agreed with the screenshot and been wrong.
+    const routes = fs.readFileSync(path.join(SRC, 'routes/pages.js'), 'utf8');
+    const map = /const PANEL_STAGE = Object\.freeze\(\{([\s\S]*?)\}\);/.exec(routes);
+    assert.ok(map, 'PANEL_STAGE is gone from pages.js — the panels are numbered by something else now');
+    const codes = [...map[1].matchAll(/'([A-Z_]+)'/g)].map((m) => m[1]);
+    assert.ok(codes.length >= 5, `PANEL_STAGE names ${codes.length} stages`);
+
+    const seed = fs.readFileSync(path.join(SRC, 'db/seed.sql'), 'utf8');
+    const seeded = new Set([...seed.matchAll(/^\s*\('([A-Z_]+)',\s*\d+,/gm)].map((m) => m[1]));
+    assert.ok(seeded.size >= 10,
+      `only ${seeded.size} stage codes parsed out of seed.sql — the reader broke, so this test `
+      + 'would pass by finding nothing');
+    const orphans = codes.filter((c) => !seeded.has(c));
+    assert.deepStrictEqual(orphans, [],
+      `these panels point at a stage seed.sql does not create, so they render unnumbered and say `
+      + `nothing about it: ${orphans.join(', ')}`);
+  });
+
+  await atest('NOTHING BLOCKED IS RENDERED AS AVAILABLE — all six, by name', async () => {
+    // UI_REFERENCE_ANNOTATED §1 names five elements that must never ship as
+    // drawn, plus §2's roadmap progress bars. Each is asserted by the phrase a
+    // reimplementation would actually use, on BOTH renders, because the empty
+    // page is the one most likely to reach for a plausible placeholder.
+    const BANNED = [
+      [/better than \d+%|top \d+%|industry percentile|compared to industry/i,
+        'a peer percentile — §1.1, no cohort exists and it is a cross-tenant surface'],
+      // A FIGURE, not the word. The page must be free to EXPLAIN that there is
+      // no confidence percentage — "On the design, not on this page" says
+      // exactly that, and a bare /confidence/i marked the explanation as the
+      // defect. So this looks for a percentage within a sentence of the word,
+      // over TEXT with the tags stripped, which also catches the mock's own
+      // layout where "87%" and "AI Confidence" sit in two separate nodes.
+      [/confidence[^.!?]{0,40}\d+\s*%|\d+\s*%[^.!?]{0,40}confidence/i,
+        'an AI confidence figure — §1.2, there is deliberately no confidence column'],
+      [/your contribution|pillar contribution|4 pillars impact|four pillars impact/i,
+        'a SustNET pillar contribution level — §1.3, no published methodology maps to one'],
+      [/certified|download certificate|certification progress/i,
+        'a certification claim — §1.4, no scheme is published'],
+      [/book a consultation|view consultation options|consultation available/i,
+        'a consultation booking — §1.5, nothing is built behind it'],
+      [/class="progress[^"]*"[\s\S]{0,200}recommendation|recommendation[\s\S]{0,200}class="progress/i,
+        'a progress bar on a recommendation — §2, nothing tracks action against one'],
+    ];
+    // Tags stripped for the prose checks, kept for the markup one — a phrase
+    // split across two elements reads as one sentence to a person and as two
+    // to a regex, and the mock puts "87%" and "AI Confidence" in separate nodes
+    // for exactly that reason.
+    const textOf = (s) => s.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
+    for (const [label, html] of [['empty', EMPTY_HTML], ['full', FULL_HTML]]) {
+      const markup = contentOf(html);
+      const text = textOf(markup);
+      for (const [re, why] of BANNED) {
+        const target = re.source.includes('class=') ? markup : text;
+        const hit = re.exec(target);
+        assert.ok(!hit, `the ${label} dashboard renders ${why}\n      matched: ${hit && hit[0].slice(0, 90)}`);
+      }
+    }
+    // The inverse, so this cannot pass by rendering nothing: the page says WHY
+    // the two most dangerous ones are absent rather than hiding them.
+    const full = contentOf(FULL_HTML);
+    assert.ok(/no industry comparison/i.test(full),
+      'the peer percentile is absent but unexplained — a hidden card teaches nothing');
+    assert.ok(/verbatim quote/i.test(full),
+      'nothing on the page says what replaced the confidence score');
   });
 
   await atest('every zero region on the empty dashboard NAMES which empty state it is', async () => {
@@ -605,15 +794,26 @@ let RENDERED = null;
   });
 
   await atest('ANIMATED FIGURES ARE IN THE DOM AS TEXT, BEFORE ANY SCRIPT RUNS', async () => {
+    // ELEMENT-AGNOSTIC. Run 53 pinned this to `<div class="score-ring-value">`;
+    // Run 55's hero ring wraps the value in .score-ring-figure so a `/100`
+    // denominator can sit on the same baseline, and the value became a <span>.
+    // The fact under test is "the number is TEXT in the DOM", which has nothing
+    // to do with which element carries it — pinning the tag made a composition
+    // change look like a missing figure. The class is the contract.
     const c = contentOf(FULL_HTML);
-    assert.ok(/<div class="score-ring-value">78<\/div>/.test(c),
-      'the overall score is not present as server-rendered text — a ring that only reads 78 after '
-      + 'JavaScript has run shows a wrong number to a screen reader, a no-JS user and anyone whose '
-      + 'script was dropped');
-    for (const pillar of ['82', '74', '77']) {
-      assert.ok(new RegExp(`<div class="score-ring-value">${pillar}</div>`).test(c),
-        `the ${pillar} sub-score is not server-rendered text`);
+    const rendered = [...c.matchAll(/class="score-ring-value"[^>]*>([^<]*)</g)].map((x) => x[1].trim());
+    assert.ok(rendered.length >= 4,
+      `only ${rendered.length} score-ring values rendered — the overall ring and three pillars are four`);
+    for (const figure of ['78', '82', '74', '77']) {
+      assert.ok(rendered.includes(figure),
+        `${figure} is not present as server-rendered text — a ring that only reads its value after `
+        + 'JavaScript has run shows a wrong number to a screen reader, a no-JS user and anyone whose '
+        + `script was dropped. Rendered: ${rendered.join(', ')}`);
     }
+    // The denominator is text too, and it is NOT part of the value — "78/100"
+    // in one node would be read aloud as seven-thousand-eight-hundred.
+    assert.ok(/class="score-ring-den"[^>]*>\/100</.test(c),
+      'the hero ring has no server-rendered denominator');
     assert.ok(!/<script/i.test(c),
       'the dashboard content region carries a script — every figure on it is server-rendered and '
       + 'nothing on this page needs one');
@@ -804,6 +1004,16 @@ let RENDERED = null;
     ['var(--red-text)', ['var(--red-bg)', 'var(--surface)', 'var(--bg)'], '.badge-red'],
     ['var(--blue-text)', ['var(--blue-bg)', 'var(--surface)', 'var(--bg)'], '.badge-blue, .alert-info'],
     ['rgba(255,255,255,0.46)', ['var(--brand)'], '.sidebar-section-label, .sidebar-user-plan'],
+    // ── the §52 components this page introduced in Run 55 ──
+    ['var(--accent-text)', ['var(--surface)', 'var(--bg)'], '.panel-index'],
+    ['var(--text)', ['var(--surface)', 'var(--bg)'], '.panel-title, .file-row-name, .metric-row-value'],
+    ['var(--muted)', ['var(--surface)', 'var(--bg)'], '.panel-meta, .file-row-meta, .score-ring-den'],
+    ['var(--text-2)', ['var(--surface)', 'var(--bg)'], '.score-ring-caption'],
+    ['var(--text)', ['var(--surface-2)', 'var(--surface)', 'var(--bg)'], '.kpi-tile-value'],
+    ['var(--muted)', ['var(--surface-2)', 'var(--surface)', 'var(--bg)'], '.kpi-tile-label'],
+    ['var(--accent-text)', ['var(--accent-bg)', 'var(--surface)', 'var(--bg)'], '.tag-accent'],
+    ['var(--amber-text)', ['var(--amber-bg)', 'var(--surface)', 'var(--bg)'], '.tag-amber'],
+    ['var(--text-2)', ['var(--surface)', 'var(--bg)'], '.tag resting'],
   ];
 
   test('CONTRAST ≥ 4.5:1 IN BOTH THEMES for every pair this page chooses', () => {

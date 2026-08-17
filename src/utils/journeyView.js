@@ -16,20 +16,26 @@
    node carries NO state class — a visibly different node — plus a grey badge
    and the reason in words. §6: state is never colour alone.
 
-   WHY NEITHER .is-earned NOR .is-locked APPEARS HERE. Both are §50 modifiers
-   and both fail §6's 4.5:1 rule, measured with test/lib/contrast.js rather
-   than guessed:
+   WHY NEITHER .is-earned NOR .is-locked APPEARS HERE — AND WHAT CHANGED.
+   Run 53 measured both against §6's 4.5:1 rule with test/lib/contrast.js and
+   found both failing, so neither was used:
 
      .milestone-badge.is-earned   1.2:1 light  — --accent-contrast is #ffffff
                                                  over a pale --accent-light, so
-                                                 it is white on near-white
+                                                 it was white on near-white
      .milestone-badge.is-locked   ~3.2:1       — opacity 0.6 over an already
                                                  quiet pair
-     .milestone-badge (resting)   7.06 / 4.97  — passes both themes
-     .badge.badge-gray            6.76 / 5.71  — passes both themes
+     .milestone-badge (resting)   7.06 / 4.97  — passed both themes
+     .badge.badge-gray            6.76 / 5.71  — passed both themes
 
-   Both modifiers need a master fix and a thirteen-path fan-out. That is its
-   own run, not a line in this one.
+   RUN 54 FIXED .is-earned in the master and fanned it out: it now pairs
+   --accent-text with --accent-bg and measures 5.08 light / 5.28 dark, so it is
+   available to any page that wants it. It is still not used HERE, and now for
+   a design reason rather than a contrast one — a rail where every completed
+   node is accent-tinted turns the whole spine one colour, and §6's "state is
+   never colour alone" is carried by the word, not the tint. .is-locked is
+   still unfixed: opacity 0.6 over a quiet pair remains below 4.5:1, and this
+   file's four states do not include "locked" anyway.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 const { esc } = require('./layout');

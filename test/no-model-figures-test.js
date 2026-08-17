@@ -378,11 +378,34 @@ atest('no rendered page shows an internal or registry brand in visible text', as
   // The DB is stubbed so the data-backed pages render their real templates.
   // Rows come back empty, which is the honest shape for a fresh company and
   // exercises the empty-state branches.
+  //
+  // WITH ONE EXCEPTION, ADDED IN RUN 55, AND IT MAKES THE STUB MORE TRUTHFUL.
+  // `SELECT count(*) …` with no GROUP BY returns exactly ONE row in Postgres,
+  // always — on an empty table, on a table this company has no rows in, on any
+  // table at all. That is what an aggregate IS. A stub answering `rows: []` to
+  // one models a database that cannot exist, and the only way a route survives
+  // it is by carrying a `rows[0] || {}` fallback for a case production never
+  // reaches — RULE 6, forced onto the code by the test rather than found in it.
+  // So an aggregate gets one row of zeroes, the route reads `rows[0].n`
+  // directly, and a genuinely broken connection still throws instead of
+  // rendering a confident 0. The same change is in test/dashboard-test.js and
+  // for the same reason; if you change it here, change it there.
+  const AGGREGATE_ZEROES = {
+    n: 0, bytes: 0, entries: 0, provisional: 0, projects: 0, products: 0,
+    proposals_live: 0, proposals_pending: 0, period_from: null, period_to: null,
+    live: 0, reviewed: 0, pending: 0, accepted: 0, answered: 0, na: 0, filled: 0,
+  };
   const dbPath = require.resolve('../src/db');
   const realDb = require.cache[dbPath];
   require.cache[dbPath] = {
     id: dbPath, filename: dbPath, loaded: true, exports: {
-      query: async () => ({ rows: [], rowCount: 0 }),
+      query: async (text) => {
+        const sql = String(text).replace(/\s+/g, ' ').trim();
+        if (/\bcount\(\*\)/i.test(sql) && !/\bGROUP BY\b/i.test(sql)) {
+          return { rows: [{ ...AGGREGATE_ZEROES }], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 0 };
+      },
       pool: { connect: async () => ({ query: async () => ({ rows: [] }), release() {} }) },
     },
   };

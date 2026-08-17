@@ -18,7 +18,7 @@ const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : nu
 const DAY_MS = 24 * 3600 * 1000;
 
 // ═══════════════════════════════════════════════════════════════════════════
-// THE DASHBOARD                                                      (Run 53)
+// THE DASHBOARD                                            (Run 53 · Run 55)
 //
 // Built from docs/design/reference-dashboard.png, and from
 // docs/design/UI_REFERENCE_ANNOTATED.md, which OUTRANKS it. About a third of
@@ -31,14 +31,21 @@ const DAY_MS = 24 * 3600 * 1000;
 // come from journeyEngine, which derives them from committed facts and stores
 // nothing. There is no counter anywhere on this page.
 //
+// RUN 55 MADE IT A GRID. Run 53 got the content right and left it a one-column
+// stack, because the master had no column system. Run 54 added §52 — a twelve
+// column grid, a numbered .panel, chips, file rows, metric rows, KPI tiles and
+// a hero score ring — so this run is composition and adds no CSS whatsoever.
+// Four rows: the four counters, then the score beside the journey, then three
+// working panels, then evidence beside carbon.
+//
 // TWO ORDERS, ONE PAGE. The mock draws a mature account, and its reading order
 // — stat cards, score, journey, panels — is right for one: the score answers
 // "where am I" and the rail answers "what next". A company that registered ten
 // minutes ago has no score, and rendering that layout for them produces a grid
 // of zeroes and an empty ring, which reads as BROKEN rather than as NEW. So
-// when there is no score the rail leads instead, because it is the one
-// component that is fully populated on day one — the stages exist before the
-// company does anything.
+// when there is no score the rail leads instead and takes the wider column,
+// because it is the one component fully populated on day one — the stages exist
+// before the company does anything.
 //
 // WHAT WAS DROPPED FROM THE MOCK, deliberately:
 //   the five stars under the score   a second rating scale competing with the
@@ -60,16 +67,64 @@ const DAY_MS = 24 * 3600 * 1000;
 
 const PILLAR_NAME = Object.freeze({ E: 'Environmental', S: 'Social', G: 'Governance' });
 
+// EACH PANEL IS A JOURNEY STAGE SEEN FROM A DIFFERENT ANGLE, so its number is
+// that stage's own position in the rail rather than a decorative 01/02/03. The
+// reference image heads every panel "Mission 05 of 09" and that instinct is
+// right — it is only honest if the number comes from esg_journey_stages, which
+// is what this map makes it do. Reorder the seed and these renumber themselves.
+// A panel whose stage is not seeded renders with NO index and NO meta rather
+// than with a made-up one.
+const PANEL_STAGE = Object.freeze({
+  review: 'PROPOSALS_REVIEWED',
+  roadmap: 'RECOMMENDATIONS',
+  green: 'GREEN_PROJECT',
+  evidence: 'DOCUMENTS_UPLOADED',
+  carbon: 'CARBON_DATA',
+});
+
+const pad2 = (n) => String(n).padStart(2, '0');
+
+/** Bytes as a human size. Not a fallback: a byte count that is not a number is
+ *  a bug upstream, and printing "—" says so rather than printing "0 KB", which
+ *  is a claim that the files are empty. */
+function fileSize(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '—';
+  if (v < 1024) return `${Math.round(v)} B`;
+  if (v < 1024 * 1024) return `${Math.round(v / 1024)} KB`;
+  return `${(v / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 /** A ring with its number in the DOM as TEXT. §3.4 rule 4: if a figure ever
  *  animates, the final value is present before any script runs — a number that
  *  is only correct once JavaScript has finished is a wrong number to a screen
- *  reader, to a no-JS user, and to anyone whose script was dropped. */
-function scoreRing(value, label, aria) {
+ *  reader, to a no-JS user, and to anyone whose script was dropped.
+ *
+ *  `--score` is the only inline style here. It is a DATA value driving §50's
+ *  conic-gradient, which is the mechanism §50 documents; it is not a theme
+ *  choice, and no size, colour or duration appears anywhere in this file. */
+function scoreRing(value, label, aria, opts = {}) {
   const n = Number(value);
-  const safe = Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 0;
-  return `<div class="score-ring" style="--score:${safe}" role="img" aria-label="${esc(aria)}">
-    <div class="score-ring-value">${Number.isFinite(n) ? esc(value) : '—'}</div>
-    <div class="score-ring-label">${esc(label)}</div>
+  const known = Number.isFinite(n);
+  const safe = known ? Math.max(0, Math.min(100, n)) : 0;
+  const size = opts.size ? ` score-ring--${opts.size}` : '';
+  const figure = opts.den
+    ? `<div class="score-ring-figure"><span class="score-ring-value">${known ? esc(value) : '—'}</span
+       ><span class="score-ring-den">/${esc(opts.den)}</span></div>`
+    : `<div class="score-ring-value">${known ? esc(value) : '—'}</div>`;
+  return `<div class="score-ring${size}" style="--score:${safe}" role="img" aria-label="${esc(aria)}">
+    ${figure}
+    ${label ? `<div class="score-ring-label">${esc(label)}</div>` : ''}
+  </div>`;
+}
+
+/** Ring, then whatever names it. §52 puts the caption OUTSIDE the ring because
+ *  inside it fights the arc. */
+function ringWrap(ring, caption, chip) {
+  return `<div class="score-ring-wrap">
+    ${ring}
+    ${chip || ''}
+    ${caption ? `<div class="score-ring-caption">${caption}</div>` : ''}
   </div>`;
 }
 
@@ -138,130 +193,328 @@ router.get('/dashboard', async (req, res, next) => {
     const overall = by.OVERALL || null;
     const answers = facts.predicates.assessment_answered;
 
-    /* ── the four stat cards ────────────────────────────────────────────── */
+    // ── THE PANEL DATA ──────────────────────────────────────────────────────
+    // journeyEngine answers "has this happened", which is all a predicate needs.
+    // The panels need the detail behind it — which files, how many proposals,
+    // which period — so this is the dashboard's own wave and it is deliberately
+    // not pushed into the engine: gatherFacts stays a predicate loader.
+    //
+    // Every one is an aggregate over a table this company owns, so each returns
+    // exactly one row and is read without a guard. A count query that returns
+    // nothing is a broken connection, and it should throw rather than render 0.
+    const [
+      { rows: docTotals }, { rows: recentDocs }, { rows: propTotals },
+      { rows: carbonTotals }, { rows: greenTotals }, { rows: registerTotals },
+    ] = await Promise.all([
+      query(
+        `SELECT count(*)::int AS n, coalesce(sum(byte_size), 0)::bigint AS bytes
+           FROM esg_documents WHERE company_id = $1`, [cid]),
+      query(
+        `SELECT id, filename, byte_size, text_status
+           FROM esg_documents WHERE company_id = $1
+          ORDER BY created_at DESC, id DESC LIMIT 5`, [cid]),
+      // auto_rejected proposals never reach a human, so they are outside both
+      // the numerator and the denominator — the same rule journeyEngine applies.
+      query(
+        `SELECT count(*)::int AS proposals_live,
+                count(*) FILTER (WHERE e.status = 'pending')::int AS proposals_pending
+           FROM esg_document_extractions e
+           JOIN esg_documents d ON d.id = e.document_id
+          WHERE d.company_id = $1 AND e.status <> 'auto_rejected'`, [cid]),
+      query(
+        `SELECT count(*)::int AS entries, min(period_start) AS period_from,
+                max(period_end) AS period_to,
+                count(*) FILTER (WHERE is_provisional)::int AS provisional
+           FROM esg_carbon_entries WHERE company_id = $1`, [cid]),
+      query(
+        `SELECT count(*)::int AS projects FROM esg_green_projects WHERE company_id = $1`, [cid]),
+      query(
+        `SELECT count(*)::int AS products FROM esg_finance_products WHERE is_active`, []),
+    ]);
+    const docs = docTotals[0];
+    const props = propTotals[0];
+    const carbon = carbonTotals[0];
+    const green = greenTotals[0];
+    const register = registerTotals[0];
+
+    /* ── panel chrome ─────────────────────────────────────────────────────
+       The index and the meta are the STAGE's, looked up by code. No stage, no
+       number — the alternative is a panel that claims a position in a rail it
+       is not on. */
+    const stageOf = (key) => (j ? j.stages.find((s) => s.stage_code === PANEL_STAGE[key]) : null);
+    function panel(key, title, body) {
+      const s = stageOf(key);
+      const idx = s ? j.stages.indexOf(s) + 1 : null;
+      return `<div class="panel panel--accent-top">
+        <div class="panel-head">
+          ${idx ? `<span class="panel-index">${esc(pad2(idx))}</span>` : ''}
+          <h3 class="panel-title">${esc(title)}</h3>
+          ${s ? `<span class="panel-meta">Stage ${esc(idx)} of ${esc(j.total_stages)} · ${
+  esc(view.stateWords(s))}</span>` : ''}
+        </div>
+        <div class="panel-body">${body}</div>
+      </div>`;
+    }
+
+    /* ── ROW A · the four counters ──────────────────────────────────────── */
     const reachable = j ? j.total_stages - j.counts.blocked : 0;
     const journeyPct = reachable > 0 ? Math.round((j.counts.completed / reachable) * 100) : 0;
     const active = j ? j.stages.find((s) => s.stage_code === j.active_stage_code) : null;
     const activeMission = (m && active)
       ? m.missions.find((x) => x.stage_code === active.stage_code) : null;
 
-    const statCards = journeyReady ? `<div class="stat-grid reveal">
-      ${statCard('Journey progress', `${journeyPct}%`,
+    const statCards = journeyReady ? `<div class="grid-12 reveal">
+      <div class="col-3">${statCard('Journey progress', `${journeyPct}%`,
     `${esc(j.counts.completed)} of ${esc(reachable)} stages you can reach${
-      j.counts.blocked ? ` · ${esc(j.counts.blocked)} blocked` : ''}`)}
-      ${statCard('Answers completed',
+      j.counts.blocked ? ` · ${esc(j.counts.blocked)} blocked` : ''}`)}</div>
+      <div class="col-3">${statCard('Answers completed',
     a ? `${esc(answers.done)} / ${esc(answers.total)}` : '—',
     a ? esc(frameworkLabel(a.framework_code, a.framework_version))
-      : 'No assessment started yet, so there is no denominator to count against')}
-      ${statCard('XP earned', esc(xp.total),
-    `${weekXp > 0 ? `${esc(weekXp)} in the last 7 days · ` : ''}Level ${esc(xp.level)} · ${esc(xp.label)}`)}
-      ${statCard('Next milestone', active ? esc(active.label_en) : 'Nothing waiting',
+      : 'No assessment started yet, so there is no denominator to count against')}</div>
+      <div class="col-3">${statCard('XP earned', esc(xp.total),
+    `${weekXp > 0 ? `${esc(weekXp)} in the last 7 days · ` : ''}Level ${esc(xp.level)} · ${esc(xp.label)}`)}</div>
+      <div class="col-3">${statCard('Next milestone', active ? esc(active.label_en) : 'Nothing waiting',
     active
       ? (activeMission ? `${esc(view.stateWords(activeMission))} · ${esc(activeMission.xp_award)} XP` : 'No mission on this stage')
       : 'Every stage you can reach is done',
-    Boolean(active))}
+    Boolean(active))}</div>
     </div>` : emptyState('uninstrumented', {
       title: 'The journey has not been set up on this deployment',
       body: 'No stage, mission or level is defined, so there is nothing to measure your position '
           + 'against. That is a configuration gap, not an empty account.' });
 
-    /* ── the score block ────────────────────────────────────────────────── */
+    /* ── ROW B · the score ──────────────────────────────────────────────────
+       A HERO RING AND THREE INLINE ONES, which is what replaced the radar. The
+       radar plotted three numbers on three axes; three rings state the same
+       three numbers, each with the ratio it was computed from underneath, and
+       cost nothing to load.
+
+       NOT .panel--deep. That variant paints --surface-deep, and §50's
+       .score-ring::before fills its centre with --surface — the disc would sit
+       on the wrong colour in the middle of the ring. A component's backdrop is
+       part of its contract. */
     const pillarRings = ['E', 'S', 'G'].map((p) => {
       const s = by[p] || {};
       const unanswered = !s.indicators_answered;
-      return `<div class="stat-card">
-        <div class="stat-label">${esc(PILLAR_NAME[p])}</div>
-        ${scoreRing(unanswered ? null : s.score_0_100, 'of 100',
-    `${PILLAR_NAME[p]} score ${unanswered ? 'not yet available' : `${s.score_0_100} out of 100`}`)}
-        <div class="stat-sub">${esc(s.indicators_answered || 0)} of ${esc(s.indicators_total || 0)} answered${
-  s.indicators_na > 0 ? ` · ${esc(s.indicators_na)} N/A` : ''}</div>
-      </div>`;
+      return ringWrap(
+        scoreRing(unanswered ? null : s.score_0_100, p,
+          `${PILLAR_NAME[p]} score ${unanswered ? 'not yet available' : `${s.score_0_100} out of 100`}`,
+          { size: 'inline' }),
+        `${esc(PILLAR_NAME[p])}<br>${esc(s.indicators_answered || 0)} of ${esc(s.indicators_total || 0)} answered${
+          s.indicators_na > 0 ? ` · ${esc(s.indicators_na)} N/A` : ''}`);
     }).join('');
 
-    const scoreBlock = overall ? `<div class="card reveal">
-      <div class="card-header">
-        <h3 class="card-title">ESG score</h3>
-        <span class="badge badge-accent">${esc(overall.band_code || 'Not banded')}${
-  bandLabel ? ` · ${esc(bandLabel)}` : ''}</span>
+    const scorePanel = overall ? `<div class="panel">
+      <div class="panel-head">
+        <h3 class="panel-title">ESG score overview</h3>
+        <span class="panel-meta">${esc(frameworkLabel(a.framework_code, a.framework_version))} · ${
+  esc(a.reporting_year)}</span>
       </div>
-      <div class="card-body">
-        <div class="stat-grid">
-          <div class="stat-card">
-            <div class="stat-label">Overall</div>
-            ${scoreRing(overall.score_0_100, 'of 100', `Overall ESG score ${overall.score_0_100} out of 100`)}
-            <div class="stat-sub">${esc(overall.indicators_answered)} of ${esc(overall.indicators_total)} answered</div>
-          </div>
-          ${pillarRings}
+      <div class="panel-body">
+        <div class="flex flex-wrap items-center gap-5">
+          ${ringWrap(
+    scoreRing(overall.score_0_100, null,
+      `Overall ESG score ${overall.score_0_100} out of 100`, { size: 'hero', den: '100' }),
+    `${esc(overall.indicators_answered)} of ${esc(overall.indicators_total)} indicators answered`,
+    `<span class="badge badge-accent">${esc(overall.band_code || 'Not banded')}${
+      bandLabel ? ` · ${esc(bandLabel)}` : ''}</span>`)}
+          <div class="flex flex-wrap gap-4 items-start">${pillarRings}</div>
         </div>
-        <p class="text-sm">${esc(frameworkLabel(a.framework_code, a.framework_version))} ·
-           weighting v${esc(overall.weighting_version)} · engine v${esc(overall.engine_version)} ·
-           reporting year ${esc(a.reporting_year)}. Every figure here is arithmetic over your own
-           answers. No part of it is generated by AI, and the band above is the one seeded in
-           esg_rating_bands — this page does not name it itself.</p>
-        ${emptyState('uninstrumented', {
-    title: 'No industry comparison',
-    body: 'Nothing writes a peer cohort, so there is no industry to compare you against. This is '
-        + 'not switched on, rather than empty — and a percentile built from other companies\' '
-        + 'scores needs opt-in and a minimum cohort size before it could ever be shown.' })}
+        <p class="text-sm">Weighting v${esc(overall.weighting_version)} · engine v${esc(overall.engine_version)}.
+           Every figure here is arithmetic over your own answers. No part of it is generated by AI,
+           and the band above is the one seeded in esg_rating_bands — this page does not name it
+           itself.</p>
+        <!-- A SENTENCE, NOT A FULL EMPTY STATE, AND THE DIFFERENCE IS MEASURED.
+             The first version of this panel used emptyState() here; the
+             screenshot showed the resulting block — big centred icon, three
+             lines of centred prose — taking up MORE of the panel than the
+             score did. The panel's job is to present the score, and the
+             loudest thing in it had become an apology for a feature that does
+             not exist. Annotation §1.1 requires this to be named rather than
+             hidden, and it is: named here in one line, explained in full in
+             "On the design, not on this page" below, which is the page's own
+             place for absent features. emptyState() is still used wherever the
+             REGION is empty — a panel with nothing in it is a different fact
+             from a panel that is full and lacks a neighbour. -->
+        <p class="text-sm text-muted">No industry comparison: nothing writes a peer cohort, so
+           there is no industry to compare you against. It is not switched on rather than empty —
+           see the table at the foot of this page.</p>
       </div>
-    </div>` : `<div class="card reveal">
-      <div class="card-header"><h3 class="card-title">ESG score</h3></div>
-      <div class="card-body">${a
+    </div>` : `<div class="panel">
+      <div class="panel-head"><h3 class="panel-title">ESG score overview</h3></div>
+      <div class="panel-body">${a
     ? emptyState('instrumented_but_empty', {
       title: 'Assessment started, not scored yet',
       body: 'The score is computed from your answers when you submit the assessment. Nothing is '
           + 'estimated in the meantime, so there is no provisional figure to show you.' })
-      + `<p style="text-align:center"><a class="btn btn-primary" href="/assessment/${esc(a.id)}">Continue the assessment</a></p>`
+      + `<p class="text-center"><a class="btn btn-primary" href="/assessment/${esc(a.id)}">Continue the assessment</a></p>`
     : emptyState('instrumented_but_empty', {
       title: 'No assessment yet',
       body: 'This is switched on and working — you have not started one. Your ESG score is '
           + 'calculated from an assessment, so it begins there.' })
-      + '<p style="text-align:center"><a class="btn btn-primary" href="/assessment">Start an assessment</a></p>'}
+      + '<p class="text-center"><a class="btn btn-primary" href="/assessment">Start an assessment</a></p>'}
       </div>
     </div>`;
 
-    /* ── the improvement roadmap ────────────────────────────────────────── */
+    const railPanel = journeyReady ? `<div class="panel">
+      <div class="panel-head">
+        <h3 class="panel-title">Your ESG journey</h3>
+        <span class="panel-meta">${esc(j.counts.completed)} of ${esc(j.total_stages)} stages</span>
+      </div>
+      <div class="panel-body">
+        ${view.rail(j.stages, { compact: true })}
+        <p class="text-sm">A blocked stage is not waiting on you — it says what is missing and who
+           has to publish it.</p>
+        <p><a class="btn btn-outline btn-sm" href="/journey">Open the journey</a></p>
+      </div>
+    </div>` : '';
+
+    /* ── ROW C · review queue, roadmap, green finance ───────────────────── */
+
+    // THE COUNTS ARE .tag, NOT .chip, AND THAT IS A DELIBERATE DEVIATION from
+    // the brief. §52's own header draws the line: ".tag is a LABEL — it
+    // describes something. A chip is a CONTROL: it is pressed, it has an active
+    // state." Nothing on this deployment filters a review queue — /documents
+    // takes no status parameter and proposals are reviewed per document — so
+    // three pressable-looking chips that do not filter would be three dead
+    // controls (§4.3c), in the panel whose whole job is to be actioned. The
+    // .chip-row is kept, because it is the row layout; the one real control is
+    // the link beneath it.
+    const missing = a ? Math.max(0, answers.total - answers.done) : 0;
+    const reviewPanel = panel('review', 'Review queue', `
+      <div class="chip-row">
+        <span class="tag">All proposals <b class="chip-count">${esc(props.proposals_live)}</b></span>
+        <span class="tag tag-amber">Review required <b class="chip-count">${esc(props.proposals_pending)}</b></span>
+        <span class="tag">Unanswered indicators <b class="chip-count">${esc(missing)}</b></span>
+      </div>
+      ${props.proposals_live > 0
+    ? `<p class="text-sm">Each proposal carries a verbatim quote checked against the document it
+         came from. There is no confidence percentage here and there never will be — an unquotable
+         claim is discarded before you see it, which is a stronger guarantee than a number.</p>
+       <p><a class="btn btn-outline btn-sm" href="/documents">Open evidence to review</a></p>`
+    : emptyState(docs.n > 0 ? 'instrumented_but_empty' : 'uninstrumented', {
+      title: docs.n > 0 ? 'Nothing waiting for you' : 'No documents to read yet',
+      body: docs.n > 0
+        ? 'Your documents have been read and no proposal is outstanding. That is a measured '
+          + 'result — the queue is empty rather than switched off.'
+        : 'Proposals are produced by reading the documents you upload. Nothing has been '
+          + 'uploaded, so there is nothing to propose.' })}`);
+
     const priorityBadge = (p) => `<span class="badge badge-${
       p === 'high' ? 'red' : p === 'medium' ? 'amber' : 'gray'}">${esc(p || 'unrated')}</span>`;
 
-    const roadmap = `<div class="card reveal">
-      <div class="card-header"><h3 class="card-title">🤖 Improvement roadmap</h3>${
-  recs.length ? `<span class="badge badge-gray">${esc(recs.length)} shown</span>` : ''}</div>
-      <div class="card-body">${recs.length
-    ? `<div class="grid">${recs.map((r) => `<div class="mission-card">
-          <div class="mission-title">${esc(PILLAR_NAME[r.pillar] || r.pillar || 'General')} · ${esc(r.points_missed)} points available</div>
-          <div class="mission-meta">${priorityBadge(r.priority)}${
-  r.source === 'fallback_template' ? ' written offline — the model was unavailable' : ''}</div>
-          <p class="text-sm">${esc(r.narrative_en)}</p>
-        </div>`).join('')}</div>
-        <p class="text-sm">The points are computed by the scoring engine. The model writes the
-           sentence around them and never the number. There is deliberately no progress bar on a
-           recommendation — nothing in this system tracks whether you have acted on one, and a 0%
-           bar would be a claim that it does.</p>`
-    : (overall
-      ? emptyState('zero', {
-        title: 'No gaps worth listing',
-        body: 'The engine found nothing above the reporting threshold for this assessment. That '
-            + 'is a measured result, not a missing one.' })
-      : emptyState('instrumented_but_empty', {
-        title: 'Nothing to improve yet',
-        body: 'The roadmap is produced when the assessment is scored. It is switched on and '
-            + 'working — there is no scored assessment to build it from.' }))}
-      </div>
-    </div>`;
+    const roadmapPanel = panel('roadmap', 'Improvement roadmap', recs.length
+      ? `${recs.slice(0, 3).map((r) => `<div class="metric-row">
+          <span class="metric-row-label">${esc(PILLAR_NAME[r.pillar] || r.pillar || 'General')}</span>
+          <span class="flex-1"><span class="tag tag-accent">+${esc(r.points_missed)} points</span>
+            ${priorityBadge(r.priority)}</span>
+          <span class="metric-row-value">${esc(r.points_missed)}</span>
+        </div>
+        <p class="text-sm">${esc(r.narrative_en)}${
+  r.source === 'fallback_template' ? ' — written offline; the model was unavailable.' : ''}</p>`).join('')}
+      <p class="text-sm">The points are computed by the scoring engine. The model writes the sentence
+         around them and never the number. There is deliberately no progress bar on a recommendation
+         — nothing in this system tracks whether you have acted on one, and a 0% bar would be a claim
+         that it does.</p>
+      <p><a class="btn btn-outline btn-sm" href="/reports">See every recommendation</a></p>`
+      : (overall
+        ? emptyState('zero', {
+          title: 'No gaps worth listing',
+          body: 'The engine found nothing above the reporting threshold for this assessment. That '
+              + 'is a measured result, not a missing one.' })
+        : emptyState('instrumented_but_empty', {
+          title: 'Nothing to improve yet',
+          body: 'The roadmap is produced when the assessment is scored. It is switched on and '
+              + 'working — there is no scored assessment to build it from.' })));
 
-    /* ── the journey rail ───────────────────────────────────────────────── */
-    const railBlock = journeyReady ? `<div class="card reveal">
-      <div class="card-header">
-        <h3 class="card-title">Your ESG journey</h3>
-        <a class="btn btn-outline btn-sm" href="/journey">Open the journey</a>
+    // TWO KPI TILES, BECAUSE TWO IS WHAT IS REAL. Readiness has not shipped —
+    // no table, no route, nothing writes one — so the panel says so by name
+    // rather than showing a readiness figure of zero, which would read as
+    // "assessed and found wanting" instead of "not built".
+    const greenPanel = panel('green', 'Green finance', `
+      <div class="grid-12 grid--dense">
+        <div class="col-6"><div class="kpi-tile">
+          <span class="kpi-tile-icon" aria-hidden="true">🌿</span>
+          <span><span class="kpi-tile-value">${esc(green.projects)}</span>
+            <span class="kpi-tile-label">${green.projects === 1 ? 'project defined' : 'projects defined'}</span></span>
+        </div></div>
+        <div class="col-6"><div class="kpi-tile">
+          <span class="kpi-tile-icon" aria-hidden="true">🏦</span>
+          <span><span class="kpi-tile-value">${esc(register.products)}</span>
+            <span class="kpi-tile-label">products on the register</span></span>
+        </div></div>
       </div>
-      <div class="card-body">
-        ${view.rail(j.stages, { compact: true })}
-        <p class="text-sm">${esc(j.counts.completed)} of ${esc(j.total_stages)} stages complete.
-           A blocked stage is not waiting on you — it says what is missing and who has to publish it.</p>
+      ${green.projects > 0
+    // Same judgement as the score panel. With projects on file the panel is
+    // populated, so the missing MATCHING is a footnote; with none it is the
+    // whole state of the region and gets the full named empty state.
+    ? `<p class="text-sm text-muted">Nothing matches you to a product yet. The register is a public
+         reference list and the projects are yours — readiness is not built, so nothing joins the
+         two, and a match shown now would be a guess.</p>`
+    : emptyState('uninstrumented', {
+      title: 'Nothing matches you to a product yet',
+      body: 'The register is a public reference list and the projects are yours. Nothing joins the '
+          + 'two — readiness is not built, so no product here has been assessed against your '
+          + 'position, and a match shown now would be a guess.' })}
+      <p><a class="btn btn-outline btn-sm" href="/green-finance">Open green finance</a></p>`);
+
+    /* ── ROW D · evidence and carbon ────────────────────────────────────── */
+    const DOC_STATUS = {
+      pending: ['Not analysed', 'badge'],
+      extracting: ['Reading…', 'badge badge-amber'],
+      extracted: ['Text extracted', 'badge badge-green'],
+      no_text_layer: ['No text layer', 'badge badge-amber'],
+      failed: ['Could not read', 'badge badge-red'],
+    };
+
+    const evidencePanel = panel('evidence', 'Evidence', docs.n > 0
+      ? `${recentDocs.map((d) => {
+        const [label, cls] = DOC_STATUS[d.text_status] || ['Unknown state', 'badge'];
+        return `<div class="file-row">
+          <span class="file-row-icon" aria-hidden="true">📄</span>
+          <span class="file-row-main">
+            <span class="file-row-name">${esc(d.filename)}</span>
+            <span class="file-row-meta">${esc(fileSize(d.byte_size))}</span>
+          </span>
+          <span class="file-row-status"><span class="${cls}">${esc(label)}</span></span>
+        </div>`;
+      }).join('')}
+      <p class="text-sm">${esc(docs.n)} ${docs.n === 1 ? 'document' : 'documents'} on file ·
+         ${esc(fileSize(docs.bytes))} in total${
+  docs.n > recentDocs.length ? ` · the ${esc(recentDocs.length)} most recent shown` : ''}.</p>
+      <p><a class="btn btn-outline btn-sm" href="/documents">Open evidence</a></p>`
+      : emptyState('instrumented_but_empty', {
+        title: 'No documents yet',
+        body: 'Uploading is switched on and working — nothing has been uploaded. Documents are '
+            + 'what the assessment draws its evidence from, so this is where the shortest path '
+            + 'to a score begins.' })
+        + '<p><a class="btn btn-primary" href="/documents">Upload a document</a></p>');
+
+    const carbonPanel = panel('carbon', 'Carbon', carbon.entries > 0
+      ? `<div class="grid-12 grid--dense">
+        <div class="col-6"><div class="kpi-tile">
+          <span class="kpi-tile-icon" aria-hidden="true">📊</span>
+          <span><span class="kpi-tile-value">${esc(carbon.entries)}</span>
+            <span class="kpi-tile-label">${carbon.entries === 1 ? 'entry on file' : 'entries on file'}</span></span>
+        </div></div>
+        <div class="col-6"><div class="kpi-tile">
+          <span class="kpi-tile-icon" aria-hidden="true">🕓</span>
+          <span><span class="kpi-tile-value">${esc(carbon.provisional)}</span>
+            <span class="kpi-tile-label">provisional</span></span>
+        </div></div>
       </div>
-    </div>` : '';
+      <p class="text-sm">Covering ${esc(String(carbon.period_from).slice(0, 10))} to
+         ${esc(String(carbon.period_to).slice(0, 10))}.${carbon.provisional > 0
+    ? ' A provisional entry used a factor that was not verified at the time it was recorded; the'
+      + ' factor version is stamped on the row, so it can be recomputed rather than guessed at.'
+    : ' Every entry used a verified factor, stamped on the row at the time it was recorded.'}</p>
+      <p><a class="btn btn-outline btn-sm" href="/carbon">Open carbon</a></p>`
+      : emptyState('instrumented_but_empty', {
+        title: 'No energy or fuel data yet',
+        body: 'The factors are loaded and the calculator is working — you have not entered a '
+            + 'period. Nothing is estimated on your behalf, so there is no provisional figure '
+            + 'standing in for one.' })
+        + '<p><a class="btn btn-primary" href="/carbon">Record a period</a></p>');
 
     /* ── what the mock shows and this page will not ─────────────────────── */
     const notShown = `<div class="card">
@@ -270,6 +523,12 @@ router.get('/dashboard', async (req, res, next) => {
         <div class="table-wrap"><table>
           <thead><tr><th>Element</th><th>Why it is not here</th></tr></thead>
           <tbody>
+            <tr><td>Comparison to your industry</td>
+                <td>There is no peer cohort in this database — nothing aggregates across companies
+                    and no industry group is recorded. It is also a cross-tenant surface: even once
+                    the data exists, a percentile must never be computable back to one competitor's
+                    score, so it needs opt-in and a minimum cohort size before it could be shown at
+                    all.</td></tr>
             <tr><td>Your impact on the four pillars</td>
                 <td>No published methodology maps company activity to a pillar. Claiming a
                     contribution level would attribute a mapping to an organisation that has
@@ -289,13 +548,35 @@ router.get('/dashboard', async (req, res, next) => {
       </div>
     </div>`;
 
-    // THE ORDER IS THE DESIGN DECISION. With a score, the mock's order stands.
-    // Without one, the rail leads — it is the only block that is fully
-    // populated on day one, and it answers both "where am I" and "what next"
-    // when nothing else can.
+    // THE ORDER IS THE DESIGN DECISION. With a score, the mock's order stands
+    // and the score takes the wider column. Without one, the rail leads AND
+    // takes .col-7 — it is the only block fully populated on day one, and it
+    // answers both "where am I" and "what next" when nothing else can.
+    const rowB = overall
+      ? `<div class="grid-12 reveal">
+          <div class="col-7">${scorePanel}</div>
+          <div class="col-5">${railPanel}</div>
+        </div>`
+      : `<div class="grid-12 reveal">
+          <div class="col-7">${railPanel}</div>
+          <div class="col-5">${scorePanel}</div>
+        </div>`;
+
+    const rowC = `<div class="grid-12 reveal">
+      <div class="col-4">${reviewPanel}</div>
+      <div class="col-4">${roadmapPanel}</div>
+      <div class="col-4">${greenPanel}</div>
+    </div>`;
+
+    const rowD = `<div class="grid-12 reveal">
+      <div class="col-6">${evidencePanel}</div>
+      <div class="col-6">${carbonPanel}</div>
+      <div class="col-12">${notShown}</div>
+    </div>`;
+
     const body = overall
-      ? `${statCards}${scoreBlock}${railBlock}${roadmap}${notShown}`
-      : `${railBlock}${statCards}${scoreBlock}${roadmap}${notShown}`;
+      ? `${statCards}${rowB}${rowC}${rowD}`
+      : `${rowB}${statCards}${rowC}${rowD}`;
 
     res.send(layout('Dashboard', body, req.user, '/dashboard'));
   } catch (err) { next(err); }
