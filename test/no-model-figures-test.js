@@ -396,7 +396,11 @@ atest('no rendered page shows an internal or registry brand in visible text', as
     // Two nav paths are served by their own routers rather than by pages.js.
     // They are rendered below, individually, so the denominator at the bottom
     // still covers every entry in MODULES.
-    const ELSEWHERE = { '/documents': '../src/routes/documents', '/green-finance': '../src/routes/greenFinance' };
+    const ELSEWHERE = {
+      '/documents': '../src/routes/documents',
+      '/green-finance': '../src/routes/greenFinance',
+      '/journey': '../src/routes/journey',
+    };
     for (const m of MODULES) {
       if (ELSEWHERE[m.path]) continue;
       const { html, failed } = await renderRoute(pages, m.path, req);
@@ -416,11 +420,13 @@ atest('no rendered page shows an internal or registry brand in visible text', as
   }
 
   // A loop that covered nothing passes every assertion inside it. Assert the
-  // DENOMINATOR: 15 nav paths + 15 signed-in shells + 1 signed-out shell.
-  // 14 until Run 47 added Green Finance.
-  assert.strictEqual(MODULES.length, 15, `expected 15 nav entries, found ${MODULES.length}`);
-  assert.strictEqual(checked.length, 31,
-    `expected 31 rendered surfaces checked, got ${checked.length}: ${checked.join(', ')}`);
+  // DENOMINATOR: 16 nav paths + 16 signed-in shells + 1 signed-out shell.
+  // 14 until Run 47 added Green Finance; 15 until Run 52 added ESG Journey.
+  // The number is hardcoded ON PURPOSE — adding a nav entry has to be an
+  // acknowledged act rather than a silent widening of a loop.
+  assert.strictEqual(MODULES.length, 16, `expected 16 nav entries, found ${MODULES.length}`);
+  assert.strictEqual(checked.length, 33,
+    `expected 33 rendered surfaces checked, got ${checked.length}: ${checked.join(', ')}`);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

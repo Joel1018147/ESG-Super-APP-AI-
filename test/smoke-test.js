@@ -265,18 +265,76 @@ const json = (method, o) => ({ method, headers: { 'Content-Type': 'application/j
                      '/api/workflow', '/api/users', '/api/integrations',
                      '/api/finance-products', '/api/project-types',
                      '/api/taxonomy/CCPT', '/api/taxonomy/ASEAN',
+                     '/api/journey', '/api/missions', '/api/xp',
                      `/api/assessments/${assessmentId}/extractions`]) {
       const r = await A(p, { headers: { Accept: 'application/json' } });
       assert.strictEqual(r.status, 200, `${p} returned ${r.status}`);
     }
   });
 
-  await check('every one of the 15 navigable screens renders signed-in', async () => {
+  await check('the journey is derived from the rows this run actually wrote', async () => {
+    // GATE 2 IN ONE CHECK. By this point the suite has a completed profile, a
+    // fully answered and scored assessment, two carbon entries and an uploaded
+    // document — all written through real HTTP — so the journey is the only
+    // surface that can prove those rows and the derived figures agree.
+    const j = await (await A('/api/journey', { headers: { Accept: 'application/json' } })).json();
+    assert.strictEqual(j.state, 'ok', `journey reported ${j.state}`);
+    const by = Object.fromEntries(j.stages.map((s) => [s.stage_code, s]));
+
+    // THE PROFILE IS GENUINELY PART-DONE AT THIS POINT — registration set the
+    // name and the grid region and nothing has set an SSM number, an MSIC code
+    // or a headcount. So the honest answer is 2 of 5, and asserting it here is
+    // what makes the flip below mean something. This assertion was written the
+    // other way round first and the engine was right: a derived figure that
+    // disagrees with a fixture is a finding about the fixture.
+    assert.strictEqual(by.COMPANY_PROFILE.state, 'in_progress',
+      `a half-filled profile reports ${by.COMPANY_PROFILE.state}`);
+    assert.strictEqual(by.COMPANY_PROFILE.done, 2,
+      `expected 2 of 5 profile fields, got ${by.COMPANY_PROFILE.done} of ${by.COMPANY_PROFILE.total}`);
+
+    assert.strictEqual(by.ASSESSMENT_ANSWERED.state, 'completed',
+      `every indicator was answered but the stage says ${by.ASSESSMENT_ANSWERED.state}`);
+    assert.strictEqual(by.ASSESSMENT_ANSWERED.total, 40,
+      `the denominator resolved to ${by.ASSESSMENT_ANSWERED.total}, not the Modus 40`);
+    assert.strictEqual(by.ASSESSMENT_SCORED.state, 'completed', 'a scored assessment did not complete its stage');
+    assert.strictEqual(by.CARBON_DATA.state, 'completed', 'two carbon entries did not complete their stage');
+    assert.strictEqual(by.CERTIFICATION.state, 'blocked', 'certification is not reported as blocked');
+    assert.strictEqual(by.CERTIFICATION.blocked_reason_code, 'CERTIFICATION');
+
+    const xp = await (await A('/api/xp', { headers: { Accept: 'application/json' } })).json();
+    assert.ok(xp.total > 0, 'nothing earned any XP after a full run through the product');
+    assert.ok(xp.awards.length >= 4, `only ${xp.awards.length} awards for a completed assessment`);
+    for (const a of xp.awards) {
+      assert.ok(a.source_table && a.source_id && a.earned_at,
+        `award ${a.mission_code} reached the API with no provenance`);
+    }
+    // §4.3b: codes over the wire, never a display string.
+    assert.ok(!JSON.stringify(j).includes('Set up your company profile'),
+      'the journey API sends an English label');
+
+    // AND THE FIGURE MOVES WHEN THE ROWS MOVE. Filling the three missing profile
+    // fields through the real API must flip the stage and add its XP, with no
+    // journey-specific write anywhere — which is the entire claim this run makes.
+    const put = await A('/api/company', json('PUT', {
+      ssm_number: `SMOKE${stamp}`, msic_code: '25113', employee_count: 12 }));
+    assert.strictEqual(put.status, 200);
+    const j2 = await (await A('/api/journey', { headers: { Accept: 'application/json' } })).json();
+    const profile2 = j2.stages.find((s) => s.stage_code === 'COMPANY_PROFILE');
+    assert.strictEqual(profile2.state, 'completed',
+      `filling the remaining profile fields left the stage at ${profile2.state} — the figure is not derived`);
+    const xp2 = await (await A('/api/xp', { headers: { Accept: 'application/json' } })).json();
+    assert.ok(xp2.total > xp.total,
+      `XP did not move when the underlying rows did: ${xp.total} then ${xp2.total}`);
+    const profileAward = xp2.awards.find((a) => a.source_table === 'esg_companies');
+    assert.ok(profileAward, 'the profile mission earned no award after the profile was completed');
+  });
+
+  await check('every one of the 16 navigable screens renders signed-in', async () => {
     // The demo is "one navigable screen per requirement section". A 500 or a
     // redirect on any of them is the whole thing failing in front of someone.
-    // 14 until Run 47 added Green Finance.
+    // 14 until Run 47 added Green Finance; 15 until Run 52 added ESG Journey.
     const { MODULES } = require('../src/utils/layout');
-    assert.strictEqual(MODULES.length, 15, `expected 15 nav entries, found ${MODULES.length}`);
+    assert.strictEqual(MODULES.length, 16, `expected 16 nav entries, found ${MODULES.length}`);
     for (const m of MODULES) {
       const r = await A(m.path);
       assert.strictEqual(r.status, 200, `${m.path} returned ${r.status}`);

@@ -190,6 +190,7 @@ app.use('/api',  requireAuth, denyWritesForReadOnly, require('./routes/api'));
 app.use('/',     requireAuth, denyWritesForReadOnly, require('./routes/documents'));
 app.use('/',     requireAuth, denyWritesForReadOnly, require('./routes/carbonImport'));
 app.use('/',     requireAuth, denyWritesForReadOnly, require('./routes/greenFinance'));
+app.use('/',     requireAuth, denyWritesForReadOnly, require('./routes/journey'));
 // pages.js stays LAST of the page routers: its `/:id` patterns are broad enough
 // to swallow a sibling module's path if it is mounted above one.
 app.use('/',     requireAuth, denyWritesForReadOnly, require('./routes/pages'));

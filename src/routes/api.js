@@ -904,4 +904,112 @@ router.post('/green-opportunities/:id/reject', wrap(async (req, res) => {
   res.json({ opportunity: row });
 }));
 
+// ═══════════════════════════════════════════════════════════════════════════
+// THE JOURNEY, MISSIONS AND XP                                       (Run 52)
+//
+// CODES AND INTEGERS ONLY. Not one of these three responses carries an English
+// display string — no stage label, no mission label, no level name.
+// MODUS_UI_CONTRACT §4.3b: a server-supplied display string cannot be
+// translated and is English forever, so identifiers and state cross the wire
+// and the client looks up the words. test/journey-test.js asserts it by
+// checking that no seeded label appears in any of the three bodies, which is a
+// test that fails the moment someone adds one for convenience.
+//
+// `blocked_reason_code` is the STAGE CODE, because there is exactly one blocked
+// reason per stage and the English sentence lives in
+// esg_journey_stages.blocked_reason. A client wanting to render it in another
+// language keys its own dictionary off this code; sending the sentence itself
+// would be the §4.3b defect.
+//
+// These reads are company-scoped inside journeyEngine.gatherFacts(), which
+// carries the tenant predicate on every statement it issues. Nothing is stored
+// by any of them: they are all GET, and the engine writes nothing at all.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const journeyEngine = require('../services/journeyEngine');
+
+router.get('/journey', wrap(async (req, res) => {
+  const { stages } = await journeyEngine.loadDefinitions();
+  if (!stages.length) {
+    // UNINSTRUMENTED, and it says so rather than answering with an empty array
+    // that a client cannot tell apart from a company at stage zero.
+    return res.json({ state: 'uninstrumented', stages: [], total_stages: 0,
+      detail: 'No journey stage is defined on this deployment; seed.sql has not run.' });
+  }
+  const facts = await journeyEngine.gatherFacts(cid(req));
+  const j = journeyEngine.computeJourney(facts, stages);
+  res.json({
+    state: 'ok',
+    engine_version: journeyEngine.ENGINE_VERSION,
+    active_stage_code: j.active_stage_code,
+    counts: j.counts,
+    total_stages: j.total_stages,
+    stages: j.stages.map((s) => ({
+      stage_code: s.stage_code,
+      group_code: s.group_code,
+      predicate_code: s.predicate_code,
+      sort_order: s.sort_order,
+      state: s.state,
+      done: s.done,
+      total: s.total,
+      blocked: s.blocked,
+      blocked_reason_code: s.blocked ? s.stage_code : null,
+    })),
+  });
+}));
+
+router.get('/missions', wrap(async (req, res) => {
+  const { missions } = await journeyEngine.loadDefinitions();
+  if (!missions.length) {
+    return res.json({ state: 'uninstrumented', missions: [], total: 0, completed: 0,
+      detail: 'No mission is defined on this deployment; seed.sql has not run.' });
+  }
+  const facts = await journeyEngine.gatherFacts(cid(req));
+  const m = journeyEngine.computeMissions(facts, missions);
+  res.json({
+    state: 'ok',
+    completed: m.completed,
+    total: m.total,
+    missions: m.missions.map((x) => ({
+      mission_code: x.mission_code,
+      stage_code: x.stage_code,
+      predicate_code: x.predicate_code,
+      state: x.state,
+      done: x.done,
+      total: x.total,
+      xp_award: x.xp_award,
+    })),
+  });
+}));
+
+router.get('/xp', wrap(async (req, res) => {
+  const { missions, levels } = await journeyEngine.loadDefinitions();
+  if (!missions.length || !levels.length) {
+    return res.json({ state: 'uninstrumented', total: 0, awards: [],
+      detail: 'No mission or level ladder is defined on this deployment; seed.sql has not run.' });
+  }
+  const facts = await journeyEngine.gatherFacts(cid(req));
+  const xp = journeyEngine.computeXp(facts, missions, levels);
+  res.json({
+    state: 'ok',
+    total: xp.total,
+    max_xp: xp.max_xp,
+    level: xp.level,
+    level_min_xp: xp.level_min_xp,
+    next_level: xp.next_level,
+    next_level_min_xp: xp.next_level_min_xp,
+    // Every award names the row that earned it and is dated by THAT ROW'S own
+    // timestamp, so a caller can compute "this week" itself and can go and look
+    // at the row. An award that could not be traced would have thrown in the
+    // engine rather than reaching here.
+    awards: xp.awards.map((a) => ({
+      mission_code: a.mission_code,
+      xp: a.xp,
+      earned_at: a.earned_at,
+      source_table: a.source_table,
+      source_id: a.source_id,
+    })),
+  });
+}));
+
 module.exports = router;

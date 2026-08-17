@@ -1109,3 +1109,146 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_esg_green_opportunities_live
   WHERE status <> 'auto_rejected';
 CREATE INDEX IF NOT EXISTS idx_esg_green_opportunities_company
   ON esg_green_opportunities (company_id, status);
+
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 13. THE JOURNEY, MISSIONS AND XP — THREE REFERENCE TABLES, AND NO COUNTER
+--                                                     (Run 52, 2026-08-17)
+--
+-- READ THE ABSENCE FIRST: there is no `company_id` anywhere in this section,
+-- and no column called `xp`, `progress`, `points` or `completed_at`. That is
+-- the whole design, not an omission.
+--
+-- Journey progress, mission completion and XP are DERIVED, every time, from
+-- the rows the company has actually written — a profile field filled in, a
+-- document uploaded, an extraction accepted, an indicator answered, a score
+-- computed. An `xp` integer that a route increments drifts from reality the
+-- first time a request dies between the write and the commit, and once it has
+-- drifted nothing in the system can tell you. Derived, it is correct by
+-- construction, recomputable at any moment, and falsifiable against its own
+-- sources — which is the same rule esg_scores already runs on, one layer up:
+-- an executor computes the figure and nothing else is allowed to author one.
+--
+-- A wrong XP number is a wrong number on a screen that also carries an ESG
+-- score, and a user cannot tell which kind they are looking at. So there is no
+-- exception for gamification here.
+--
+-- These three tables hold the DEFINITION — which stages exist, in what order,
+-- which fact satisfies each, which cannot happen yet and why, and what a level
+-- is called. `seed.sql` is their only writer, deliberately and explicitly
+-- (recurring-bugs-checklist.md #22): they are product configuration, not
+-- transaction data, and they change when someone edits the seed, never when a
+-- user clicks something.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- The journey as DATA, so that adding the Green Finance arc — or removing a
+-- stage the day it stops being true — is a seed edit and not a template edit.
+CREATE TABLE IF NOT EXISTS esg_journey_stages (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  code           text NOT NULL,
+  sort_order     integer NOT NULL,
+  label_en       text NOT NULL,
+  -- NULL, and they stay NULL. No source publishes these strings, and
+  -- seed.sql:150-154 already records the ruling for this repo: inventing one is
+  -- precisely what mapping_status exists to prevent. The page renders the
+  -- English label; the API sends the CODE and never the label, so a client with
+  -- its own dictionary is not blocked by this.
+  label_bm       text,
+  label_zh       text,
+  description_en text,
+  group_code     text NOT NULL
+                 CHECK (group_code IN ('assess','evidence','improve','finance','expert','certify')),
+  -- Names the fact that satisfies this stage. journeyEngine.js THROWS on a code
+  -- it does not implement rather than treating it as unsatisfied — an
+  -- unrecognised predicate is a seed/code mismatch, and scoring it as "pending"
+  -- would hide it behind a state that looks perfectly normal (RULE 6a).
+  predicate_code text NOT NULL,
+  -- THE IMPORTANT COLUMN. Non-null means: this cannot happen yet, and here is
+  -- why, in the words of whoever decided it. A blocked stage is NOT pending —
+  -- pending means your turn next. Drawing them the same way is the same error
+  -- class as a failed AI call rendering like an empty one.
+  blocked_reason text,
+  is_active      boolean NOT NULL DEFAULT true,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  updated_at     timestamptz NOT NULL DEFAULT now()
+);
+-- Covers: every row. `code` is NOT NULL, so a plain unique index is honest here
+-- rather than a partial one — and esg_missions.stage_code references it, which
+-- needs a unique index to point at.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_esg_journey_stages_code
+  ON esg_journey_stages (code);
+CREATE INDEX IF NOT EXISTS idx_esg_journey_stages_order
+  ON esg_journey_stages (sort_order) WHERE is_active;
+
+-- A mission is a stage's predicate with an XP price on it. Same predicate
+-- vocabulary, deliberately: two vocabularies would drift, and a mission that
+-- could be complete while its stage was not is a contradiction a user would
+-- see before we did.
+CREATE TABLE IF NOT EXISTS esg_missions (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  code           text NOT NULL,
+  stage_code     text NOT NULL REFERENCES esg_journey_stages(code) ON UPDATE CASCADE,
+  label_en       text NOT NULL,
+  description_en text,
+  predicate_code text NOT NULL,
+  -- Strictly positive. A zero-XP mission is a mission nobody can tell they
+  -- completed, which is a control that renders and changes nothing.
+  xp_award       integer NOT NULL CHECK (xp_award > 0),
+  sort_order     integer NOT NULL DEFAULT 0,
+  is_active      boolean NOT NULL DEFAULT true,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  updated_at     timestamptz NOT NULL DEFAULT now()
+);
+-- Covers: every row. code is NOT NULL.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_esg_missions_code
+  ON esg_missions (code);
+CREATE INDEX IF NOT EXISTS idx_esg_missions_stage
+  ON esg_missions (stage_code, sort_order);
+
+-- The level ladder. A PRODUCT CHOICE and nothing else: no standard, no
+-- publisher and no regulator defines these names or these thresholds, and the
+-- seed says so in its own comment. Recorded here so nobody later cites it as
+-- if SEDG or SSEO had authored it.
+CREATE TABLE IF NOT EXISTS esg_xp_levels (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  level      integer NOT NULL CHECK (level >= 1),
+  min_xp     integer NOT NULL CHECK (min_xp >= 0),
+  label_en   text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+-- Covers: every row, on both columns. level is the identifier; min_xp is unique
+-- because two levels sharing a threshold would make "which level is this total"
+-- depend on row order, and a tie broken by ordering is a figure that can change
+-- without anything changing.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_esg_xp_levels_level
+  ON esg_xp_levels (level);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_esg_xp_levels_min_xp
+  ON esg_xp_levels (min_xp);
+
+-- ── updated_at triggers, second pass ───────────────────────────────────────
+-- §9's loop runs ABOVE this line, so on the boot that first creates a table
+-- declared below it the loop has already been and gone: sections 10 to 13 get
+-- their trigger one replay late. Re-running the identical loop here closes that
+-- lag for this section and, incidentally, for the three above it. It is the
+-- same DO block, it is idempotent, and it creates nothing that the next boot
+-- would not have created anyway.
+DO $$
+DECLARE t text;
+BEGIN
+  FOR t IN
+    SELECT c.relname FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE c.relkind = 'r' AND n.nspname = current_schema()
+      AND c.relname LIKE 'esg\_%'
+  LOOP
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_trigger
+      WHERE tgname = 'trg_' || t || '_touch' AND NOT tgisinternal
+    ) THEN
+      EXECUTE format(
+        'CREATE TRIGGER %I BEFORE UPDATE ON %I FOR EACH ROW EXECUTE FUNCTION esg_touch_updated_at()',
+        'trg_' || t || '_touch', t);
+    END IF;
+  END LOOP;
+END $$;

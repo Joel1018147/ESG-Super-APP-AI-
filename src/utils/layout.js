@@ -103,6 +103,13 @@ const GROUPS = ['ASSESS', 'FINANCE', 'EVIDENCE', 'INTELLIGENCE', 'ADMINISTRATION
 
 const MODULES = [
   { key: 'dashboard',    group: 'ASSESS',         icon: '⊞',  label: 'Dashboard',       path: '/dashboard' },
+  // ONE entry, not two. Missions live on the journey page because a mission is
+  // a stage's predicate with an XP price on it — the same fact, from the same
+  // function — and two pages rendering one set of facts is how the two
+  // renderings end up disagreeing. Nothing was removed to make room, and
+  // BOTTOM_NAV_KEYS is untouched (see the comment below it for why that must
+  // never happen as a side effect).
+  { key: 'journey',      group: 'ASSESS',         icon: '🧭', label: 'ESG Journey',     path: '/journey' },
   { key: 'company',      group: 'ASSESS',         icon: '🏢', label: 'Company Profile', path: '/company' },
   { key: 'assessment',   group: 'ASSESS',         icon: '📋', label: 'ESG Assessment',  path: '/assessment' },
   { key: 'carbon',       group: 'ASSESS',         icon: '🌱', label: 'Carbon',          path: '/carbon' },

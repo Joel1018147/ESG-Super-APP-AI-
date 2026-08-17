@@ -52,7 +52,15 @@ const svc = require('../src/services/opportunityService');
 const RUN48 = (() => {
   const i = SCHEMA.indexOf('12. GREEN PROJECTS');
   assert.ok(i > 0, 'the Run 48 schema section is gone — the anchor moved');
-  return SCHEMA.slice(i);
+  // BOUNDED AT THE NEXT NUMBERED SECTION. Unbounded, this slice ran to the end
+  // of the file, so it swallowed Run 52's three tables the moment section 13
+  // was appended and the four-tables assertion went red in a run that had not
+  // touched this feature at all. That is anchor rot
+  // (test-harness-integrity-audit.md), and the fix is a bound rather than a
+  // bigger number.
+  const rest = SCHEMA.slice(i + 1);
+  const next = /\n-- \d+\. /.exec(rest);
+  return next ? rest.slice(0, next.index) : rest;
 })();
 
 function tableBlock(name) {
