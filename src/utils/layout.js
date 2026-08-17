@@ -289,7 +289,11 @@ function layout(title, content, user, activePath = '') {
   <header class="app-topbar">
     <h1 class="topbar-title">${esc(title)}</h1>
     <div class="topbar-right">
-      <button class="btn btn-outline btn-sm" id="themeBtn" type="button" aria-label="Switch between light and dark">◐</button>
+      <!-- .btn rather than .btn-sm: at 8px padding on a 13px line it is the
+           largest touch target the design system offers, and it is still only
+           ~29px against §6's 44px. That is a master gap, recorded in
+           test/dashboard-test.js and fixable only there. -->
+      <button class="btn btn-outline" id="themeBtn" type="button" aria-label="Switch between light and dark">◐</button>
     </div>
   </header>
   <main class="app-main" id="main-content">${content}</main>

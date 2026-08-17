@@ -656,6 +656,26 @@ let RENDERED = null;
     assert.ok(320 / 5 >= 44, 'five bottom-nav items no longer fit a 320px viewport at 44px each');
   });
 
+  test('the button classes are still the size they are — none reaches 44px', () => {
+    // §6 asks for 44×44 on mobile. The bottom nav clears it at 60px. NO BUTTON
+    // CLASS IN THE MASTER DOES: .btn is ~29px and .btn-sm ~22px, and this repo
+    // cannot change either. Recorded rather than waived, so that raising them
+    // upstream turns this red and says to delete the record.
+    const height = (sel) => {
+      const m = new RegExp(`\\.${sel}\\s*\\{[^}]*padding:\\s*(\\d+)px[^;]*;[^}]*font-size:\\s*(\\d+)px`).exec(CSS)
+        || new RegExp(`\\.${sel}\\s*\\{[^}]*font-size:\\s*(\\d+)px[^}]*padding:\\s*(\\d+)px`).exec(CSS);
+      assert.ok(m, `.${sel} declares no padding and font-size to measure`);
+      const [pad, font] = sel === 'btn' ? [Number(m[1]), Number(m[2])] : [Number(m[1]), Number(m[2])];
+      return pad * 2 + font;   // line-height is 1 on .btn
+    };
+    assert.strictEqual(height('btn'), 29, '.btn changed size — if it now clears 44px, delete this record');
+    assert.strictEqual(height('btn-sm'), 22, '.btn-sm changed size — if it now clears 44px, delete this record');
+    // And the shell uses the larger of the two for its one control.
+    assert.ok(/id="themeBtn"[^>]*>/.test(FULL_HTML), 'the theme toggle is gone');
+    assert.ok(!/class="btn btn-outline btn-sm" id="themeBtn"/.test(FULL_HTML),
+      'the topbar control uses .btn-sm, which is the smaller of the two touch targets');
+  });
+
   await atest('every dynamic value on the dashboard goes through esc()', async () => {
     const payload = '<script>alert(1)</script>';
     const html = await renderRoute('routes/pages', '/dashboard', populatedDb({ hostile: payload }).exports);
