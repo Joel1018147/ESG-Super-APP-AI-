@@ -970,3 +970,142 @@ CREATE INDEX IF NOT EXISTS idx_esg_finance_products_filter
   ON esg_finance_products (availability_status, financing_type, borrower_scope);
 CREATE INDEX IF NOT EXISTS idx_esg_finance_products_verified
   ON esg_finance_products (last_verified);
+
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 12. GREEN PROJECTS — DEFINITION, CLASSIFICATION, BASELINE, OPPORTUNITIES
+--                                                     (Run 48, 2026-08-17)
+--
+-- Run 47 built the reference layer: what financing exists and how the two
+-- taxonomies are shaped. This is the company's own side of it — a project a
+-- lender can be told about, in the lender's vocabulary, with an energy baseline
+-- computed from carbon data the platform already holds.
+--
+-- THE CLASSIFICATION IS STAMPED, NEVER JOINED AT READ TIME. Same rule as the
+-- emission factor on esg_carbon_entries and SST on a Commerce transaction, and
+-- here it has already nearly bitten once: ASEAN V3 was superseded by V4 in
+-- November 2025. A project classified under V3 must keep saying V3. Read
+-- through a live join it would silently re-classify itself the day the taxonomy
+-- row changed, and nobody would see it happen.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS esg_green_projects (
+  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id          uuid NOT NULL REFERENCES esg_companies(id) ON DELETE CASCADE,
+  project_type_id     uuid REFERENCES esg_project_types(id),
+  title               text NOT NULL,
+  description         text,
+  estimated_cost_myr  numeric(18,2),
+  status              text NOT NULL DEFAULT 'draft'
+                      CHECK (status IN ('draft','defined','seeking_financing','implementing','implemented','abandoned')),
+  -- ── The stamp ──────────────────────────────────────────────────────────
+  -- Text codes and the scheme VERSION they were read from, copied at
+  -- classification time. Not FKs: an FK would follow the taxonomy row when it
+  -- is corrected, which is the whole failure this design prevents.
+  ccpt_category_code   text,
+  ccpt_scheme_version  text,
+  asean_ff_code        text,
+  asean_ps_code        text,
+  asean_scheme_version text,
+  classified_by        uuid REFERENCES esg_users(id) ON DELETE SET NULL,
+  classified_at        timestamptz,
+  -- NULLABLE, and that is the honest shape. A project that has never been
+  -- classified must not claim 'project_type_default' — see the note below on
+  -- why no project type carries a default today.
+  classification_basis text
+                       CHECK (classification_basis IN ('project_type_default','human_assigned')),
+  created_by          uuid REFERENCES esg_users(id) ON DELETE SET NULL,
+  created_at          timestamptz NOT NULL DEFAULT now(),
+  updated_at          timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_esg_green_projects_company
+  ON esg_green_projects (company_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_esg_green_projects_status
+  ON esg_green_projects (company_id, status);
+
+-- WHY 'project_type_default' IS CURRENTLY UNREACHABLE, AND WHY THAT IS RIGHT.
+--
+-- Run 48's brief assumed esg_project_types carries `default_ccpt_code`. The
+-- column is `default_ccpt_category_id` (a uuid FK, not a text code) and all
+-- twelve rows are NULL — deliberately. Run 47 refused to invent a per-type
+-- classification because no source publishes one, and its suite asserts that
+-- zero rows carry a default, so populating them here would both invent the
+-- data and turn that assertion red.
+--
+-- So the creation path resolves the default WHEN ONE EXISTS and stamps
+-- 'project_type_default'; with none configured it leaves the classification
+-- NULL and the UI says "not classified yet". It does not write a basis for a
+-- classification that never happened. The moment a human sets a default on a
+-- project type, the path starts working with no further change.
+
+CREATE TABLE IF NOT EXISTS esg_green_project_baselines (
+  id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id         uuid NOT NULL REFERENCES esg_green_projects(id) ON DELETE CASCADE,
+  period_start       date NOT NULL,
+  period_end         date NOT NULL,
+  metric             text NOT NULL
+                     CHECK (metric IN ('electricity_kwh','fuel_litres','water_m3','waste_kg','kg_co2e')),
+  value              numeric(20,4) NOT NULL,
+  unit               text NOT NULL,
+  derived_from       text NOT NULL
+                     CHECK (derived_from IN ('carbon_entries','manual_entry','document')),
+  source_entry_count integer NOT NULL DEFAULT 0,
+  -- TRUE if ANY contributing entry was provisional. A baseline built partly on
+  -- the placeholder DEFRA fuel factors is provisional, and the report says so.
+  -- Averaging a provisional and a verified factor into one number that looks
+  -- verified is the failure this column exists to make impossible.
+  is_provisional     boolean NOT NULL,
+  computed_at        timestamptz NOT NULL DEFAULT now(),
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  updated_at         timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT esg_green_project_baselines_period CHECK (period_start <= period_end)
+);
+CREATE INDEX IF NOT EXISTS idx_esg_green_project_baselines_project
+  ON esg_green_project_baselines (project_id, computed_at DESC);
+
+-- Evidence REUSES esg_documents. There is deliberately no second upload path:
+-- a second one would need its own size limit, its own mime check and its own
+-- extraction hook, and would drift from the first the day one of them changed.
+CREATE TABLE IF NOT EXISTS esg_green_project_evidence (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id  uuid NOT NULL REFERENCES esg_green_projects(id) ON DELETE CASCADE,
+  document_id uuid NOT NULL REFERENCES esg_documents(id) ON DELETE CASCADE,
+  attached_by uuid REFERENCES esg_users(id) ON DELETE SET NULL,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);
+-- Covers: every row. Both columns are NOT NULL, so a plain unique index is
+-- honest here — one document is attached to one project at most once.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_esg_green_project_evidence
+  ON esg_green_project_evidence (project_id, document_id);
+
+-- AI PROPOSALS. NOTE WHAT IS ABSENT: there is no numeric column on this table,
+-- and that is the containment, not an oversight. Same construction as
+-- esg_document_extractions — a model-authored figure has nowhere to land, so
+-- the guard cannot be forgotten by a later author. The suite asserts it.
+CREATE TABLE IF NOT EXISTS esg_green_opportunities (
+  id                        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id                uuid NOT NULL REFERENCES esg_companies(id) ON DELETE CASCADE,
+  assessment_id             uuid REFERENCES esg_assessments(id) ON DELETE SET NULL,
+  -- A CODE from a closed set, never free text the model invented. Anything not
+  -- present in esg_project_types is dropped before a row is written.
+  proposed_project_type_code text NOT NULL,
+  rationale_en              text,
+  derived_from_kind         text
+                            CHECK (derived_from_kind IN ('indicator_response','carbon_entry','company_profile')),
+  derived_from_ref          text,
+  status                    text NOT NULL DEFAULT 'pending'
+                            CHECK (status IN ('pending','accepted','rejected','auto_rejected')),
+  reviewed_by               uuid REFERENCES esg_users(id) ON DELETE SET NULL,
+  reviewed_at               timestamptz,
+  created_at                timestamptz NOT NULL DEFAULT now(),
+  updated_at                timestamptz NOT NULL DEFAULT now()
+);
+-- Covers: live proposals only — pending, accepted and rejected. Auto-rejected
+-- rows are kept for audit and excluded, so a proposal the parser threw away
+-- never blocks a later good one for the same project type.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_esg_green_opportunities_live
+  ON esg_green_opportunities (company_id, proposed_project_type_code)
+  WHERE status <> 'auto_rejected';
+CREATE INDEX IF NOT EXISTS idx_esg_green_opportunities_company
+  ON esg_green_opportunities (company_id, status);

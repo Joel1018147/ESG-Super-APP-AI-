@@ -664,4 +664,232 @@ router.patch('/finance-products/:id', superAdminOnly, wrap(async (req, res) => {
   res.json({ product: rows[0], last_verified: rows[0].last_verified });
 }));
 
+// ═══════════════════════════════════════════════════════════════════════════
+// GREEN PROJECTS, BASELINES, EVIDENCE AND OPPORTUNITIES              (Run 48)
+//
+// requiring opportunityService HERE is what registers its job handler. The
+// registration happens by side-effect at the bottom of that file, exactly as
+// extractionService does it, and a handler registered in a module nobody
+// imports fails at claim time with "No handler registered" — which reads as a
+// queue bug rather than a missing import. server.js:23 requires verraService
+// for the same reason and says so.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const opp = require('../services/opportunityService');
+const baselines = require('../services/baselineService');
+
+/** Ownership on every project-scoped route. Copied from ownedAssessment()
+ *  above rather than reinvented — two ownership predicates in one file is the
+ *  duplication trap checklist #15 describes, where one of them drifts. */
+async function ownedProject(req) {
+  const { rows } = await query(
+    `SELECT id, company_id, project_type_id, title, description, estimated_cost_myr,
+            status, ccpt_category_code, ccpt_scheme_version, asean_ff_code,
+            asean_ps_code, asean_scheme_version, classification_basis,
+            classified_at, created_at
+       FROM esg_green_projects WHERE id = $1 AND company_id = $2`,
+    [req.params.id, cid(req)]);
+  return rows[0] || null;
+}
+
+router.get('/green-projects', wrap(async (req, res) => {
+  const { rows } = await query(
+    `SELECT p.id, p.title, p.status, p.estimated_cost_myr, p.ccpt_category_code,
+            p.ccpt_scheme_version, p.asean_ff_code, p.asean_scheme_version,
+            p.classification_basis, p.created_at, t.code AS project_type_code,
+            t.label_en AS project_type_label
+       FROM esg_green_projects p
+       LEFT JOIN esg_project_types t ON t.id = p.project_type_id
+      WHERE p.company_id = $1
+      ORDER BY p.created_at DESC`, [cid(req)]);
+  res.json({ projects: rows });
+}));
+
+router.post('/green-projects', wrap(async (req, res) => {
+  const b = req.body || {};
+  const title = String(b.title || '').trim();
+  if (!title) return res.status(400).json({ error: 'title is required' });
+
+  let typeRow = null;
+  if (b.project_type_code) {
+    const { rows } = await query(
+      `SELECT id, code, label_en, default_ccpt_category_id, default_asean_objective_id
+         FROM esg_project_types WHERE code = $1 AND is_active`, [String(b.project_type_code)]);
+    if (!rows[0]) {
+      return res.status(400).json({
+        error: 'unknown project_type_code',
+        detail: 'GET /api/project-types lists the selectable ones. A type is never inferred.',
+      });
+    }
+    typeRow = rows[0];
+  }
+
+  // The classification is stamped at creation FROM the type's default, when it
+  // has one. No type carries one today (Run 47 seeded them NULL rather than
+  // invent a classification no source publishes), so a project created now is
+  // unclassified and says so, rather than claiming a basis for a
+  // classification that never happened.
+  const stamp = typeRow
+    ? await opp.resolveDefaultClassification(typeRow)
+    : { ccpt_category_code: null, ccpt_scheme_version: null, asean_ff_code: null,
+        asean_ps_code: null, asean_scheme_version: null, classification_basis: null };
+
+  const { rows } = await query(
+    `INSERT INTO esg_green_projects
+       (company_id, project_type_id, title, description, estimated_cost_myr, status,
+        ccpt_category_code, ccpt_scheme_version, asean_ff_code, asean_ps_code,
+        asean_scheme_version, classification_basis, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+     RETURNING id, title, status, estimated_cost_myr, classification_basis, created_at`,
+    [cid(req), typeRow ? typeRow.id : null, title, b.description || null,
+     num(b.estimated_cost_myr), 'draft',
+     stamp.ccpt_category_code, stamp.ccpt_scheme_version, stamp.asean_ff_code,
+     stamp.asean_ps_code, stamp.asean_scheme_version, stamp.classification_basis,
+     req.user.id]);
+  res.status(201).json({ project: rows[0] });
+}));
+
+router.get('/green-projects/:id', wrap(async (req, res) => {
+  const p = await ownedProject(req);
+  if (!p) return res.status(404).json({ error: 'Not found' });
+  const [bl, ev] = await Promise.all([
+    baselines.listBaselines(p.id),
+    query(`SELECT e.document_id, d.filename, d.doc_type, d.byte_size, e.created_at
+             FROM esg_green_project_evidence e
+             JOIN esg_documents d ON d.id = e.document_id
+            WHERE e.project_id = $1 ORDER BY e.created_at DESC`, [p.id]),
+  ]);
+  res.json({ project: p, baselines: bl, evidence: ev.rows });
+}));
+
+router.patch('/green-projects/:id', wrap(async (req, res) => {
+  const p = await ownedProject(req);
+  if (!p) return res.status(404).json({ error: 'Not found' });
+  const b = req.body || {};
+  const STATUSES = ['draft', 'defined', 'seeking_financing', 'implementing', 'implemented', 'abandoned'];
+  if (b.status !== undefined && !STATUSES.includes(b.status)) {
+    return res.status(400).json({ error: 'invalid status', detail: `expected one of: ${STATUSES.join(', ')}` });
+  }
+  // A human assigning a classification stamps human_assigned and the scheme
+  // version it was read under — never a bare code with no provenance.
+  const humanClassifying = b.ccpt_category_code !== undefined || b.asean_ff_code !== undefined;
+  let ccptVersion = p.ccpt_scheme_version;
+  let aseanVersion = p.asean_scheme_version;
+  if (humanClassifying) {
+    const { rows: cur } = await query(
+      `SELECT code, version FROM esg_taxonomy_schemes WHERE is_current`);
+    for (const s of cur) {
+      if (s.code === 'CCPT') ccptVersion = s.version;
+      if (s.code === 'ASEAN') aseanVersion = s.version;
+    }
+  }
+
+  const { rows } = await query(
+    `UPDATE esg_green_projects SET
+       title = COALESCE(NULLIF($2,''), title),
+       description = CASE WHEN $3::text IS NULL THEN description ELSE NULLIF($3,'') END,
+       estimated_cost_myr = COALESCE($4, estimated_cost_myr),
+       status = COALESCE($5, status),
+       ccpt_category_code = COALESCE($6, ccpt_category_code),
+       asean_ff_code = COALESCE($7, asean_ff_code),
+       asean_ps_code = COALESCE($8, asean_ps_code),
+       ccpt_scheme_version = $9,
+       asean_scheme_version = $10,
+       classification_basis = CASE WHEN $11 THEN 'human_assigned' ELSE classification_basis END,
+       classified_by = CASE WHEN $11 THEN $12::uuid ELSE classified_by END,
+       classified_at = CASE WHEN $11 THEN now() ELSE classified_at END
+     WHERE id = $1 AND company_id = $13
+     RETURNING id, title, description, status, estimated_cost_myr, ccpt_category_code,
+               ccpt_scheme_version, asean_ff_code, asean_ps_code, asean_scheme_version,
+               classification_basis, classified_at`,
+    [p.id, b.title === undefined ? '' : String(b.title),
+     b.description === undefined ? null : String(b.description),
+     num(b.estimated_cost_myr), b.status || null,
+     b.ccpt_category_code || null, b.asean_ff_code || null, b.asean_ps_code || null,
+     ccptVersion, aseanVersion, humanClassifying, req.user.id, cid(req)]);
+  res.json({ project: rows[0] });
+}));
+
+router.post('/green-projects/:id/baseline', wrap(async (req, res) => {
+  const p = await ownedProject(req);
+  if (!p) return res.status(404).json({ error: 'Not found' });
+  const b = req.body || {};
+  if (!b.period_start || !b.period_end) {
+    return res.status(400).json({ error: 'period_start and period_end are required' });
+  }
+  const result = await baselines.computeBaseline(p.id, cid(req), b.period_start, b.period_end);
+  if (!result) return res.status(404).json({ error: 'Not found' });
+  const reasons = result.provisional
+    ? await baselines.provisionalReasons(cid(req), b.period_start, b.period_end)
+    : [];
+  res.json({ ...result, provisional_reasons: reasons });
+}));
+
+router.post('/green-projects/:id/evidence', wrap(async (req, res) => {
+  const p = await ownedProject(req);
+  if (!p) return res.status(404).json({ error: 'Not found' });
+  const documentId = String((req.body || {}).document_id || '').trim();
+  if (!documentId) return res.status(400).json({ error: 'document_id is required' });
+  // The document must already belong to this company. Evidence reuses
+  // esg_documents; there is no second upload path.
+  const { rows: doc } = await query(
+    `SELECT id FROM esg_documents WHERE id = $1 AND company_id = $2`, [documentId, cid(req)]);
+  if (!doc[0]) return res.status(404).json({ error: 'Document not found for this company' });
+
+  const { rows } = await query(
+    `INSERT INTO esg_green_project_evidence (project_id, document_id, attached_by)
+     VALUES ($1,$2,$3)
+     ON CONFLICT (project_id, document_id) DO NOTHING
+     RETURNING id, project_id, document_id`, [p.id, documentId, req.user.id]);
+  // Already attached is reported, not swallowed — a caller polling otherwise
+  // cannot tell "attached" from "nothing happened".
+  res.status(rows[0] ? 201 : 200).json({ attached: Boolean(rows[0]), evidence: rows[0] || null });
+}));
+
+router.delete('/green-projects/:id/evidence/:documentId', wrap(async (req, res) => {
+  const p = await ownedProject(req);
+  if (!p) return res.status(404).json({ error: 'Not found' });
+  const { rows } = await query(
+    `DELETE FROM esg_green_project_evidence WHERE project_id = $1 AND document_id = $2
+     RETURNING id`, [p.id, req.params.documentId]);
+  res.json({ detached: rows.length > 0 });
+}));
+
+router.get('/green-opportunities', wrap(async (req, res) => {
+  const { rows } = await query(
+    `SELECT o.id, o.proposed_project_type_code, o.rationale_en, o.status,
+            o.derived_from_kind, o.reviewed_at, o.created_at, t.label_en AS project_type_label
+       FROM esg_green_opportunities o
+       LEFT JOIN esg_project_types t ON t.code = o.proposed_project_type_code
+      WHERE o.company_id = $1
+      ORDER BY o.created_at DESC`, [cid(req)]);
+  const scan = await opp.lastScan(cid(req));
+  // The scan's own state travels with the list, so a caller can tell an empty
+  // list that means "nothing found" from one that means "the analysis failed".
+  res.json({
+    opportunities: rows,
+    scan: scan ? { status: scan.status, last_error: scan.last_error, ran_at: scan.updated_at } : null,
+  });
+}));
+
+router.post('/green-opportunities/scan', wrap(async (req, res) => {
+  const jobId = await opp.queueScan(cid(req), req.user.id);
+  if (jobId) setImmediate(() => runOnce().catch((e) => console.error('opportunity scan:', e.message)));
+  // null means a scan for THIS company is already queued or running — reported
+  // rather than swallowed, so a caller polling knows why nothing changed.
+  res.status(jobId ? 202 : 200).json({ queued: Boolean(jobId), jobId });
+}));
+
+router.post('/green-opportunities/:id/accept', wrap(async (req, res) => {
+  const created = await opp.acceptOpportunity(req.params.id, req.user.id, cid(req));
+  if (!created) return res.status(404).json({ error: 'Not found' });
+  res.status(201).json({ project: created });
+}));
+
+router.post('/green-opportunities/:id/reject', wrap(async (req, res) => {
+  const row = await opp.rejectOpportunity(req.params.id, req.user.id, cid(req));
+  if (!row) return res.status(404).json({ error: 'Not found or not pending' });
+  res.json({ opportunity: row });
+}));
+
 module.exports = router;

@@ -58,7 +58,17 @@ const copy = require('../src/services/financeCopy');
 const RUN47 = (() => {
   const i = SCHEMA.indexOf('11. GREEN FINANCE');
   assert.ok(i > 0, 'the Run 47 schema section is gone — the anchor "11. GREEN FINANCE" no longer appears');
-  return SCHEMA.slice(i);
+  // BOUNDED AT THE NEXT SECTION, NOT AT THE END OF FILE.
+  //
+  // This sliced to EOF originally, which was correct exactly until §12 was
+  // appended in Run 48 — at which point these guards silently began policing
+  // the NEXT run's tables and indexes, and reported four extra tables and an
+  // uncommented partial index that were never Run 47's. A section-scoped check
+  // that is open-ended at one end is not scoped, it merely has not been widened
+  // yet. Found by Run 48 landing on top of it.
+  const rest = SCHEMA.slice(i);
+  const next = rest.search(/\n-- ═+\n-- \d+\. /);
+  return next === -1 ? rest : rest.slice(0, next);
 })();
 
 test('the vocabulary in financeCopy.js is exactly the schema CHECK set — every one', () => {
