@@ -819,7 +819,7 @@ let RENDERED = null;
       `text below 4.5:1:\n      ${failures2.join('\n      ')}`);
   });
 
-  test('BOTH shells default to data-theme="dark" (Ruling A, Run 54)', () => {
+  test('EVERY theme emitter defaults to dark (Ruling A, Run 54)', () => {
     const { layout, bareLayout } = require('../src/utils/layout');
     const signedIn = layout('Dashboard', '<div class="card"></div>', { name: 'Joel', email: 'j@x.test' }, '/dashboard');
     const signedOut = bareLayout('Sign in', '<form></form>');
@@ -831,6 +831,36 @@ let RENDERED = null;
     // The default moved; the override did not. A user who chose light keeps it.
     assert.ok(/localStorage.getItem\(KEY\)/.test(signedIn) && /setAttribute\('data-theme',saved\)/.test(signedIn),
       'the client-side theme restorer is gone — the default would become the only option');
+
+    // The first version of this test named the two shells in layout.js and
+    // shipped Ruling A two-thirds done: `public/index.html` is a THIRD emitter,
+    // it is the page a first-time visitor actually lands on, and Gate 2 caught
+    // it live rather than here. Checklist #23 — a scoped check is only as good
+    // as its scope — so this no longer names files. It FINDS every `<html>` tag
+    // in the repo that carries a theme and requires each one to be dark; a
+    // fourth emitter added tomorrow fails here on the day it is written.
+    // Deliberately NOT de-duplicated by tag text: the two shells emit the same
+    // string, so collapsing identical tags would report two emitters where
+    // there are three and quietly restore the blind spot this replaces.
+    const emitters = [];
+    (function walk(dir) {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (e.name === 'node_modules' || e.name === '.git') continue;
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) { walk(p); continue; }
+        if (!/\.(js|html)$/.test(e.name)) continue;
+        for (const m of fs.readFileSync(p, 'utf8').matchAll(/<html\b[^>]*>/g)) {
+          if (!/data-theme=/.test(m[0])) continue;
+          emitters.push([path.relative(ROOT, p), m[0]]);
+        }
+      }
+    }(ROOT));
+
+    assert.ok(emitters.length >= 3,
+      `expected at least the two shells and the landing page to emit a theme, found ${emitters.length}`);
+    const light = emitters.filter(([, tag]) => !/data-theme="dark"/.test(tag));
+    assert.deepStrictEqual(light.map(([f, t]) => `${f}  ${t}`), [],
+      'these <html> tags still default to a theme other than dark');
   });
 
   test('the CSP names no script host, and nothing loads Chart.js', () => {
