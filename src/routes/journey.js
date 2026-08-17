@@ -19,7 +19,8 @@
 
    NO NEW CSS. Every class here comes from §50 of the master stylesheet, which
    Run 50 fanned out to all thirteen paths and Run 51 synced into this repo at
-   md5 8b92094c. A per-repo edit to the design system is a §1 defect, and a
+   md5 8b92094c — Run 54 moved that to 5785b26f. A per-repo edit is a §1
+   defect, and a
    class that merely LOOKS like a design-system class fails silently — CSS
    never warns. Every class below was grepped out of that file before it was
    written here.

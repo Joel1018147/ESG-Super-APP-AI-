@@ -49,11 +49,19 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      // Design system CSS is inlined by utils/layout.js, and Chart.js is loaded
-      // from cdnjs. Both are named explicitly rather than disabling CSP.
+      // The design system's token floor is inlined by utils/layout.js, so
+      // 'unsafe-inline' is required for styleSrc. Nothing else is named.
+      //
+      // cdnjs.cloudflare.com WAS in scriptSrc for the dashboard's Chart.js
+      // radar. Run 53 deleted the radar; Run 54 closes the policy. A CSP that
+      // allows a script host the product no longer loads from is a
+      // supply-chain surface held open for nothing — anyone who can inject a
+      // tag gets a permitted origin to fetch from. This is a security cleanup,
+      // not a tidy-up, and test/no-model-figures-test.js asserts the host does
+      // not come back.
       styleSrc:  ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       fontSrc:   ["'self'", 'https://fonts.gstatic.com', 'data:'],
-      scriptSrc: ["'self'", "'unsafe-inline'", 'https://cdnjs.cloudflare.com'],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
       imgSrc:    ["'self'", 'data:'],
       connectSrc:["'self'"],
     },

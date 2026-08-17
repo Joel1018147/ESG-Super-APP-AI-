@@ -513,8 +513,8 @@ let RENDERED = null;
     // line in this one. Pinned to the master hash Run 51 synced.
     const crypto = require('crypto');
     const md5 = crypto.createHash('md5').update(fs.readFileSync(CSS_PATH)).digest('hex').slice(0, 8);
-    assert.strictEqual(md5, '8b92094c',
-      `the design system is ${md5}, not the master's 8b92094c — either this repo edited it (a §1 `
+    assert.strictEqual(md5, '5785b26f',
+      `the design system is ${md5}, not the master's 5785b26f — either this repo edited it (a §1 `
       + 'defect) or a master sync landed and this pin was left behind (§1b)');
   });
 
@@ -656,11 +656,21 @@ let RENDERED = null;
     assert.ok(320 / 5 >= 44, 'five bottom-nav items no longer fit a 320px viewport at 44px each');
   });
 
-  test('the button classes are still the size they are — none reaches 44px', () => {
-    // §6 asks for 44×44 on mobile. The bottom nav clears it at 60px. NO BUTTON
-    // CLASS IN THE MASTER DOES: .btn is ~29px and .btn-sm ~22px, and this repo
-    // cannot change either. Recorded rather than waived, so that raising them
-    // upstream turns this red and says to delete the record.
+  test('every button clears 44px AT MOBILE SIZES, and stays compact on desktop', () => {
+    /* §6 asks for 44×44 on mobile. Run 53 recorded that no button class
+       cleared it — .btn ~29px, .btn-sm ~22px — and Run 54 fixed it in the
+       master with a min-height inside the EXISTING ≤768px block. Applied there
+       and not to the base rule on purpose: 44px is a finger, not a design, and
+       a desktop toolbar of 44px buttons is a different and worse product. So
+       the base sizes below are still the old ones, and that is correct. */
+    const mobile = /@media\s*\(max-width:\s*768px\)\s*\{([\s\S]*?)\n\}/.exec(CSS);
+    assert.ok(mobile, 'the ≤768px block is gone from the stylesheet');
+    assert.ok(/min-height:\s*44px/.test(mobile[1]),
+      'the mobile block sets no 44px minimum on any control — §6 is unenforced again');
+    for (const cls of ['btn', 'btn-sm', 'page-btn', 'theme-toggle']) {
+      assert.ok(new RegExp(`\\.${cls}[,\\s]`).test(mobile[1]),
+        `.${cls} is not in the mobile touch-target rule`);
+    }
     const height = (sel) => {
       const m = new RegExp(`\\.${sel}\\s*\\{[^}]*padding:\\s*(\\d+)px[^;]*;[^}]*font-size:\\s*(\\d+)px`).exec(CSS)
         || new RegExp(`\\.${sel}\\s*\\{[^}]*font-size:\\s*(\\d+)px[^}]*padding:\\s*(\\d+)px`).exec(CSS);
@@ -765,34 +775,35 @@ let RENDERED = null;
      opposite of an exemption list, where an entry means "stop looking". */
   const contrast = require('./lib/contrast');
 
+  /* ALL OF THESE PASS. Eleven of them did not until Run 54, and they were
+     pinned here at their measured ratio precisely so that fixing the master
+     would turn this suite red and say MOVE THEM UP rather than relax them.
+     That is what happened: the master gained --accent-text and the five status
+     -text tokens, --muted was darkened, the sidebar alphas were raised, and
+     .milestone-badge.is-earned stopped being white on near-white. The record
+     is deleted rather than kept, because an entry in it means "still broken". */
   const MUST_PASS = [
     ['var(--text)', ['var(--surface)', 'var(--bg)'], '.stat-value, .page-title, .card-title'],
     ['var(--text-2)', ['var(--surface)', 'var(--bg)'], '.score-ring-label, .mission-meta, .journey-node-meta'],
     ['var(--text)', ['var(--bg)'], 'body copy on the page background'],
     ['var(--text-2)', ['var(--surface-2)', 'var(--surface)', 'var(--bg)'], '.milestone-badge (resting)'],
     ['var(--text-2)', ['var(--bg-soft)', 'var(--surface)', 'var(--bg)'], '.badge-gray'],
-    ['var(--accent-contrast)', ['var(--surface-deep)'], '.mission-card--deep'],
+    ['var(--accent-contrast)', ['var(--surface-deep)'], '.mission-card--deep, .panel--deep'],
     ['#ffffff', ['var(--accent)'], '.btn-primary, .skip-link'],
     ['#ffffff', ['var(--brand)'], 'the sidebar brand'],
     ['rgba(255,255,255,0.5)', ['var(--brand)'], '.sidebar-item resting'],
     ['rgba(255,255,255,0.85)', ['var(--brand)'], '.sidebar-user-name'],
-  ];
-
-  // MASTER DEFECTS, pinned at their measured ratio in each theme. Every one of
-  // these is below 4.5:1 today and needs a change to modus-design-system.css,
-  // which is a §1b fan-out to thirteen paths and therefore its own run.
-  const KNOWN_BELOW = [
-    ['var(--muted)', ['var(--surface)', 'var(--bg)'], '--muted on a card (.stat-label, .stat-sub, .text-muted)', 2.56, 3.07],
-    ['var(--muted)', ['var(--bg)'], '--muted on the page background', 2.43, 3.75],
-    ['var(--green)', ['var(--green-bg)', 'var(--surface)', 'var(--bg)'], '.badge-green', 3.02, 4.01],
-    ['var(--amber)', ['var(--amber-bg)', 'var(--surface)', 'var(--bg)'], '.badge-amber', 2.93, 4.18],
-    ['var(--red)', ['var(--red-bg)', 'var(--surface)', 'var(--bg)'], '.badge-red', 3.39, 3.64],
-    ['var(--accent-contrast)', ['var(--accent-light)', 'var(--surface)', 'var(--bg)'], '.milestone-badge.is-earned', 1.2, 11.88],
-    ['rgba(255,255,255,0.28)', ['var(--brand)'], '.sidebar-section-label', 2.5, 2.37],
-    ['rgba(255,255,255,0.35)', ['var(--brand)'], '.sidebar-user-plan', 3.21, 3.1],
-    ['var(--muted)', ['var(--surface)'], '.bottom-nav-item resting', 2.56, 3.07],
-    ['var(--accent)', ['var(--surface)'], '.bottom-nav-item active', 4.99, 2.93],
-    ['var(--accent)', ['var(--accent-bg)', 'var(--surface)', 'var(--bg)'], '.badge-accent, .level-chip', 4.5, 2.73],
+    // ── moved up in Run 54 ──
+    ['var(--muted)', ['var(--surface)', 'var(--bg)'], '--muted on a card (.stat-label, .stat-sub, .text-muted)'],
+    ['var(--muted)', ['var(--bg)'], '--muted on the page background'],
+    ['var(--muted)', ['var(--surface)'], '.bottom-nav-item resting'],
+    ['var(--accent-text)', ['var(--surface)'], '.bottom-nav-item active'],
+    ['var(--accent-text)', ['var(--accent-bg)', 'var(--surface)', 'var(--bg)'], '.badge-accent, .level-chip, .milestone-badge.is-earned'],
+    ['var(--green-text)', ['var(--green-bg)', 'var(--surface)', 'var(--bg)'], '.badge-green'],
+    ['var(--amber-text)', ['var(--amber-bg)', 'var(--surface)', 'var(--bg)'], '.badge-amber'],
+    ['var(--red-text)', ['var(--red-bg)', 'var(--surface)', 'var(--bg)'], '.badge-red'],
+    ['var(--blue-text)', ['var(--blue-bg)', 'var(--surface)', 'var(--bg)'], '.badge-blue, .alert-info'],
+    ['rgba(255,255,255,0.46)', ['var(--brand)'], '.sidebar-section-label, .sidebar-user-plan'],
   ];
 
   test('CONTRAST ≥ 4.5:1 IN BOTH THEMES for every pair this page chooses', () => {
@@ -808,31 +819,46 @@ let RENDERED = null;
       `text below 4.5:1:\n      ${failures2.join('\n      ')}`);
   });
 
-  test('the MASTER pairs below 4.5:1 are still exactly the ones on record', () => {
-    const moved = [];
-    console.log('      master contrast, light / dark — every one of these is below 4.5:1:');
-    for (const [fg, bg, label, wantLight, wantDark] of KNOWN_BELOW) {
-      const got = {
-        light: contrast.ratio(fg, bg, contrast.tokens('light')),
-        dark: contrast.ratio(fg, bg, contrast.tokens('dark')),
-      };
-      console.log(`        ${String(got.light).padStart(6)} / ${String(got.dark).padStart(6)}   ${label}`);
-      if (got.light !== wantLight) moved.push(`light ${label}: ${wantLight} -> ${got.light}`);
-      if (got.dark !== wantDark) moved.push(`dark ${label}: ${wantDark} -> ${got.dark}`);
+  test('BOTH shells default to data-theme="dark" (Ruling A, Run 54)', () => {
+    const { layout, bareLayout } = require('../src/utils/layout');
+    const signedIn = layout('Dashboard', '<div class="card"></div>', { name: 'Joel', email: 'j@x.test' }, '/dashboard');
+    const signedOut = bareLayout('Sign in', '<form></form>');
+    for (const [label, html] of [['signed-in', signedIn], ['signed-out', signedOut]]) {
+      assert.ok(/<html[^>]*data-theme="dark"/.test(html),
+        `the ${label} shell does not default to dark`);
+      assert.ok(/<html[^>]*data-platform="esg"/.test(html), `the ${label} shell lost the platform accent`);
     }
-    assert.deepStrictEqual(moved, [],
-      `a recorded master contrast ratio moved:\n      ${moved.join('\n      ')}\n      `
-      + 'If it went UP past 4.5, the master was fixed — move the pair into MUST_PASS and delete '
-      + 'the record. If it went DOWN, something made an already-failing pair worse.');
+    // The default moved; the override did not. A user who chose light keeps it.
+    assert.ok(/localStorage.getItem\(KEY\)/.test(signedIn) && /setAttribute\('data-theme',saved\)/.test(signedIn),
+      'the client-side theme restorer is gone — the default would become the only option');
   });
 
-  test('nothing this run renders uses the 1.2:1 pair', () => {
-    // .milestone-badge.is-earned is white on a pale tint in light mode. It is
-    // not "below AA", it is unreadable, and it is the one master pair this run
-    // refuses to put on a page.
-    for (const f of ['utils/journeyView.js', 'routes/journey.js', 'routes/pages.js']) {
-      const src = fs.readFileSync(path.join(SRC, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
-      assert.ok(!/is-earned/.test(src), `${f} renders .milestone-badge.is-earned (1.2:1 in light mode)`);
+  test('the CSP names no script host, and nothing loads Chart.js', () => {
+    // Run 53 deleted the radar; Run 54 closed the policy. A CSP that permits a
+    // host the product never fetches from is a supply-chain surface held open
+    // for nothing.
+    const server = fs.readFileSync(path.join(SRC, 'server.js'), 'utf8');
+    const csp = /scriptSrc:\s*\[([^\]]*)\]/.exec(server);
+    assert.ok(csp, 'scriptSrc is gone from the CSP entirely');
+    assert.ok(!/cdnjs|unpkg|jsdelivr|cloudflare/i.test(csp[1]),
+      `scriptSrc still permits a third-party host: ${csp[1].trim()}`);
+    for (const f of fs.readdirSync(path.join(SRC, 'routes')).filter((x) => x.endsWith('.js'))) {
+      const src = fs.readFileSync(path.join(SRC, 'routes', f), 'utf8').replace(/\/\/[^\n]*/g, '');
+      assert.ok(!/<script[^>]+src=/i.test(src), `routes/${f} loads an external script`);
+    }
+  });
+
+  test('no status colour is used as TEXT — that is what the -text tokens are for', () => {
+    // Run 54 split --red/--green/--amber/--blue/--purple into a FILL (a dot, a
+    // bar, a solid button, tuned so white sits on it) and a -text variant
+    // (tuned to sit on the 8% tint). A fill used as text is the defect that run
+    // fixed thirty-two times in the master, and this repo must not reintroduce
+    // it in a route file either.
+    for (const f of fs.readdirSync(path.join(SRC, 'routes')).filter((x) => x.endsWith('.js'))) {
+      const src = fs.readFileSync(path.join(SRC, 'routes', f), 'utf8');
+      for (const m of src.matchAll(/color:\s*var\(\s*--(red|green|amber|blue|purple)\s*\)/g)) {
+        assert.fail(`routes/${f} uses the fill --${m[1]} as text; use --${m[1]}-text`);
+      }
     }
   });
 

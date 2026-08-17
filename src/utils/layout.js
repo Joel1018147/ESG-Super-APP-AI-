@@ -5,6 +5,22 @@
 // nothing throws, and the element renders transparent. The [data-platform="esg"]
 // block was added to modus-design-system.css for exactly that reason.
 
+// ── ESG DEFAULTS TO DARK ────────────────────────────────────────────────────
+// Ruled by Joel, 2026-08-17, Run 54. Both shells emit data-theme="dark" on
+// <html>; the boot script still reads localStorage['modus-theme'] and overrides
+// before first paint, so a user who has chosen light keeps light and §4.4's
+// shared key is untouched. Only the DEFAULT moved.
+//
+// The reason, recorded because a default with no reason gets flipped back: this
+// platform's composition is built on deep surfaces and luminous rails, and
+// those do not carry on a white background. A platform whose design direction
+// is dark should not open light and wait to be corrected.
+//
+// MODUS_UI_CONTRACT's ONE RULE is amended in the same change: the permitted
+// difference between two platforms is now the accent colour AND the default
+// theme. Both are per-platform values in a shared file; neither changes layout,
+// component set, spacing or behaviour. A third axis needs its own ruling.
+
 const fs     = require('fs');
 const path   = require('path');
 const crypto = require('crypto');
@@ -165,7 +181,7 @@ function esc(s) {
  *  page. Same tokens, same theme toggle, no navigation. */
 function bareLayout(title, content) {
   return `<!DOCTYPE html>
-<html lang="en" data-platform="esg" data-theme="light">
+<html lang="en" data-platform="esg" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -247,7 +263,7 @@ function layout(title, content, user, activePath = '') {
   }).join('');
 
   return `<!DOCTYPE html>
-<html lang="en" data-platform="esg" data-theme="light">
+<html lang="en" data-platform="esg" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">

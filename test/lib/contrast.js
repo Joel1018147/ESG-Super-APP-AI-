@@ -24,19 +24,68 @@ const path = require('path');
 
 const CSS_PATH = path.join(__dirname, '..', '..', 'public', 'css', 'modus-design-system.css');
 
-/** The declarations of one top-level selector block, exactly as written. */
-function blockOf(css, selector) {
-  const re = new RegExp(`(?:^|\\n)\\s*${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`);
-  const m = re.exec(css);
-  if (!m) return {};
+/** Blank comment bodies, preserving offsets and newlines, walking strings so a
+ *  `/*` inside one is not read as a comment.
+ *
+ *  THIS IS NOT OPTIONAL AND IT WAS MISSING UNTIL RUN 54. `[data-platform="migs"]`
+ *  opens with a comment quoting the school's own CSS — `a, .page-title { color:
+ *  #344889 }` — and the `\{([^}]*)\}` capture below stops at the brace INSIDE
+ *  that comment. The block parsed to zero tokens, and every ratio computed for
+ *  MIGS then threw "token --accent is not defined" about a token defined four
+ *  lines further down. `Modus-Agent-OS/design/verify-design-system.js` names
+ *  this exact trap in its own header; this file did not have the scanner.
+ *
+ *  It is a copy rather than a require: a cross-repo absolute require is banned
+ *  (test-harness-integrity-audit.md), and the RULE 6 scanner is duplicated
+ *  across twelve repos for the same reason. If you change it here, change it
+ *  there. */
+function stripComments(css) {
+  const out = css.split('');
+  let i = 0;
+  while (i < css.length) {
+    const c = css[i];
+    if (c === '/' && css[i + 1] === '*') {
+      const end = css.indexOf('*/', i + 2);
+      const stop = end === -1 ? css.length : end + 2;
+      for (let k = i; k < stop; k++) if (out[k] !== '\n') out[k] = ' ';
+      i = stop; continue;
+    }
+    if (c === '"' || c === "'") {
+      let j = i + 1;
+      while (j < css.length) {
+        if (css[j] === '\\') { j += 2; continue; }
+        if (css[j] === c || css[j] === '\n') { j++; break; }
+        j++;
+      }
+      i = j; continue;
+    }
+    i++;
+  }
+  return out.join('');
+}
+
+/** The declarations of one selector, merged across EVERY block that declares
+ *  it, in document order — which is what the cascade does.
+ *
+ *  Written to take the first match only, and that was wrong for two platforms:
+ *  `[data-theme="dark"][data-platform="commerce"]` and `…="school"` each appear
+ *  TWICE in the master, and `--accent-light` is in the second one. The first
+ *  block carries Commerce's deprecated gray aliases, so the reader found a
+ *  block, found tokens in it, and returned a table with the one token it was
+ *  asked about missing — a confident wrong answer rather than an error. */
+function blockOf(rawCss, selector) {
+  const css = stripComments(rawCss);
+  const re = new RegExp(`(?:^|\\n)\\s*${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 'g');
+  const bodies = [...css.matchAll(re)].map((m) => m[1]);
+  if (!bodies.length) return {};
+  const m = [bodies.join(';')];
   const out = {};
-  // Comments stripped FIRST. Written without this, a declaration preceded by a
-  // `/* … */` on its own line came out with the comment glued to the property
-  // name, `startsWith('--')` was false, and the whole :root block parsed to
-  // zero tokens — a checker reporting "token not defined" about a token that is
-  // defined thirty lines up. Checklist #16, in a file about a different rule.
-  const body = m[1].replace(/\/\*[\s\S]*?\*\//g, '');
-  for (const line of body.split(';')) {
+  // Comments are already blanked by stripComments above, which is what makes
+  // the capture safe: without it a declaration preceded by a `/* … */` on its
+  // own line arrived with the comment glued to the property name,
+  // `startsWith('--')` was false, and the whole :root block parsed to zero
+  // tokens. Checklist #16, twice in one function.
+  for (const line of m[0].split(';')) {
     const i = line.indexOf(':');
     if (i < 0) continue;
     const name = line.slice(0, i).trim();
