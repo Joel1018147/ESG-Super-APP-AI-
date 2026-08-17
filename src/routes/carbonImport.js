@@ -39,14 +39,14 @@ router.get('/carbon/import', (req, res) => {
   res.send(layout('Bulk carbon import', `
     <div class="card">
       <h3>Bulk import carbon activity data</h3>
-      <p class="muted">Upload a spreadsheet of utility bills or fuel purchases. The AI proposes which
+      <p class="text-muted">Upload a spreadsheet of utility bills or fuel purchases. The AI proposes which
       column is which — it never sees or states an activity figure — and you approve the mapping
       before anything is calculated or saved. Every row still goes through the same emission-factor
       calculation as adding one entry by hand.</p>
       <form method="post" action="/carbon/import/upload" enctype="multipart/form-data">
         <div class="form-group">
           <label for="file">Spreadsheet (.xlsx, .xls, .csv)</label>
-          <input class="input" id="file" name="file" type="file" accept=".xlsx,.xls,.csv" required>
+          <input id="file" name="file" type="file" accept=".xlsx,.xls,.csv" required>
         </div>
         <button class="btn btn-primary" type="submit">Upload &amp; propose mapping</button>
       </form>
@@ -72,7 +72,7 @@ router.get('/carbon/import/:batchId', async (req, res, next) => {
     const rows = await svc.getBatchRows(batch.id, 10);
 
     if (batch.status === 'committed') {
-      const rowTable = rows.length ? `<table class="table"><thead><tr>
+      const rowTable = rows.length ? `<table><thead><tr>
         <th>Row</th><th>Status</th><th>Detail</th></tr></thead><tbody>
         ${rows.map((r) => `<tr><td>${esc(r.row_number)}</td>
           <td><span class="badge ${r.status === 'committed' ? 'badge-green' : 'badge-red'}">${esc(r.status)}</span></td>
@@ -97,7 +97,7 @@ router.get('/carbon/import/:batchId', async (req, res, next) => {
       ? `<div class="alert alert-warning" role="alert"><strong>The AI column mapping did not run.</strong>
            Your spreadsheet uploaded and parsed correctly — only the suggestion step failed, so nothing
            is pre-selected below. Map the columns yourself and commit as normal.
-           <br><small class="muted">${esc(batch.error_message)}</small></div>`
+           <br><small class="text-muted">${esc(batch.error_message)}</small></div>`
       : '';
     const proposed = batch.proposed_mapping || {};
     const mappingRows = headers.map((h) => {
@@ -105,7 +105,7 @@ router.get('/carbon/import/:batchId', async (req, res, next) => {
       const options = ['', ...Object.keys(FIELD_LABEL)].map((f) =>
         `<option value="${esc(f)}"${f === suggested ? ' selected' : ''}>${f ? esc(FIELD_LABEL[f]) : '— ignore this column —'}</option>`).join('');
       return `<tr><td><code>${esc(h)}</code></td>
-        <td><select class="input" name="map___${encodeURIComponent(h)}">${options}</select></td></tr>`;
+        <td><select name="map___${encodeURIComponent(h)}">${options}</select></td></tr>`;
     }).join('');
 
     const previewRows = rows.slice(0, 5).map((r) =>
@@ -115,17 +115,17 @@ router.get('/carbon/import/:batchId', async (req, res, next) => {
       <div class="card">
         <h3>${esc(batch.filename)}</h3>
         ${aiNotice}
-        <p class="muted">${esc(batch.row_count)} row(s) detected. Review the AI's suggested mapping below —
+        <p class="text-muted">${esc(batch.row_count)} row(s) detected. Review the AI's suggested mapping below —
         change or clear any column — then approve to calculate and save.</p>
         <form method="post" action="/carbon/import/${esc(batch.id)}/approve">
-          <table class="table"><thead><tr><th>Column in your file</th><th>Maps to</th></tr></thead>
+          <table><thead><tr><th>Column in your file</th><th>Maps to</th></tr></thead>
             <tbody>${mappingRows}</tbody></table>
           <button class="btn btn-primary" type="submit" style="margin-top:16px">Approve &amp; commit</button>
         </form>
       </div>
       <div class="card" style="margin-top:16px">
         <h4>Preview (first 5 rows)</h4>
-        <div class="table-wrap"><table class="table"><thead><tr>
+        <div class="table-wrap"><table><thead><tr>
           ${headers.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
           <tbody>${previewRows}</tbody></table></div>
       </div>`, req.user, '/carbon'));

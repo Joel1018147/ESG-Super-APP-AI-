@@ -36,12 +36,17 @@ const upload = multer({
   },
 });
 
+// The class names live in a MAP rather than in a class attribute, which is why
+// a source census of `class="…"` never saw them and why the empty-database
+// render never saw them either — the list is empty until a document exists.
+// badge-warning / badge-success / badge-danger do not exist in the design
+// system; badge-amber / badge-green / badge-red do.
 const STATUS_LABEL = {
   pending:       ['Not analysed', 'badge'],
-  extracting:    ['Reading…', 'badge badge-warning'],
-  extracted:     ['Text extracted', 'badge badge-success'],
-  no_text_layer: ['No text layer (scan)', 'badge badge-warning'],
-  failed:        ['Could not read', 'badge badge-danger'],
+  extracting:    ['Reading…', 'badge badge-amber'],
+  extracted:     ['Text extracted', 'badge badge-green'],
+  no_text_layer: ['No text layer (scan)', 'badge badge-amber'],
+  failed:        ['Could not read', 'badge badge-red'],
 };
 
 // ── List and upload ─────────────────────────────────────────────────────────
@@ -56,14 +61,14 @@ router.get('/documents', async (req, res, next) => {
          FROM esg_documents d WHERE d.company_id = $1
         ORDER BY d.created_at DESC`, [cid(req)]);
 
-    const table = rows.length ? `<table class="table"><thead><tr>
+    const table = rows.length ? `<table><thead><tr>
         <th>File</th><th>Type</th><th>Size</th><th>Status</th><th>To review</th><th></th></tr></thead><tbody>
         ${rows.map((d) => {
           const [label, cls] = STATUS_LABEL[d.text_status] || ['Unknown', 'badge'];
           return `<tr><td>${esc(d.filename)}</td><td>${esc(d.doc_type)}</td>
             <td>${Math.round(d.byte_size / 1024)} KB</td>
-            <td><span class="${cls}">${esc(label)}</span>${d.page_count ? ` <small class="muted">${esc(d.page_count)}p</small>` : ''}</td>
-            <td>${d.pending > 0 ? `<span class="badge badge-primary">${esc(d.pending)}</span>` : '—'}</td>
+            <td><span class="${cls}">${esc(label)}</span>${d.page_count ? ` <small class="text-muted">${esc(d.page_count)}p</small>` : ''}</td>
+            <td>${d.pending > 0 ? `<span class="badge badge-accent">${esc(d.pending)}</span>` : '—'}</td>
             <td><a class="btn btn-outline" href="/documents/${esc(d.id)}">Open</a></td></tr>`;
         }).join('')}</tbody></table>`
       : emptyState('instrumented_but_empty', {
@@ -75,10 +80,10 @@ router.get('/documents', async (req, res, next) => {
         <form method="post" action="/documents" enctype="multipart/form-data"
               style="display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
           <div class="form-group" style="margin:0"><label for="file">File (max 15 MB)</label>
-            <input class="input" id="file" name="file" type="file" required
+            <input id="file" name="file" type="file" required
                    accept=".pdf,.png,.jpg,.jpeg,.docx,.xlsx"></div>
           <div class="form-group" style="margin:0"><label for="doc_type">What is it?</label>
-            <select class="input" id="doc_type" name="doc_type">
+            <select id="doc_type" name="doc_type">
               <option value="esg_report">ESG / sustainability report</option>
               <option value="utility_bill">Utility bill</option>
               <option value="policy">Policy document</option>
@@ -88,7 +93,7 @@ router.get('/documents', async (req, res, next) => {
             </select></div>
           <div style="display:flex;align-items:flex-end"><button class="btn btn-primary" type="submit">Upload</button></div>
         </form>
-        ${req.query.error ? `<div class="badge badge-danger" style="display:block;margin-top:12px">${esc(req.query.error)}</div>` : ''}
+        ${req.query.error ? `<div class="badge badge-red" style="display:block;margin-top:12px">${esc(req.query.error)}</div>` : ''}
       </div>
       <div class="table-wrap" style="margin-top:16px">${table}</div>`, req.user, '/documents'));
   } catch (err) { next(err); }
@@ -148,12 +153,12 @@ router.get('/documents/:id', async (req, res, next) => {
         <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
           <span class="badge">${esc(p.code)}</span>
           <strong>${esc(p.question_en)}</strong>
-          <span class="badge badge-primary">${esc(p.proposed_option_code)}</span>
-          ${p.page_no ? `<small class="muted">page ${esc(p.page_no)}</small>` : ''}
+          <span class="badge badge-accent">${esc(p.proposed_option_code)}</span>
+          ${p.page_no ? `<small class="text-muted">page ${esc(p.page_no)}</small>` : ''}
         </div>
         <blockquote style="margin:10px 0;padding-left:12px;border-left:3px solid var(--border);color:var(--text-2)">
           ${esc(p.evidence_quote)}</blockquote>
-        ${p.reject_reason ? `<small class="muted">${esc(p.reject_reason)}</small>` : ''}
+        ${p.reject_reason ? `<small class="text-muted">${esc(p.reject_reason)}</small>` : ''}
         ${actions || ''}
       </div>`;
 
@@ -162,15 +167,15 @@ router.get('/documents/:id', async (req, res, next) => {
     res.send(layout(d.filename, `
       <div class="card">
         <p><span class="${cls}">${esc(label)}</span>
-           ${d.page_count ? `<small class="muted"> · ${esc(d.page_count)} pages</small>` : ''}
-           <small class="muted"> · ${Math.round(d.byte_size / 1024)} KB · ${esc(d.doc_type)}</small></p>
-        ${d.extraction_error ? `<p class="muted">${esc(d.extraction_error)}</p>` : ''}
+           ${d.page_count ? `<small class="text-muted"> · ${esc(d.page_count)} pages</small>` : ''}
+           <small class="text-muted"> · ${Math.round(d.byte_size / 1024)} KB · ${esc(d.doc_type)}</small></p>
+        ${d.extraction_error ? `<p class="text-muted">${esc(d.extraction_error)}</p>` : ''}
         ${d.text_status === 'no_text_layer' ? `<div class="ai-insight">
             <strong>This PDF has no text layer.</strong> It is almost certainly a scan or an export
             of images. Nothing could be read from it — which is not the same as it disclosing
             nothing. Re-export it from the original document, or run OCR, and upload again.
           </div>` : ''}
-        ${!d.assessment_id ? `<p class="muted">Not linked to an assessment, so it cannot be analysed.
+        ${!d.assessment_id ? `<p class="text-muted">Not linked to an assessment, so it cannot be analysed.
             <a href="/assessment">Create one first</a>.</p>` : ''}
         <div style="display:flex;gap:10px;margin-top:12px">
           <a class="btn btn-outline" href="/documents/${esc(d.id)}/download">Download</a>
@@ -194,7 +199,7 @@ router.get('/documents/:id', async (req, res, next) => {
           </div>`)).join('')}` : ''}
 
       ${decided.length ? `<h3 style="margin:24px 0 12px">Reviewed</h3>
-        ${decided.map((p) => card(p, `<small class="muted">${esc(p.status)}</small>`)).join('')}` : ''}
+        ${decided.map((p) => card(p, `<small class="text-muted">${esc(p.status)}</small>`)).join('')}` : ''}
 
       ${rejected.length ? `<h3 style="margin:24px 0 12px">Discarded automatically — ${rejected.length}</h3>
         <div class="ai-insight" style="margin-bottom:12px">

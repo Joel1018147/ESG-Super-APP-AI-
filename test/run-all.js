@@ -7,7 +7,7 @@ const path = require('path');
 // inherits stdio — the tree guard's REPORT-ONLY / NOT A PASS banner has to be
 // readable, and the other eleven repos' runners capture output and print it only
 // for failing suites, which would swallow it.
-const suites = ['scoring-engine-test.js', 'no-model-figures-test.js', 'schema-idempotency-test.js', 'layer2-test.js', 'carbon-import-test.js', 'sedg-import-test.js', 'sedg-ui-test.js', 'green-finance-register-test.js', 'green-projects-test.js', 'journey-test.js', 'no-fallbacks-test.js', 'framework-choice-test.js', 'no-new-fallbacks.js', 'no-fallbacks-tree.js'];
+const suites = ['scoring-engine-test.js', 'no-model-figures-test.js', 'schema-idempotency-test.js', 'layer2-test.js', 'carbon-import-test.js', 'sedg-import-test.js', 'sedg-ui-test.js', 'green-finance-register-test.js', 'green-projects-test.js', 'journey-test.js', 'dashboard-test.js', 'no-fallbacks-test.js', 'framework-choice-test.js', 'no-new-fallbacks.js', 'no-fallbacks-tree.js'];
 let failed = 0;
 for (const s of suites) {
   console.log(`\n── ${s} ${'─'.repeat(Math.max(0, 60 - s.length))}`);

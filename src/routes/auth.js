@@ -12,8 +12,8 @@ function authPage(title, body, error) {
   return layout(title, `
     <div class="card">
       <h2 style="margin-bottom:4px">${esc(title)}</h2>
-      <p class="muted" style="margin-bottom:20px">Malaysia SMEs ESG e-Reporting System</p>
-      ${error ? `<div class="badge badge-danger" style="display:block;margin-bottom:16px">${esc(error)}</div>` : ''}
+      <p class="text-muted" style="margin-bottom:20px">Malaysia SMEs ESG e-Reporting System</p>
+      ${error ? `<div class="badge badge-red" style="display:block;margin-bottom:16px">${esc(error)}</div>` : ''}
       ${body}
     </div>`, null, '');
 }
@@ -24,12 +24,12 @@ router.get('/login', (req, res) => {
   res.send(authPage('Sign in', `
     <form method="post" action="/auth/login">
       <div class="form-group"><label for="email">Email</label>
-        <input class="input" id="email" name="email" type="email" required autocomplete="username"></div>
+        <input id="email" name="email" type="email" required autocomplete="username"></div>
       <div class="form-group"><label for="password">Password</label>
-        <input class="input" id="password" name="password" type="password" required autocomplete="current-password"></div>
+        <input id="password" name="password" type="password" required autocomplete="current-password"></div>
       <button class="btn btn-primary" style="width:100%" type="submit">Sign in</button>
     </form>${google}
-    <p class="muted" style="margin-top:16px">No account? <a href="/auth/register">Register your company</a></p>`,
+    <p class="text-muted" style="margin-top:16px">No account? <a href="/auth/register">Register your company</a></p>`,
     req.query.error));
 });
 
@@ -41,13 +41,13 @@ router.get('/register', (req, res) => {
   res.send(authPage('Register', `
     <form method="post" action="/auth/register">
       <div class="form-group"><label for="company">Company name</label>
-        <input class="input" id="company" name="company" required></div>
+        <input id="company" name="company" required></div>
       <div class="form-group"><label for="name">Your name</label>
-        <input class="input" id="name" name="name" required></div>
+        <input id="name" name="name" required></div>
       <div class="form-group"><label for="email">Email</label>
-        <input class="input" id="email" name="email" type="email" required autocomplete="username"></div>
+        <input id="email" name="email" type="email" required autocomplete="username"></div>
       <div class="form-group"><label for="password">Password (min 10 characters)</label>
-        <input class="input" id="password" name="password" type="password" minlength="10" required autocomplete="new-password"></div>
+        <input id="password" name="password" type="password" minlength="10" required autocomplete="new-password"></div>
       <button class="btn btn-primary" style="width:100%" type="submit">Create account</button>
     </form>`, req.query.error));
 });

@@ -220,7 +220,7 @@ function layout(title, content, user, activePath = '') {
     const links = items.map((m) => {
       const active = activePath === m.path ? ' active' : '';
       return `<a class="nav-item${active}" href="${esc(m.path)}">
-      <span class="nav-icon">${m.icon}</span><span class="nav-label">${esc(m.label)}</span></a>`;
+      <span>${m.icon}</span><span>${esc(m.label)}</span></a>`;
     }).join('');
     return `<div class="nav-group"><div class="nav-group-label text-sm">${esc(g)}</div>${links}</div>`;
   }).join('');
@@ -228,7 +228,7 @@ function layout(title, content, user, activePath = '') {
   const bottomNav = BOTTOM_NAV_KEYS.map((k) => MODULES.find((m) => m.key === k)).filter(Boolean).map((m) => {
     const active = activePath === m.path ? ' active' : '';
     return `<a class="bn-item${active}" href="${esc(m.path)}">
-      <span class="bn-icon">${m.icon}</span><span class="bn-label">${esc(m.label)}</span></a>`;
+      <span class="bn-icon">${m.icon}</span><span>${esc(m.label)}</span></a>`;
   }).join('');
 
   return `<!DOCTYPE html>
