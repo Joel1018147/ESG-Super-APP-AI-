@@ -59,10 +59,13 @@ router.get('/improvement', wrap(async (req, res) => {
   const live = await journey.loadLiveAssessment(companyId);
   const assessmentId = live ? live.id : null;
 
-  const [gaps, road] = await Promise.all([
-    gapAnalysis.analyse(companyId, assessmentId),
-    roadmapService.build(companyId, assessmentId),
-  ]);
+  /* ONE GAP ANALYSIS, RENDERED TWICE — not two analyses.
+     This used to run gapAnalysis.analyse() here and let roadmapService.build()
+     run it again, which measured as six duplicated statements per render and
+     put two independently-derived figures on one page. The roadmap is handed
+     the result instead. */
+  const gaps = await gapAnalysis.analyse(companyId, assessmentId);
+  const road = await roadmapService.build(companyId, assessmentId, { gaps });
 
   const header = `
     <header class="esg-page-header esg-enter">
@@ -84,6 +87,14 @@ router.get('/improvement', wrap(async (req, res) => {
             + 'assessment exists and has been scored. Scoring is switched on and working — there '
             + 'is simply nothing to score, and no provisional figure is being estimated in the '
             + 'meantime.' });
+    }
+    if (gaps.state === 'incomplete_score') {
+      /* A SCORE SET WITH NO OVERALL ROW. Rare — the engine writes every scope
+         in one transaction — and it used to reach the line below and throw on
+         a null. Named rather than guarded, so the page says what happened. */
+      return emptyState('uninstrumented', {
+        title: 'This assessment’s score is incomplete',
+        body: gaps.detail });
     }
     if (gaps.state === 'not_scored') {
       return emptyState('instrumented_but_empty', {

@@ -240,10 +240,24 @@ app.use((req, res) => {
   // a rendered HTML shell wastes ~97 KB and, worse, returns Content-Type
   // text/html for something the browser asked for as an image or a script.
   if (/\.[a-z0-9]{2,5}$/i.test(req.path)) return res.status(404).type('txt').send('Not found');
-  const { layout } = require('./utils/layout');
-  res.status(404).send(layout('Not found',
-    '<div class="empty-state"><div class="es-icon">🔍</div><h3>Page not found</h3></div>',
-    req.user, ''));
+  /* P10 · THE PRODUCT'S OWN EMPTY STATE, AND A WAY OUT.
+     This rendered a 🔍 emoji and the three words "Page not found" — an emoji
+     P8 removed everywhere it looked, and a dead end with nothing to click.
+     emptyState() draws the same mark as every other absence in the product and
+     the page now names where to go, which is the rule the rest of the product
+     already follows: an absence says what it is and what to do next. */
+  const { layout, emptyState } = require('./utils/layout');
+  res.status(404).send(layout('Not found', `
+    <div class="esg-page">
+      ${emptyState('zero', {
+    title: 'That page does not exist',
+    body: 'The address was not recognised. It may have been mistyped, or it may be a page that '
+        + 'was never built — the sidebar lists everything this platform can currently do.' })}
+      <div class="esg-row">
+        <a class="btn btn-primary" href="${req.user ? '/dashboard' : '/auth/login'}">${
+  req.user ? 'Back to your dashboard' : 'Sign in'}</a>
+      </div>
+    </div>`, req.user, ''));
 });
 
 // Error handler. Logs the stack, returns a message — never the stack — to the
@@ -255,11 +269,19 @@ app.use((err, req, res, next) => {
   if (req.path.startsWith('/api/')) {
     return res.status(500).json({ error: IS_PROD ? 'Internal error' : err.message });
   }
-  const { layout, esc } = require('./utils/layout');
+  /* Same migration as the 404 above, and the same reason. The message itself
+     is unchanged: the stack never reaches the caller in production. */
+  const { layout, emptyState } = require('./utils/layout');
   res.status(500).send(layout('Something went wrong', `
-    <div class="empty-state"><div class="es-icon">⚠️</div>
-      <h3>Something went wrong</h3>
-      <p>${esc(IS_PROD ? 'The team has been notified. Please try again.' : err.message)}</p>
+    <div class="esg-page">
+      ${emptyState('uninstrumented', {
+    title: 'Something went wrong',
+    body: IS_PROD ? 'The team has been notified. Nothing you entered was lost by this — try again, '
+        + 'and if it keeps happening the page you came from will say so too.' : err.message })}
+      <div class="esg-row">
+        <a class="btn btn-primary" href="${req.user ? '/dashboard' : '/auth/login'}">${
+  req.user ? 'Back to your dashboard' : 'Sign in'}</a>
+      </div>
     </div>`, req.user, ''));
 });
 

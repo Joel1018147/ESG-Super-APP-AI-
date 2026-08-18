@@ -380,6 +380,7 @@ test('EVERY statement in journeyEngine.js carries a tenant predicate, at the SQL
 const API_SRC = fs.readFileSync(path.join(SRC, 'routes', 'api.js'), 'utf8');
 const JOURNEY_ANCHOR = 'THE JOURNEY, MISSIONS AND XP';
 const P9_ANCHOR = 'P9 · THE OPERATING WORKFLOW';
+const P10_ANCHOR = 'P10 · THE NAV, AND ONE LIVE ID PER DETAIL PAGE';
 
 test('the Run 52 API block issues no SQL of its own', () => {
   // Everything it needs comes from the engine, which is where the tenant
@@ -407,9 +408,17 @@ test('the P9 API block issues no SQL of its own either', () => {
      wrong, and the real invariant is asserted instead: it names no table, and
      it contains no statement keyword pair. That is stronger than the proxy, not
      weaker: a backtick-free block could still concatenate SQL with +. */
+  /* BOUNDED AT BOTH ENDS, for the second time and the same reason.
+     This slice ran to the END OF THE FILE, which was correct exactly as long
+     as the P9 block was last — and P10 appended an endpoint after it, at which
+     point the guard was reporting on a region that is no longer the one it
+     names. Anchor rot is now a pattern in this file rather than an incident;
+     every new block gets its own anchor and its own assertion. */
   const i = API_SRC.indexOf(P9_ANCHOR);
   assert.ok(i > 0, 'the P9 API section is gone — the anchor moved');
-  const block = stripComments(API_SRC.slice(i));
+  const end = API_SRC.indexOf(P10_ANCHOR);
+  assert.ok(end > i, 'the P10 anchor is gone or has moved above the P9 block');
+  const block = stripComments(API_SRC.slice(i, end));
   const named = [...block.matchAll(/\b(esg_[a-z_]+)\b/g)].map((m) => m[1]);
   assert.deepStrictEqual(named, [],
     `the P9 API block names a table directly: ${named.join(', ')} — every one of its six endpoints `
@@ -418,6 +427,45 @@ test('the P9 API block issues no SQL of its own either', () => {
     .map((m) => m[0].replace(/\s+/g, ' ').slice(0, 60));
   assert.deepStrictEqual(sql, [],
     `the P9 API block issues SQL directly: ${sql.join(' | ')}`);
+});
+
+test('the P10 nav endpoint reads only ids, and every read is tenant-scoped', () => {
+  /* /nav-paths is the ONE endpoint in this file that legitimately issues SQL:
+     it publishes the sample ids test/visual/audit.js needs so its page list is
+     derived rather than hand-kept. So it is not held to "no SQL" — it is held
+     to the two things that actually matter for it.
+
+     1. IT SELECTS NOTHING BUT ids. A name, a figure or a document body leaking
+        through a harness endpoint would be a real widening of what /api
+        exposes.
+     2. EVERY STATEMENT TOUCHING COMPANY DATA CARRIES THE TENANT PREDICATE.
+        The finance-product read does not, and must not: the register is public
+        reference data shared by every tenant, which is why it is asserted by
+        name here rather than waved through. */
+  const i = API_SRC.indexOf(P10_ANCHOR);
+  assert.ok(i > 0, 'the P10 API section is gone — the anchor moved');
+  const block = stripComments(API_SRC.slice(i));
+
+  const statements = [...block.matchAll(/[`']\s*(SELECT[\s\S]*?)[`']/g)].map((m) => m[1]);
+  assert.ok(statements.length >= 2, `only ${statements.length} statements found in the P10 block`);
+
+  for (const st of statements) {
+    const selected = st.replace(/\s+/g, ' ').match(/SELECT (.*?) FROM/i);
+    assert.ok(selected, `could not read the select list of: ${st.slice(0, 60)}`);
+    const cols = selected[1].split(',').map((c) => c.trim().replace(/^\w+\./, ''));
+    for (const c of cols) {
+      assert.strictEqual(c, 'id',
+        `the nav endpoint selects "${c}" — it may publish ids and nothing else`);
+    }
+  }
+
+  const untenanted = statements.filter((st) => !/company_id = \$1/.test(st));
+  assert.strictEqual(untenanted.length, 1,
+    `${untenanted.length} statements carry no tenant predicate; exactly one may — the financing `
+    + 'register, which is public reference data shared by every tenant');
+  assert.ok(/esg_finance_products/.test(untenanted[0]),
+    `the untenanted statement reads ${untenanted[0].replace(/\s+/g, ' ').slice(0, 80)} — only the `
+    + 'public financing register may be read without a company predicate');
 });
 
 test('routes/journey.js issues no SQL at all', () => {

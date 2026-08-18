@@ -1,44 +1,67 @@
 async (page) => {
   const BASE = 'http://127.0.0.1:3000';
-  const PAGES = [
-    ['dashboard', '/dashboard'],
-    ['journey', '/journey'],
-    ['assessment', '/assessment/6b83d64e-872f-4d7d-96d3-c7b3d981368a'],
-    ['green-finance', '/green-finance'],
-    ['projects', '/green-finance/projects'],
-    ['readiness', '/green-finance/readiness'],
-    ['opportunities', '/green-finance/opportunities'],
-    ['impact', '/impact'],
-    ['carbon', '/carbon'],
-    ['documents', '/documents'],
-    ['company', '/company'],
-    ['governance', '/governance'],
-    /* THESE TWO WERE MISSING, and their absence is why P8 reported "zero
-     * horizontal overflow" while production clipped both of them at 390px.
-     *
-     * The list was hand-written from the pages P8 was changing, so it grew to
-     * cover the migrated set and never covered the rest. /assessment here is
-     * the LIST page — the detail page /assessment/:id was in the list all
-     * along, and having one of the two made the gap invisible.
-     *
-     * A hand-kept page list will drift again. layout.MODULES is the nav's own
-     * source and smoke-test.js already walks it; the honest fix is to derive
-     * from it, which needs this probe to run in Node rather than in the
-     * Playwright sandbox. Until then these are named explicitly and this
-     * comment is the reason. */
-    ['assessment-list', '/assessment'],
-    ['frameworks', '/frameworks'],
-    ['reports', '/reports'],
-    /* P9's three. /reports above is the SAME path and is now a real page
-       rather than an empty state, so it is measured as one for the first time.
-       /explain carries a live indicator id for the same reason /assessment
-       above carries an assessment id: with a bad one the probe measures a 404
-       and reports it clean. Check the page titles before believing a clean
-       run. */
-    ['improvement', '/improvement'],
-    ['consultation', '/consultation'],
-    ['explain', '/explain?intent=explain_requirement&subject=0543013c-e90a-4e65-8154-66a338b4ede2'],
+  /* THE NAV PART OF THE PAGE LIST IS NO LONGER HAND-KEPT. THE REST STILL IS,
+     AND THIS COMMENT SAYS SO RATHER THAN IMPLYING OTHERWISE.
+
+     It was hand-kept entirely, and it drifted twice. P8 reported "zero
+     horizontal overflow" while production clipped /assessment and /frameworks,
+     because neither was in the list. fc29163 added them and wrote: "A
+     hand-kept page list will drift again. layout.MODULES is the nav's own
+     source and smoke-test.js already walks it; the honest fix is to derive
+     from it."
+
+     It drifted again. The P10 audit found /green-finance/register clipping a
+     749px table into a 390px viewport with no scroll container — 371px of
+     every one of 31 rows unreachable — and the six "not built yet" pages
+     rendering at 0px padding. None of the seven was in the list.
+
+     So the nav is derived now. This probe runs in the Playwright sandbox and
+     cannot require() the nav module, so the list is fetched FROM THE RUNNING
+     APP: /api/nav-paths publishes exactly what layout.MODULES holds. A
+     destination added to the nav is audited from that moment.
+
+     BUT DERIVING FROM THE NAV WOULD NOT HAVE CAUGHT THE REGISTER, and the
+     first version of this comment read as though it had. /green-finance/
+     register is not a nav destination — it is reached by a button on
+     /green-finance — so it is absent from MODULES and was therefore absent
+     from the derived list too, right through the review of the change that
+     fixed it. Deriving fixes nav drift and nothing else.
+
+     NON_NAV below closes that hole for the pages a signed-in user can open
+     with no id and no extra role. What is still outside coverage, and why:
+
+       /green-finance/projects/:id, /green-finance/projects/:id/routes,
+       /documents/:id, /carbon/import/:batchId
+         need a live id, and /api/nav-paths publishes only three. Add the id
+         there and add the route here — do not guess an id, because a bad one
+         measures a 404 and reports it clean.
+
+       /green-finance/admin/products, /green-finance/admin/products/:id/edit
+         are super-admin only. This probe signs in as a company_admin, so it
+         would measure the 403 page and call it clean. Audit them from a
+         session that can actually open them.
+
+       /design-system
+         is a developer reference, not a product page, and next()s straight
+         past in production.
+
+     The detail pages take ids for the same reason named above — check the
+     titles in a green run before believing it. */
+  const nav = await (await page.request.get(BASE + '/api/nav-paths',
+    { headers: { Accept: 'application/json' } })).json();
+  // Reachable, in no nav, no id, no extra role. Keep this list honest by hand.
+  const NON_NAV = [
+    ['green-finance-register', '/green-finance/register'],
+    ['green-finance-projects-new', '/green-finance/projects/new'],
+    ['carbon-import', '/carbon/import'],
   ];
+  const PAGES = [
+    ...nav.paths.map((p) => [p.replace(/^\//, '').replace(/\//g, '-') || 'root', p]),
+    ...NON_NAV,
+    ['assessment-detail', '/assessment/' + nav.sample.assessment],
+    ['register-detail', '/green-finance/register/' + nav.sample.financeProduct],
+    ['explain', '/explain?intent=explain_requirement&subject=' + nav.sample.indicator],
+  ].filter(([, p]) => !/undefined|null/.test(p));
   /* 360 ADDED IN P9. The five above were P8's set; the directive names six and
      360 is the one that was missing — it is the narrowest width this product
      supports and the one where a 16rem grid track minimum has least room. */

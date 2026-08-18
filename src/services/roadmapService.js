@@ -152,12 +152,25 @@ async function gather(companyId) {
  * absent row, because "you have not got here yet" is information and a missing
  * step is not.
  */
-async function build(companyId, assessmentId) {
+async function build(companyId, assessmentId, precomputed = {}) {
   if (!companyId) return null;
 
+  /* THE GAP ANALYSIS IS ACCEPTED, NOT ALWAYS RE-RUN.
+     /improvement renders both the gap list and this roadmap, and it was
+     calling gapAnalysis.analyse() itself AND letting this function call it
+     again. MEASURED: six statements issued twice on one render — the whole of
+     gapAnalysis.gather(), including the scores, the bands, the recommendation
+     rows and the responses.
+
+     It is not only the round trips. Two independent analyses on one page are
+     two chances to disagree, and the page renders figures from both. Passing
+     the first one in makes them the SAME object by construction.
+
+     The parameter is optional and the fallback is the old behaviour, so every
+     other caller — and this function's own tests — are unaffected. */
   const [gaps, ready, { opportunities, projects }] = await Promise.all([
-    gapAnalysis.analyse(companyId, assessmentId),
-    readinessService.calculate(companyId),
+    precomputed.gaps || gapAnalysis.analyse(companyId, assessmentId),
+    precomputed.readiness || readinessService.calculate(companyId),
     gather(companyId),
   ]);
 

@@ -286,10 +286,18 @@ function frameworkLabel(code, version) {
       || 'Assessment framework';
 }
 
+/* THE SINGLE QUOTE IS ESCAPED TOO, AS OF P10.
+   It was not, and the product was safe anyway — every interpolated attribute
+   in this codebase is DOUBLE-quoted, checked across all eight route files. But
+   that is safety by convention, and the convention is invisible: one
+   single-quoted attribute, written by anyone, would open a break-out silently
+   and nothing would fail. `&#39;` costs one replace and removes the dependency
+   on a habit. It renders identically to a reader. */
 function esc(s) {
   return String(s ?? '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 /** A CALENDAR DAY, WRITTEN AS ONE.

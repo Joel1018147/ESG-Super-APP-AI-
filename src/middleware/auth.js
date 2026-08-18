@@ -2,6 +2,15 @@
 
 const { normaliseRole, homePathForRole } = require('../services/roles');
 
+/* THE HOME PATHS THAT ACTUALLY RESOLVE.
+   homePathForRole() is a product statement about where a role belongs; this is
+   the check that the statement points at a route this app serves. '/admin' is
+   deliberately absent — it is what homePathForRole returns for a super_admin
+   and there is no such route, which is the defect this set exists to absorb
+   until either the route is built or the mapping is changed. Asserted in
+   test/roles-test.js against the real router stack, so this cannot rot. */
+const ROUTED_HOMES = new Set(['/dashboard']);
+
 const wantsJson = (req) =>
   req.xhr ||
   req.path.startsWith('/api/') ||
@@ -23,15 +32,27 @@ function forbidden(req, res) {
   if (wantsJson(req)) {
     return res.status(403).json({ error: 'Forbidden', home });
   }
-  const { layout, esc } = require('../utils/layout');
+  /* P10 · off the 🔒 emoji and onto the product's own empty state, for the
+     reason P8 gave when it removed every other emoji: fifteen multi-coloured
+     glyphs in a monochrome interface were the strongest "generated template"
+     signal the audit found. This surface was not in P8's list.
+
+     The destination is checked too. homePathForRole() returns '/admin' for a
+     super_admin and NO SUCH ROUTE EXISTS — measured: a signed-in GET /admin
+     answers 404 — so this button sent the one role that can reach the most
+     pages to a dead end. It now falls back to a path that resolves. */
+  const { layout, esc, emptyState } = require('../utils/layout');
   const role = normaliseRole(req.user && req.user.role) || 'unassigned';
+  const dest = ROUTED_HOMES.has(home) ? home : '/dashboard';
   return res.status(403).send(layout('No Access', `
-    <div class="empty-state">
-      <div class="es-icon">🔒</div>
-      <h3>You do not have access to this page</h3>
-      <p>Your account is set to <strong>${esc(role)}</strong>, and this area is not
-         part of that role's work. This is deliberate, not a fault.</p>
-      <a href="${esc(home)}" class="btn btn-primary" style="margin-top:16px">← Back to your home page</a>
+    <div class="esg-page">
+      ${emptyState('zero', {
+    title: 'This area is not part of your role',
+    body: `Your account is set to ${role}, and this page belongs to a different part of the `
+        + 'work. That is deliberate, not a fault — nothing is broken and nothing was lost.' })}
+      <div class="esg-row">
+        <a href="${esc(dest)}" class="btn btn-primary">Back to your home page</a>
+      </div>
     </div>`, req.user, ''));
 }
 
@@ -52,12 +73,34 @@ const requireRoles = (...roles) => {
 // nobody thought about.
 const requireAnyRole = (req, res, next) => requireAuth(req, res, next);
 
-// Read-only roles must not be able to POST. Checked on the METHOD, so adding a
-// new write route under an existing mount cannot quietly grant them writes.
+/* Read-only roles must not be able to POST. Checked on the METHOD, so adding a
+   new write route under an existing mount cannot quietly grant them writes.
+
+   P10 CLOSED A FAIL-OPEN HERE, and the interesting part is that the module it
+   depends on already claimed the opposite. roles.js says of normaliseRole:
+   "An unrecognised role normalises to null, which no allow-list contains — a
+   typo reaches nothing rather than inheriting whatever the weakest granted set
+   happens to be." That is true of requireRoles, which is an ALLOW-list. This
+   is a DENY-list, and null fell straight through it: a user whose role string
+   was not recognised could write.
+
+   NOT REACHABLE TODAY, and the audit checked rather than assumed: the only two
+   writers of esg_users.role are registration and the Google callback, and both
+   hardcode 'company_admin'. But esg_users.role is plain `text` with no CHECK
+   constraint, so an off-list value is storable, and the first admin screen that
+   sets a role would make this live.
+
+   WRITES NOW REQUIRE A ROLE THIS APP RECOGNISES. An unrecognised role is
+   treated as read-only — the same answer requireRoles already gives it —
+   rather than as "not one of the two read-only roles, therefore allowed". */
+const WRITE_METHODS_ALLOWED_FOR = new Set([
+  'super_admin', 'company_admin', 'esg_manager', 'contributor', 'consultant',
+]);
+
 const denyWritesForReadOnly = (req, res, next) => {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
   const r = normaliseRole(req.user && req.user.role);
-  const readOnly = r === 'auditor' || r === 'gov_officer';
-  if (readOnly && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return forbidden(req, res);
+  if (!r || !WRITE_METHODS_ALLOWED_FOR.has(r)) return forbidden(req, res);
   return next();
 };
 

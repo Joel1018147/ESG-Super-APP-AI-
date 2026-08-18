@@ -26,7 +26,18 @@
 
 const express = require('express');
 const { query } = require('../db');
-const { layout, esc, emptyState } = require('../utils/layout');
+/* dayOf IS IMPORTED, AND THAT IS THE WHOLE OF THE P10 DATE FIX.
+   node-postgres materialises a DATE column as a JS Date at LOCAL midnight, so
+   String(v) is "Sat Aug 15 2026 00:00:00 GMT+0800 (Malaysia Time)" and
+   .slice(0, 10) yields "Sat Aug 15" — a date with no year. Three places in
+   this file did that, and one of them fed an <input type="date">, which
+   REJECTS a value in that shape and renders the field EMPTY.
+
+   layout.dayOf() already existed and already handled this correctly. Nothing
+   new was written; the defective sites now call the helper this repo already
+   owns. (impactService keeps its own isoDate: same rule, different null
+   contract — it returns null where dayOf returns '' — and its tests pin that.) */
+const { layout, esc, dayOf, emptyState } = require('../utils/layout');
 const { requireRoles } = require('../middleware/auth');
 const copy = require('../services/financeCopy');
 
@@ -206,21 +217,37 @@ router.get('/green-finance/register', wrap(async (req, res) => {
   let body;
   if (rows.length) {
     const trs = rows.map((r) => `<tr>
-        <td>${esc(r.institution_name)}<br>
-            <span class="text-muted text-sm">${esc(copy.labelFor(copy.INSTITUTION_KIND_LABELS, r.institution_kind))}</span></td>
-        <td><a href="${NAV}/register/${esc(r.id)}">${esc(r.product_name)}</a>${
-          r.is_active ? '' : ' <span class="badge badge-gray">not current</span>'}</td>
-        <td>${esc(copy.labelFor(copy.FINANCING_TYPE_LABELS, r.financing_type))}</td>
-        <td>${esc(copy.labelFor(copy.BORROWER_SCOPE_LABELS, r.borrower_scope))}</td>
-        <td><span class="badge ${r.availability_status === 'open' ? 'badge-green' : 'badge-amber'}">${
-          esc(copy.labelFor(copy.AVAILABILITY_LABELS, r.availability_status))}</span></td>
-        <td>${ageBadge(r.days_since_verified)}</td>
+        <td data-label="Institution">${esc(r.institution_name)}<br>
+            <span class="esg-small">${esc(copy.labelFor(copy.INSTITUTION_KIND_LABELS, r.institution_kind))}</span></td>
+        <td data-label="Programme"><a class="esg-cell-link" href="${NAV}/register/${esc(r.id)}">${esc(r.product_name)}</a>${
+  r.is_active ? '' : ' <span class="esg-astate esg-astate--na">not current</span>'}</td>
+        <td data-label="Financing type">${esc(copy.labelFor(copy.FINANCING_TYPE_LABELS, r.financing_type))}</td>
+        <td data-label="Borrower">${esc(copy.labelFor(copy.BORROWER_SCOPE_LABELS, r.borrower_scope))}</td>
+        <td data-label="Availability"><span class="esg-astate esg-astate--${
+  r.availability_status === 'open' ? 'verified' : 'missing'}">${
+  esc(copy.labelFor(copy.AVAILABILITY_LABELS, r.availability_status))}</span></td>
+        <td data-label="Source last read">${ageBadge(r.days_since_verified)}</td>
       </tr>`).join('');
-    body = `<div class="table-wrap"><table>
+    /* P10 · OFF .table-wrap AND ONTO §5's SCROLL CONTAINER.
+       MEASURED at 390px before this change: the table was 749px wide inside
+       .table-wrap, whose overflow-x is hidden, with no scroll container above
+       it — so the last cell's right edge landed at 761px in a 390px viewport
+       and 371px of every one of 31 rows was unreachable. No scrollbar, no
+       gesture, no way back. That is D1's data-loss shape, and it is the same
+       defect fc29163 fixed on /frameworks and /assessment.
+
+       It survived that run because this page was not in test/visual/audit.js's
+       hand-kept list — exactly the drift that commit's own comment predicted.
+       The list is derived from layout.MODULES in this run so it cannot drift
+       again. Same treatment the green projects table already had: a scroll
+       container that is keyboard reachable, and .esg-table--stack so a phone
+       gets one row per block instead of a sideways scroll it has to discover. */
+    body = `<div class="esg-table-scroll" tabindex="0" role="region" aria-label="Financing register">
+      <table class="esg-table esg-table--stack">
       <thead><tr><th>Institution</th><th>Programme</th><th>Financing type</th>
                  <th>Borrower</th><th>Availability</th><th>Source last read</th></tr></thead>
       <tbody>${trs}</tbody></table></div>
-      <p class="text-muted text-sm">${esc(rows.length)} programme${rows.length === 1 ? '' : 's'} shown.
+      <p class="esg-small esg-prose">${esc(rows.length)} programme${rows.length === 1 ? '' : 's'} shown.
          A row marked over ${esc(copy.STALE_AFTER_DAYS)} days old has not been re-read since it was
          recorded; treat its figures as needing confirmation with the institution.</p>`;
   } else if (any) {
@@ -326,37 +353,77 @@ router.get('/green-finance/register/:id', wrap(async (req, res) => {
           + 'eligibility criteria for this programme. The programme is real and this record is '
           + 'complete — the institution does not disclose the terms.' });
 
+  /* P10 · THE DETAIL PAGE, MIGRATED WITH ITS LIST.
+     The derived page list found this the moment it started deriving: the same
+     module, the same pre-P8 markup, and a source URL 492px wide rendered
+     off-screen at 360 and 390 with nothing to scroll it. A BNM document URL is
+     one unbreakable token, so it needs a wrapping rule rather than a container
+     — .esg-prose-wide plus overflow-wrap is what /frameworks already uses for
+     the same kind of link. The 11px master badges go with it, for the reason
+     §3 gives: 11px is reserved for legal and provenance, never for a status. */
   res.send(layout(p.product_name, `
-    <h2 class="page-title">${esc(p.product_name)}</h2>
-    <p class="text-muted">${esc(p.institution_name)} ·
-       ${esc(copy.labelFor(copy.INSTITUTION_KIND_LABELS, p.institution_kind))}</p>
-    ${disclaimerBlock()}
+    <div class="esg-page">
+      <header class="esg-page-header esg-enter">
+        <div class="esg-page-header__text">
+          <h2 class="esg-h1">${esc(p.product_name)}</h2>
+          <p class="esg-page-header__intro">${esc(p.institution_name)} ·
+             ${esc(copy.labelFor(copy.INSTITUTION_KIND_LABELS, p.institution_kind))}</p>
+        </div>
+      </header>
+      ${disclaimerBlock()}
 
-    <div class="card">
-      <h3 class="section-title">Status</h3>
-      <p><span class="badge ${p.availability_status === 'open' ? 'badge-green' : 'badge-amber'}">${
-        esc(copy.labelFor(copy.AVAILABILITY_LABELS, p.availability_status))}</span>
-        ${p.is_active ? '' : ' <span class="badge badge-gray">not current</span>'}
-        ${ageBadge(p.days_since_verified)}</p>
-      <p>${esc(p.status_note)}</p>
-    </div>
+      <section class="esg-section esg-enter" style="--esg-i:1">
+        <div class="esg-section__head">
+          <h3 class="esg-section__title">Status</h3>
+          <span class="esg-section__note">As the institution publishes it</span>
+        </div>
+        <div class="esg-card"><div class="esg-card__body esg-stack">
+          <div class="esg-row">
+            <span class="esg-astate esg-astate--${
+  p.availability_status === 'open' ? 'verified' : 'missing'}">${
+  esc(copy.labelFor(copy.AVAILABILITY_LABELS, p.availability_status))}</span>
+            ${p.is_active ? '' : '<span class="esg-astate esg-astate--na">not current</span>'}
+            ${ageBadge(p.days_since_verified)}
+          </div>
+          <p class="esg-body esg-prose">${esc(p.status_note)}</p>
+        </div></div>
+      </section>
 
-    <div class="card">
-      <h3 class="section-title">What the institution publishes</h3>
-      <div class="table-wrap"><table><tbody>
-        <tr><th scope="row">Financing type</th><td>${esc(copy.labelFor(copy.FINANCING_TYPE_LABELS, p.financing_type))}</td></tr>
-        <tr><th scope="row">Borrower</th><td>${esc(copy.labelFor(copy.BORROWER_SCOPE_LABELS, p.borrower_scope))}</td></tr>
-      </tbody></table></div>
-      ${terms}
-    </div>
+      <section class="esg-section esg-enter" style="--esg-i:2">
+        <div class="esg-section__head">
+          <h3 class="esg-section__title">What the institution publishes</h3>
+          <span class="esg-section__note">Recorded from the source, never inferred</span>
+        </div>
+        <div class="esg-card"><div class="esg-card__body esg-stack">
+          <div class="esg-table-scroll" tabindex="0" role="region" aria-label="Published terms">
+            <table class="esg-table esg-table--stack"><tbody>
+              <tr><th scope="row">Financing type</th>
+                  <td data-label="Financing type">${esc(copy.labelFor(copy.FINANCING_TYPE_LABELS, p.financing_type))}</td></tr>
+              <tr><th scope="row">Borrower</th>
+                  <td data-label="Borrower">${esc(copy.labelFor(copy.BORROWER_SCOPE_LABELS, p.borrower_scope))}</td></tr>
+            </tbody></table>
+          </div>
+          ${terms}
+        </div></div>
+      </section>
 
-    <div class="card">
-      <h3 class="section-title">Where this came from</h3>
-      <p>${esc(copy.labelFor(copy.SOURCE_PUBLISHER_LABELS, p.source_publisher))} ·
-         read ${esc(String(p.last_verified).slice(0, 10))}</p>
-      <p><a href="${esc(p.source_url)}" rel="noreferrer noopener" target="_blank">${esc(p.source_url)}</a></p>
-    </div>
-    <p><a class="btn btn-outline" href="${NAV}/register">Back to the register</a></p>`,
+      <section class="esg-section esg-enter" style="--esg-i:3">
+        <div class="esg-section__head">
+          <h3 class="esg-section__title">Where this came from</h3>
+          <span class="esg-section__note">Provenance, and when it was last read</span>
+        </div>
+        <div class="esg-card"><div class="esg-card__body esg-stack">
+          <p class="esg-body">${esc(copy.labelFor(copy.SOURCE_PUBLISHER_LABELS, p.source_publisher))} ·
+             read ${esc(dayOf(p.last_verified))}</p>
+          <p class="esg-prose-wide"><a class="esg-cell-link" href="${esc(p.source_url)}"
+             rel="noreferrer noopener" target="_blank">${esc(p.source_url)}</a></p>
+        </div></div>
+      </section>
+
+      <div class="esg-row">
+        <a class="btn btn-outline" href="${NAV}/register">Back to the register</a>
+      </div>
+    </div>`,
   req.user, NAV));
 }));
 
@@ -412,7 +479,10 @@ router.get('/green-finance/admin/products/:id/edit', adminOnly, wrap(async (req,
         body: 'Nothing in the register has that identifier.' })}`, req.user, NAV));
   }
   const p = rows[0];
-  const today = new Date().toISOString().slice(0, 10);
+  /* LOCAL components, not UTC. toISOString() was the fourth site of the same
+     off-by-one: in GMT+0800 an admin recording a verification before 08:00
+     local would get yesterday's date here, and could not select today. */
+  const today = dayOf(new Date());
   const area = (name, label, value) => `<div class="form-group">
       <label for="fld-${esc(name)}">${esc(label)}</label>
       <textarea id="fld-${esc(name)}" name="${esc(name)}" rows="3">${esc(value === null || value === undefined ? '' : value)}</textarea>
@@ -1032,7 +1102,7 @@ function inputRow(def, criterion, row) {
   const checked = (v) => (state === v ? ' checked' : '');
   // A date and a number are not yes/no questions; everything else here is.
   const control = def.code === 'incorporation_date'
-    ? `<input id="${esc(id)}" name="${esc(id)}" type="date" value="${esc(row && row.value_date ? String(row.value_date).slice(0, 10) : '')}">`
+    ? `<input id="${esc(id)}" name="${esc(id)}" type="date" value="${esc(row && row.value_date ? dayOf(row.value_date) : '')}">`
     : (def.code === 'trading_years'
       ? `<input id="${esc(id)}" name="${esc(id)}" type="number" min="0" step="1" value="${esc(row && row.value_numeric !== null && row.value_numeric !== undefined ? row.value_numeric : '')}">`
       : (def.code === 'revenue_trend'
@@ -1402,7 +1472,7 @@ router.get('/green-finance/projects/:id/routes', wrap(async (req, res) => {
     : esc(k.why)}</span>`).join('')}
           <span class="esg-evidence__k">Source</span>
           <span class="esg-evidence__v"><a href="${esc(c.product.source_url)}" rel="noopener noreferrer" target="_blank">${
-  esc(c.product.source_publisher)}</a>, last read ${esc(String(c.product.last_verified).slice(0, 10))}</span>
+  esc(c.product.source_publisher)}</a>, last read ${esc(dayOf(c.product.last_verified))}</span>
         </div>
       </details>
     </div></div>`;
