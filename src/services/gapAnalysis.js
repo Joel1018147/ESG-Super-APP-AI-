@@ -359,13 +359,36 @@ async function analyse(companyId, assessmentId) {
     .map((r) => describe(r, responseBy.get(r.indicator_id) || null, scheme, assessmentId))
     .sort((a, b) => (b.points_missed || 0) - (a.points_missed || 0));
 
+  /* `ok` REQUIRES AN OVERALL ROW, and P10 made that explicit.
+     `state: 'ok'` was returned whenever esg_scores held ANY row for the
+     assessment, while `overall` was null unless one of them was the OVERALL
+     scope. Two consumers then disagreed about what `ok` promised:
+     roadmapService re-checked `gaps.overall` before reading it, and
+     /improvement did not — so a score set with pillar rows and no OVERALL
+     rendered the roadmap fine and 500'd the page beside it.
+
+     scoringEngine always writes all four scopes in one transaction, so this is
+     a broken-write shape rather than a routine one. That is exactly why it
+     gets its own state instead of a guard at each call site: a caller can
+     render it, and no caller has to remember. */
   const overall = scores.find((s) => s.scope === 'OVERALL') || null;
-  const band = overall ? bands.find((b) => b.band_code === overall.band_code) || null : null;
+  if (!overall) {
+    return Object.freeze({
+      state: 'incomplete_score',
+      assessment,
+      detail: `This assessment has ${scores.length} score row${scores.length === 1 ? '' : 's'} and `
+            + 'no overall figure among them. The scoring engine writes every scope together, so a '
+            + 'set missing the overall one is an interrupted write rather than a normal state — '
+            + 'nothing here will add up the pillars to stand in for it.',
+    });
+  }
+  const band = bands.find((b) => b.band_code === overall.band_code) || null;
 
   return Object.freeze({
     state: 'ok',
     assessment,
-    overall: overall ? Object.freeze({
+    // Non-null by construction: the branch above returns before this point.
+    overall: Object.freeze({
       score: Number(overall.score_0_100),
       band_code: overall.band_code,
       band_label: band ? band.band_label : null,
@@ -376,7 +399,7 @@ async function analyse(companyId, assessmentId) {
       framework_version: overall.framework_version,
       engine_version: overall.engine_version,
       computed_at: overall.computed_at,
-    }) : null,
+    }),
     bands: Object.freeze(bands),
     scheme: scheme ? Object.freeze({ ...scheme }) : null,
     gaps: Object.freeze(gaps),

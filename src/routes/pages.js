@@ -1536,7 +1536,7 @@ router.get('/assessment/:id', async (req, res, next) => {
             <div class="esg-evidence__body">
               ${done.map((x) => `<span class="esg-evidence__k">${esc(x.status === 'accepted' ? 'Accepted' : 'Dismissed')}</span>
                 <span class="esg-evidence__v">${esc(optionWord(x.proposed_option_code))} — from ${esc(x.filename)}${
-  x.page_no ? `, page ${esc(x.page_no)}` : ''}${x.reviewed_at ? `, reviewed ${esc(String(x.reviewed_at).slice(0, 10))}` : ''}</span>`).join('')}
+  x.page_no ? `, page ${esc(x.page_no)}` : ''}${x.reviewed_at ? `, reviewed ${esc(dayOf(x.reviewed_at))}` : ''}</span>`).join('')}
             </div>
           </details>` : ''}
         </div>`;
@@ -2262,21 +2262,50 @@ router.get('/reports', async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /** A scope list. Deliberately not a checklist and not a progress bar — both
- *  would imply measured completion that nothing here measures. */
+ *  would imply measured completion that nothing here measures.
+ *
+ *  P10 MOVED IT OFF THE MASTER'S BARE .card. That card FAILS OPEN — D5 in the
+ *  ESG layer's own header — and it measured 0px padding on all six pages that
+ *  render this helper, so every scope list sat flush against a bordered box.
+ *  They were the last six surfaces still on pre-P8 markup, and they are all in
+ *  the navigation.
+ *
+ *  Nothing here says anything new: same title, same items, same statement that
+ *  it is a scope and not a claim. Only the components changed. */
 const scope = (title, items) => `
-  <div class="card">
-    <h3 class="card-title">${esc(title)}</h3>
-    <ul>${items.map((i) => `<li>${esc(i)}</li>`).join('')}</ul>
-  </div>`;
+  <section class="esg-section esg-enter" style="--esg-i:2">
+    <div class="esg-section__head">
+      <h3 class="esg-section__title">${esc(title)}</h3>
+      <span class="esg-section__note">A scope statement, not a claim that any of it works</span>
+    </div>
+    <div class="esg-card"><div class="esg-card__body">
+      <ul class="esg-prose">${items.map((i) => `<li>${esc(i)}</li>`).join('')}</ul>
+    </div></div>
+  </section>`;
 
-/** `.coming-soon` — defined at modus-design-system.css:986. Not built at all. */
+/** NOT BUILT AT ALL — and P10 says so with the product's own vocabulary.
+ *
+ *  This rendered the master's .coming-soon with a 🚧 emoji. P8 removed emoji
+ *  everywhere it looked, as the strongest "generated template" signal in the
+ *  interface; it did not look here, so four navigable pages kept theirs.
+ *
+ *  §10's .esg-reserved is the component this product already uses for a
+ *  capability that is defined and deliberately not operational — the dashboard
+ *  renders SustNET and Certification through it. A page that is not built is
+ *  the same fact about a whole destination, so it gets the same treatment and
+ *  the same drawn glyph. The words are unchanged. */
 const comingSoon = (title, body, phase) => `
-  <div class="coming-soon">
-    <div class="coming-soon-icon">🚧</div>
-    <h2>${esc(title)}</h2>
-    <p>${esc(body)}</p>
-    ${phase ? `<div class="coming-soon-phase">${esc(phase)}</div>` : ''}
-  </div>`;
+  <section class="esg-section esg-enter">
+    <div class="esg-reserved">
+      <span class="esg-reserved__mark" aria-hidden="true">${icon('future')}</span>
+      <div>
+        <h3 class="esg-reserved__title">${esc(title)}</h3>
+        <p class="esg-reserved__body">${esc(body)}</p>
+      </div>
+      <span class="esg-reserved__status">Not built</span>
+      ${phase ? `<p class="esg-small esg-prose">${esc(phase)}</p>` : ''}
+    </div>
+  </section>`;
 
 // ── Frameworks — the real one ──────────────────────────────────────────────
 router.get('/frameworks', (req, res) => {
@@ -2432,35 +2461,39 @@ router.get('/frameworks', (req, res) => {
 // ── Analytics — table exists, nothing writes to it ─────────────────────────
 router.get('/analytics', (req, res) => {
   res.send(layout('Analytics', `
-    ${emptyState('uninstrumented', {
-      title: 'Analytics is not instrumented yet',
-      body: 'Scores are stored per assessment, but nothing yet writes the time series, peer '
-          + 'benchmarks or trend aggregates this section needs. It is not switched on, rather than empty.',
-    })}
-    ${scope('What this section will cover', [
-      'Score trend over time, per pillar and overall',
-      'Peer benchmarking by sector and company size',
-      'Disclosure completeness against the official framework',
-      'Carbon intensity trend against reported activity',
-      'Evidence coverage — which answers are documented',
-    ])}`, req.user, '/analytics'));
+    <div class="esg-page">
+      ${emptyState('uninstrumented', {
+        title: 'Analytics is not instrumented yet',
+        body: 'Scores are stored per assessment, but nothing yet writes the time series, peer '
+            + 'benchmarks or trend aggregates this section needs. It is not switched on, rather than empty.',
+      })}
+      ${scope('What this section will cover', [
+        'Score trend over time, per pillar and overall',
+        'Peer benchmarking by sector and company size',
+        'Disclosure completeness against the official framework',
+        'Carbon intensity trend against reported activity',
+        'Evidence coverage — which answers are documented',
+      ])}</div>
+  `, req.user, '/analytics'));
 });
 
 // ── KPIs — table exists, nothing writes to it ──────────────────────────────
 router.get('/kpis', (req, res) => {
   res.send(layout('KPIs', `
-    ${emptyState('uninstrumented', {
-      title: 'KPI tracking is not instrumented yet',
-      body: 'No target has been set and nothing writes KPI values. An empty chart here would '
-          + 'claim a capability that does not exist yet.',
-    })}
-    ${scope('What this section will cover', [
-      'Targets per pillar, set by the company',
-      'Actual against target, per reporting period',
-      'Emissions intensity and reduction targets',
-      'Training hours, turnover and safety rates',
-      'Alerting when a KPI moves away from its target',
-    ])}`, req.user, '/kpis'));
+    <div class="esg-page">
+      ${emptyState('uninstrumented', {
+        title: 'KPI tracking is not instrumented yet',
+        body: 'No target has been set and nothing writes KPI values. An empty chart here would '
+            + 'claim a capability that does not exist yet.',
+      })}
+      ${scope('What this section will cover', [
+        'Targets per pillar, set by the company',
+        'Actual against target, per reporting period',
+        'Emissions intensity and reduction targets',
+        'Training hours, turnover and safety rates',
+        'Alerting when a KPI moves away from its target',
+      ])}</div>
+  `, req.user, '/kpis'));
 });
 
 // ── AI Assistant — not built as a standalone surface ───────────────────────
@@ -2471,68 +2504,76 @@ router.get('/kpis', (req, res) => {
 // working AI actually is, rather than implying there is none.
 router.get('/assistant', (req, res) => {
   res.send(layout('AI Assistant', `
-    ${comingSoon('A conversational assistant is not built yet',
-      'AI is already working elsewhere in this platform: your assessment result carries '
-      + 'AI-generated recommendations, and the model is never allowed to author a figure. '
-      + 'A general-purpose assistant surface is a separate piece of work.',
-      'Available today: open an assessment result to see AI recommendations')}
-    ${scope('What this section will cover', [
-      'Ask questions about your own assessment and evidence',
-      'Guidance on what a specific disclosure is asking for',
-      'Drafting narrative answers for review — never auto-submitted',
-      'Trilingual (EN / BM / 中文)',
-      'The model never produces a figure — the same guard the rest of the platform uses',
-    ])}`, req.user, '/assistant'));
+    <div class="esg-page">
+      ${comingSoon('A conversational assistant is not built yet',
+        'AI is already working elsewhere in this platform: your assessment result carries '
+        + 'AI-generated recommendations, and the model is never allowed to author a figure. '
+        + 'A general-purpose assistant surface is a separate piece of work.',
+        'Available today: open an assessment result to see AI recommendations')}
+      ${scope('What this section will cover', [
+        'Ask questions about your own assessment and evidence',
+        'Guidance on what a specific disclosure is asking for',
+        'Drafting narrative answers for review — never auto-submitted',
+        'Trilingual (EN / BM / 中文)',
+        'The model never produces a figure — the same guard the rest of the platform uses',
+      ])}</div>
+  `, req.user, '/assistant'));
 });
 
 // ── Workflow — not built ───────────────────────────────────────────────────
 router.get('/workflow', (req, res) => {
   res.send(layout('Workflow', `
-    ${comingSoon('Review and approval workflow is not built yet',
-      'Assessments are currently completed and scored in one step, with no review stage. '
-      + 'Nothing in the database tracks an approval, so there is nothing to show here yet.',
-      'Not started')}
-    ${scope('What this section will cover', [
-      'Submit an assessment for internal review before it is final',
-      'Reviewer and approver roles, with an audit trail',
-      'Return-for-revision with comments against specific answers',
-      'Period locking once a reporting year is signed off',
-      'Notification when an action is waiting on someone',
-    ])}`, req.user, '/workflow'));
+    <div class="esg-page">
+      ${comingSoon('Review and approval workflow is not built yet',
+        'Assessments are currently completed and scored in one step, with no review stage. '
+        + 'Nothing in the database tracks an approval, so there is nothing to show here yet.',
+        'Not started')}
+      ${scope('What this section will cover', [
+        'Submit an assessment for internal review before it is final',
+        'Reviewer and approver roles, with an audit trail',
+        'Return-for-revision with comments against specific answers',
+        'Period locking once a reporting year is signed off',
+        'Notification when an action is waiting on someone',
+      ])}</div>
+  `, req.user, '/workflow'));
 });
 
 // ── Users & Roles — not built ──────────────────────────────────────────────
 router.get('/users', (req, res) => {
   res.send(layout('Users & Roles', `
-    ${comingSoon('User and role management is not built yet',
-      'Accounts exist and are authenticated, and every route is authorised server-side. '
-      + 'What is missing is the screen to invite people and change their role — that is '
-      + 'currently a database operation.',
-      'Not started')}
-    ${scope('What this section will cover', [
-      'Invite a colleague by email',
-      'Assign and change roles, granted by an administrator and never self-claimed',
-      'Remove access, with the change recorded',
-      'See who last signed in',
-      'Audit trail of role changes',
-    ])}`, req.user, '/users'));
+    <div class="esg-page">
+      ${comingSoon('User and role management is not built yet',
+        'Accounts exist and are authenticated, and every route is authorised server-side. '
+        + 'What is missing is the screen to invite people and change their role — that is '
+        + 'currently a database operation.',
+        'Not started')}
+      ${scope('What this section will cover', [
+        'Invite a colleague by email',
+        'Assign and change roles, granted by an administrator and never self-claimed',
+        'Remove access, with the change recorded',
+        'See who last signed in',
+        'Audit trail of role changes',
+      ])}</div>
+  `, req.user, '/users'));
 });
 
 // ── Integrations — not built ───────────────────────────────────────────────
 router.get('/integrations', (req, res) => {
   res.send(layout('Integrations', `
-    ${comingSoon('Integrations are not built yet',
-      'No third-party connection is configured, and none is running in the background. '
-      + 'Showing a list of logos with Connect buttons that do nothing would be worse than '
-      + 'showing this.',
-      'Not started')}
-    ${scope('What this section will cover', [
-      'Utility and energy data import for the carbon calculator',
-      'Accounting system import for the financial disclosures',
-      'HR system import for headcount, turnover and training hours',
-      'Document storage for evidence files',
-      'Export to a customer’s supplier portal',
-    ])}`, req.user, '/integrations'));
+    <div class="esg-page">
+      ${comingSoon('Integrations are not built yet',
+        'No third-party connection is configured, and none is running in the background. '
+        + 'Showing a list of logos with Connect buttons that do nothing would be worse than '
+        + 'showing this.',
+        'Not started')}
+      ${scope('What this section will cover', [
+        'Utility and energy data import for the carbon calculator',
+        'Accounting system import for the financial disclosures',
+        'HR system import for headcount, turnover and training hours',
+        'Document storage for evidence files',
+        'Export to a customer’s supplier portal',
+      ])}</div>
+  `, req.user, '/integrations'));
 });
 
 

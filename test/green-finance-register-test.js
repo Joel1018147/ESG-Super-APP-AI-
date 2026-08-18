@@ -395,7 +395,25 @@ const MEMBER = { id: 'u-member', name: 'M', email: 'm@example.test', role: 'comp
       `expected 403, got ${r.status} — 401 means we do not know who you are, 403 means we know exactly who you are`);
     const html = await r.text();
     assert.ok(html.includes('<!DOCTYPE html>'), 'the 403 did not render a page');
-    assert.ok(html.includes('do not have access'), 'the 403 page does not say what happened');
+
+    /* WHAT THE 403 MUST DO, rather than one sentence it must contain.
+       This pinned the literal phrase "do not have access", so rewording the
+       page failed the test without anything being wrong with it. The intent
+       was never the phrase — it was that a refusal EXPLAINS ITSELF and leaves
+       a way out — so that is what is asserted now, in three parts. It is
+       stricter than the string it replaces: the old assertion would have
+       passed a page with no role named and no link on it. */
+    assert.ok(/company_admin/.test(html),
+      'the 403 does not name the role it refused, so the reader cannot tell why');
+    assert.ok(/deliberate/i.test(html),
+      'the 403 does not say the refusal is intentional — a denial that reads as a fault sends '
+      + 'the user to support for something that is working correctly');
+    const dest = html.match(/<a[^>]+href="(\/[^"]*)"[^>]*class="btn/)
+      || html.match(/class="btn[^"]*"[^>]*href="(\/[^"]*)"/);
+    assert.ok(dest, 'the 403 offers no way out — §4.3c, at the one moment a user is already stuck');
+    assert.ok(!/^\/admin$/.test(dest[1]),
+      `the 403's way out points at ${dest[1]}, which has no route — measured: a signed-in GET `
+      + '/admin answers 404');
   });
 
   await atest('a super_admin DOES reach the admin screens', async () => {

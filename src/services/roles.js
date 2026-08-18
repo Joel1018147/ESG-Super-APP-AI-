@@ -25,11 +25,25 @@ function normaliseRole(r) {
   return CANON[String(r).trim().toLowerCase()] || null;
 }
 
-// Where a role lands after login. Deliberately explicit: an auditor sent to a
-// page they cannot open reads the refusal as an outage.
+/* Where a role lands after login. Deliberately explicit: an auditor sent to a
+   page they cannot open reads the refusal as an outage.
+
+   SUPER_ADMIN USED TO BE SENT TO '/admin', AND NO SUCH ROUTE EXISTS. Measured
+   in the P10 audit: a signed-in GET /admin answers 404. This is the value the
+   403 page renders as its only way out, so the one role that can reach the
+   most pages was the one being sent to a dead end.
+
+   It returns /dashboard now, which is the truth: there is no admin home. The
+   admin SCREENS exist — /green-finance/admin/products is real and super-admin
+   only — but a screen is not a home, and pointing a role's home at one deep
+   inside another module would be the same guess in a different place. Build an
+   admin home and change this line; do not change this line first.
+
+   test/roles-test.js checks every value this returns against the real router
+   stack, so the next one cannot rot the way this one did. */
 function homePathForRole(role) {
   switch (normaliseRole(role)) {
-    case 'super_admin': return '/admin';
+    case 'super_admin':
     case 'auditor':
     case 'gov_officer': return '/dashboard';
     default:            return '/dashboard';

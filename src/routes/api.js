@@ -1196,4 +1196,42 @@ router.post('/copilot', wrap(async (req, res) => {
   }
 }));
 
+
+/* ── P10 · THE NAV, AND ONE LIVE ID PER DETAIL PAGE ───────────────────────
+   Published so test/visual/audit.js can DERIVE its page list instead of
+   keeping one by hand. It kept one by hand, and it drifted twice: P8 missed
+   /assessment and /frameworks, and P10 found /green-finance/register clipping
+   371px of every row at 390px plus six pages rendering at 0px padding — none
+   of the seven was in the list.
+
+   It publishes nothing a signed-in user cannot already see: the sidebar shows
+   every path, and each sample id belongs to the caller's own company. No
+   figure, no name, no document content — three identifiers and the routes
+   they belong to.
+
+   Destinations flagged not-built are INCLUDED. They are in the navigation, a
+   person can open them, and "not built" describes the capability rather than
+   the page — the six that render a scope list are exactly the ones the audit
+   found unmigrated. */
+router.get('/nav-paths', wrap(async (req, res) => {
+  const { MODULES } = require('../utils/layout');
+  const [{ rows: a }, { rows: fp }, { rows: ind }] = await Promise.all([
+    query(`SELECT id FROM esg_assessments WHERE company_id = $1 AND status <> 'archived'
+            ORDER BY reporting_year DESC, created_at DESC LIMIT 1`, [cid(req)]),
+    query('SELECT id FROM esg_finance_products WHERE is_active ORDER BY id LIMIT 1'),
+    query(`SELECT i.id FROM esg_indicators i
+             JOIN esg_assessments x ON x.framework_id = i.framework_id
+            WHERE x.company_id = $1 AND i.is_active ORDER BY i.sort_order LIMIT 1`, [cid(req)]),
+  ]);
+  res.json({
+    paths: MODULES.map((m) => m.path),
+    built: MODULES.filter((m) => m.built).map((m) => m.path),
+    sample: {
+      assessment: a[0] ? a[0].id : null,
+      financeProduct: fp[0] ? fp[0].id : null,
+      indicator: ind[0] ? ind[0].id : null,
+    },
+  });
+}));
+
 module.exports = router;
