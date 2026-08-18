@@ -271,7 +271,7 @@ app.use((err, req, res, next) => {
   }
   /* Same migration as the 404 above, and the same reason. The message itself
      is unchanged: the stack never reaches the caller in production. */
-  const { layout, esc, emptyState } = require('./utils/layout');
+  const { layout, emptyState } = require('./utils/layout');
   res.status(500).send(layout('Something went wrong', `
     <div class="esg-page">
       ${emptyState('uninstrumented', {
