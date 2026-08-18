@@ -13,6 +13,22 @@ async (page) => {
     ['documents', '/documents'],
     ['company', '/company'],
     ['governance', '/governance'],
+    /* THESE TWO WERE MISSING, and their absence is why P8 reported "zero
+     * horizontal overflow" while production clipped both of them at 390px.
+     *
+     * The list was hand-written from the pages P8 was changing, so it grew to
+     * cover the migrated set and never covered the rest. /assessment here is
+     * the LIST page — the detail page /assessment/:id was in the list all
+     * along, and having one of the two made the gap invisible.
+     *
+     * A hand-kept page list will drift again. layout.MODULES is the nav's own
+     * source and smoke-test.js already walks it; the honest fix is to derive
+     * from it, which needs this probe to run in Node rather than in the
+     * Playwright sandbox. Until then these are named explicitly and this
+     * comment is the reason. */
+    ['assessment-list', '/assessment'],
+    ['frameworks', '/frameworks'],
+    ['reports', '/reports'],
   ];
   const VIEWPORTS = [[1440, 900], [1280, 800], [1024, 800], [768, 900], [390, 844]];
 
