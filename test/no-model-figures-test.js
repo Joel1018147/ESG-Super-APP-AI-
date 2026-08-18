@@ -401,7 +401,7 @@ atest('no rendered page shows an internal or registry brand in visible text', as
     id: dbPath, filename: dbPath, loaded: true, exports: {
       query: async (text) => {
         const sql = String(text).replace(/\s+/g, ' ').trim();
-        if (/\bcount\(\*\)/i.test(sql) && !/\bGROUP BY\b/i.test(sql)) {
+        if (/\b(count|sum|min|max|avg)\s*\(/i.test(sql) && !/\bGROUP BY\b/i.test(sql)) {
           return { rows: [{ ...AGGREGATE_ZEROES }], rowCount: 1 };
         }
         return { rows: [], rowCount: 0 };
@@ -434,6 +434,11 @@ atest('no rendered page shows an internal or registry brand in visible text', as
       '/green-finance/readiness': '../src/routes/greenFinance',
       '/impact': '../src/routes/greenFinance',
       '/journey': '../src/routes/journey',
+      // P9 · two more, in their own router for the same reason /journey is:
+      // pages.js is mounted LAST because its `/:id` patterns are broad enough
+      // to swallow a sibling module's path.
+      '/improvement': '../src/routes/improvement',
+      '/consultation': '../src/routes/improvement',
     };
     for (const m of MODULES) {
       if (ELSEWHERE[m.path]) continue;
@@ -454,16 +459,24 @@ atest('no rendered page shows an internal or registry brand in visible text', as
   }
 
   // A loop that covered nothing passes every assertion inside it. Assert the
-  // DENOMINATOR: 20 nav paths + 20 signed-in shells + 1 signed-out shell.
+  // DENOMINATOR: 22 nav paths + 22 signed-in shells + 1 signed-out shell.
   // 14 until Run 47 added Green Finance; 15 until Run 52 added ESG Journey;
   // 16 until Run 62/P3 gave Green projects and AI suggestions a home in the
   // nav — both routes already existed and were reachable only by typing them;
-  // 18 until P6.5 added Finance readiness; 19 until P7 added ESG Impact.
+  // 18 until P6.5 added Finance readiness; 19 until P7 added ESG Impact;
+  // 20 until P9 added Improvement and Expert support.
+  //
+  // P9 ALSO MOVED TWO ENTRIES WITHOUT CHANGING THE COUNT, and that is worth
+  // recording here because the count alone would not have shown it: Reports
+  // went from built:false to built:true and moved tier, because the page now
+  // renders reporting READINESS. The report GENERATOR is still not built and
+  // reportReadiness.js carries `generator.built = false` as a stated constant.
+  //
   // The number is hardcoded ON PURPOSE — adding a nav entry has to be an
   // acknowledged act rather than a silent widening of a loop.
-  assert.strictEqual(MODULES.length, 20, `expected 20 nav entries, found ${MODULES.length}`);
-  assert.strictEqual(checked.length, 41,
-    `expected 41 rendered surfaces checked, got ${checked.length}: ${checked.join(', ')}`);
+  assert.strictEqual(MODULES.length, 22, `expected 22 nav entries, found ${MODULES.length}`);
+  assert.strictEqual(checked.length, 45,
+    `expected 45 rendered surfaces checked, got ${checked.length}: ${checked.join(', ')}`);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

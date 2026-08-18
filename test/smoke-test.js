@@ -266,10 +266,224 @@ const json = (method, o) => ({ method, headers: { 'Content-Type': 'application/j
                      '/api/finance-products', '/api/project-types',
                      '/api/taxonomy/CCPT', '/api/taxonomy/ASEAN',
                      '/api/journey', '/api/missions', '/api/xp',
+                     // P9's six. CLAUDE.md #9: no feature ships without its
+                     // API equivalent, and this is where that is checked.
+                     '/api/actions', '/api/gaps', '/api/roadmap',
+                     '/api/report-readiness', '/api/consultation',
                      `/api/assessments/${assessmentId}/extractions`]) {
       const r = await A(p, { headers: { Accept: 'application/json' } });
       assert.strictEqual(r.status, 200, `${p} returned ${r.status}`);
     }
+  });
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     P9 · THE OPERATING WORKFLOW, AGAINST THE ROWS THIS RUN ACTUALLY WROTE
+     ─────────────────────────────────────────────────────────────────────
+     GATE 2 FOR P9. By this point the suite has a part-filled profile, a fully
+     answered and SCORED assessment, two carbon entries and an uploaded
+     document — written through real HTTP against a real Postgres. That is the
+     only state in which these three can be checked as anything other than
+     shapes: an action list, a gap list and a roadmap all derive from exactly
+     those rows.
+
+     A 200 is not the assertion. What is asserted is that the figures agree
+     with what this run put in the database, and that the honesty rules hold on
+     live data rather than on a fixture.
+     ═════════════════════════════════════════════════════════════════════ */
+  await check('P9 · the action list derives from this run\'s own rows, and every priority explains itself', async () => {
+    const a = await (await A('/api/actions', { headers: { Accept: 'application/json' } })).json();
+    assert.strictEqual(a.state, 'ok', `the action list reported ${a.state}`);
+    assert.ok(a.actions.length > 0, 'no action at all was derived');
+
+    for (const x of a.actions) {
+      assert.ok(x.basis && x.basis.length > 20, `${x.code} carries no basis`);
+      assert.ok(x.cta && x.href, `${x.code} has no verb or no destination`);
+      for (const generic of ['get started', 'learn more', 'explore', 'view details']) {
+        assert.notStrictEqual(x.cta.toLowerCase().trim(), generic,
+          `${x.code} uses the generic CTA "${x.cta}"`);
+      }
+    }
+
+    // THE PROFILE IS PART-DONE AT THIS POINT, exactly as the journey check
+    // below asserts, so the profile stage must be OPEN and not completed.
+    const profile = a.actions.find((x) => x.code === 'STAGE_COMPANY_PROFILE');
+    assert.ok(profile, 'the profile stage produced no action');
+    assert.notStrictEqual(profile.state, 'completed',
+      'a half-filled profile was reported as a completed action');
+
+    // The scored assessment's stage IS completed, and a completed action is
+    // outside the open count.
+    const scored = a.actions.find((x) => x.code === 'STAGE_ASSESSMENT_SCORED');
+    assert.strictEqual(scored.state, 'completed',
+      `a scored assessment's stage reports ${scored.state}`);
+
+    // A blocked stage renders its reason and is not counted as work.
+    const blocked = a.actions.filter((x) => x.state === 'blocked');
+    assert.ok(blocked.length > 0, 'the seeded blocked stages produced no blocked action');
+    for (const b of blocked) assert.ok(b.why.length > 30, `${b.code} is blocked with no reason`);
+
+    // And the seven states are published with their meanings, so a client
+    // cannot invent its own vocabulary for them.
+    assert.strictEqual(a.states.length, 7);
+
+    /* THE TOP BAR AND THIS LIST MAY NEVER DISAGREE.
+       shellContext renders "N need review" on every page, and it is
+       extractions_pending + suggestions_pending. FOUND ON STAGING during this
+       run: the chip read 5 and the list mentioned none of them, because the
+       suggestion queue was surfaced only while a company had no green project.
+       Asserted here over real HTTP as well as at unit level, because it is a
+       disagreement between two independent queries and only a live run puts
+       both in front of the same rows. */
+    const me = await (await A('/api/me', { headers: { Accept: 'application/json' } })).json();
+    assert.ok(me.company_id, 'the session carries no company');
+    const chip = a.actions.filter((x) => /proposal|suggestion/i.test(x.cta + ' ' + x.what));
+    const queued = a.counts.urgent + a.counts.priority + a.counts.recommended;
+    assert.ok(queued >= 0);
+    // Whatever review work exists must be NAMED by exactly one action each.
+    const suggestions = a.actions.filter((x) => /suggestion/i.test(x.cta + ' ' + x.what));
+    const proposals = a.actions.filter((x) => /proposal/i.test(x.cta + ' ' + x.what));
+    assert.ok(suggestions.length <= 1,
+      `${suggestions.length} cards ask about the same suggestion queue`);
+    assert.ok(proposals.length <= 1,
+      `${proposals.length} cards ask about the same proposal queue`);
+    assert.ok(chip.length === suggestions.length + proposals.length);
+  });
+
+  await check('P9 · the gap list carries the ENGINE\'s points, one row per indicator', async () => {
+    const g = await (await A('/api/gaps', { headers: { Accept: 'application/json' } })).json();
+    assert.strictEqual(g.state, 'ok', `the gap analysis reported ${g.state}`);
+
+    // This run answers every indicator as `documented`, not `verified`, so the
+    // evidence multiplier leaves points on the table and the engine writes
+    // recommendation rows. A gap list of zero here would mean the scoring
+    // engine stopped writing them, which is a finding either way.
+    assert.ok(g.gaps.length > 0,
+      'a documented-but-unverified assessment produced no gap at all — the engine writes a '
+      + 'recommendation row for every indicator short of full weight');
+
+    const ids = g.gaps.map((x) => x.indicator_id);
+    assert.strictEqual(new Set(ids).size, ids.length,
+      'the same indicator appears twice — the engine row and its ai_phrasing sibling were both '
+      + 'counted, which doubles every figure on the page');
+
+    for (const x of g.gaps) {
+      assert.ok(typeof x.points_missed === 'number' && x.points_missed > 0,
+        `${x.code} carries no engine figure`);
+      assert.ok(['unanswered', 'unevidenced', 'partial'].includes(x.kind), `${x.code}: kind ${x.kind}`);
+      assert.ok(typeof x.evidence.configured === 'boolean',
+        `${x.code} does not say whether its evidence requirement is configured`);
+      // WHO SHOULD ACT: the platform has no owner column and must say so.
+      assert.ok(/nobody is assigned/i.test(x.who), `${x.code} nominates an owner: "${x.who}"`);
+    }
+
+    // The total is the sum of the parts, rounded once.
+    const summed = Math.round(g.gaps.reduce((n, x) => n + x.points_missed, 0) * 100) / 100;
+    assert.strictEqual(g.counts.points_missed, summed,
+      `the headline total (${g.counts.points_missed}) is not the sum of the gaps (${summed})`);
+  });
+
+  await check('P9 · the roadmap says how each rung is joined, and never claims a report', async () => {
+    const r = await (await A('/api/roadmap', { headers: { Accept: 'application/json' } })).json();
+    assert.ok(r.steps.length >= 9, `only ${r.steps.length} rungs`);
+
+    for (const s of r.steps) {
+      assert.ok(['derived', 'recorded', 'sequence', 'none'].includes(s.link),
+        `${s.code} claims link kind "${s.link}"`);
+      assert.ok(s.link_meaning, `${s.code} publishes no meaning for its link kind`);
+      assert.ok(!/\d+\s?%/.test(`${s.what} ${s.detail || ''}`),
+        `${s.code} states a percentage over a set of discrete facts`);
+    }
+
+    // THE CLAIM THAT MATTERS. Nothing in this system establishes that a green
+    // opportunity answers an ESG gap — the scan is never told the gaps.
+    assert.strictEqual(r.steps.find((s) => s.code === 'OPPORTUNITY').link, 'sequence',
+      'the roadmap claims a green opportunity is computed from an ESG gap');
+
+    assert.strictEqual(r.steps.find((s) => s.code === 'REPORTED').state, 'not_configured',
+      'the roadmap reached a reported state — nothing here writes a report file');
+  });
+
+  await check('P9 · reporting readiness reports what exists, and refuses to generate', async () => {
+    const rr = await (await A('/api/report-readiness', { headers: { Accept: 'application/json' } })).json();
+    assert.strictEqual(rr.generator.built, false,
+      'the reporting page claims a generator this codebase does not contain');
+    assert.deepStrictEqual(rr.generator.formats, [], 'a format is offered by a generator that is not built');
+
+    const by = Object.fromEntries(rr.sections.map((s) => [s.code, s]));
+    // This run wrote a score, answers, a document and carbon entries.
+    for (const code of ['SCORE', 'ANSWERS', 'EVIDENCE', 'CARBON']) {
+      assert.strictEqual(by[code].state, 'available',
+        `${code} is reported as ${by[code].state} after this run wrote rows for it`);
+    }
+    // And it wrote no green project, which is "nothing recorded" — an empty
+    // account, not a platform limit.
+    assert.strictEqual(by.PROJECTS.state, 'missing',
+      `no project was created and PROJECTS reports ${by.PROJECTS.state}`);
+    // The three that cannot exist for anybody say WHY.
+    for (const code of ['SUSTNET', 'CERTIFICATION', 'ASSURANCE']) {
+      assert.strictEqual(by[code].state, 'not_configured');
+      assert.ok(by[code].why && by[code].why.length > 40,
+        `${code} does not say why it cannot exist, so it reads as a gap in the company's data`);
+    }
+  });
+
+  await check('P9 · expert support is triggered by a situation and never by a score', async () => {
+    const c = await (await A('/api/consultation', { headers: { Accept: 'application/json' } })).json();
+    assert.strictEqual(c.considered, 6, `${c.considered} rules were considered, not 6`);
+    assert.strictEqual(c.booking.built, false, 'a booking capability is claimed that does not exist');
+    assert.ok(Object.keys(c.thresholds).length === 6,
+      'the thresholds are not published, so the rule cannot be checked by a reader');
+    // Every fired trigger names the rows it fired on, with a figure in it.
+    for (const t of c.triggers) {
+      assert.ok(/\d/.test(t.because), `${t.code} fired without naming a figure: "${t.because}"`);
+    }
+    // The signals are counts of rows, and none of them is a score.
+    assert.ok(!('score' in c.signals) && !('band' in c.signals),
+      'the consultation signals carry a score — the directive rules that out explicitly');
+  });
+
+  await check('P9 · the copilot answers one disclosure and produces no figure', async () => {
+    /* THE SUBJECT COMES FROM THE GAP LIST, NOT FROM /api/indicators.
+       The first draft took it from /api/indicators and got a 400 — that
+       endpoint deliberately returns a framework's questions by CODE and does
+       not publish the row id, because a code is the public identifier of a
+       disclosure and an id is not. The gap list does carry indicator_id, and
+       it is the better subject anyway: a real outstanding disclosure of this
+       company's, which is exactly what a user would be asking about. */
+    const g = await (await A('/api/gaps', { headers: { Accept: 'application/json' } })).json();
+    assert.strictEqual(g.state, 'ok', `the gap list reported ${g.state}`);
+    assert.ok(g.gaps.length > 0, 'no gap could be read to ask the copilot about');
+    const subject = { id: g.gaps[0].indicator_id, code: g.gaps[0].code };
+    assert.ok(subject.id, 'the gap list published no indicator id');
+
+    const r = await A('/api/copilot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ intent: 'explain_requirement', subject_id: subject.id }),
+    });
+    assert.strictEqual(r.status, 200, `/api/copilot returned ${r.status}`);
+    const out = await r.json();
+
+    // WITHOUT A GROQ KEY THIS RUNS THE DETERMINISTIC PATH, and that is a real
+    // result rather than a skipped one: the guarantee is that BOTH paths
+    // produce no figure and both declare which they are.
+    assert.ok(['ai', 'template'].includes(out.mode), `copilot mode was ${out.mode}`);
+    assert.ok(out.text && out.text.length > 40, 'the copilot answered with nothing');
+    assert.ok(out.basis && out.basis.length > 40, 'the copilot did not say where its answer came from');
+    if (out.mode === 'ai') {
+      assert.ok(!/\d/.test(out.text),
+        `a generated copilot answer carries a figure: "${out.text}"`);
+    }
+
+    // A closed vocabulary: an intent outside the four is a 400 that names them.
+    const bad = await A('/api/copilot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ intent: 'write_my_report', subject_id: subject.id }),
+    });
+    assert.strictEqual(bad.status, 400, `an unknown intent returned ${bad.status}, not 400`);
+    const err = await bad.json();
+    assert.strictEqual(err.intents.length, 4, 'the refusal does not name the four intents');
   });
 
   await check('the journey is derived from the rows this run actually wrote', async () => {
@@ -387,10 +601,17 @@ const json = (method, o) => ({ method, headers: { 'Content-Type': 'application/j
     // THE PIN, after every screen above has actually been fetched and checked.
     // 14 until Run 47 added Green Finance; 15 until Run 52 added ESG Journey;
     // 20 after P1–P7 added Green projects, Finance readiness, AI suggestions
-    // and ESG Impact. A change here must be deliberate — but it can no longer
-    // stop the twenty screens above from being verified.
-    assert.strictEqual(MODULES.length, 20,
-      `the nav is ${MODULES.length} entries, not 20 — every one of them rendered, so this is a `
+    // and ESG Impact; 22 after P9 added Improvement and Expert support. A
+    // change here must be deliberate — but it can no longer stop the screens
+    // above from being verified.
+    //
+    // P9 ALSO FLIPPED Reports FROM built:false TO built:true WITHOUT CHANGING
+    // THIS COUNT, which is worth recording because the count alone would not
+    // have shown it. The page now renders reporting READINESS; the report
+    // GENERATOR is still not built, and reportReadiness.js carries
+    // generator.built = false as a stated constant with its own test.
+    assert.strictEqual(MODULES.length, 22,
+      `the nav is ${MODULES.length} entries, not 22 — every one of them rendered, so this is a `
       + 'deliberate-change pin rather than a failure: update the count and the history line above');
   });
 

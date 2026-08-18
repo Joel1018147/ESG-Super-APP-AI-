@@ -248,16 +248,24 @@ async function acceptOpportunity(opportunityId, userId, companyId) {
 
   const stamp = await resolveDefaultClassification(pt[0]);
 
+  /* source_opportunity_id STAMPS WHERE THIS PROJECT CAME FROM (P9).
+     The two rows were already causally linked and nothing recorded it, so one
+     step later the chain was unrecoverable. It is the one connection between
+     these modules the system actually establishes — and note what it still
+     does NOT establish: no ESG indicator is named, because the scan is never
+     told which gap to answer and is never asked to name one. */
   const { rows: created } = await query(
     `INSERT INTO esg_green_projects
        (company_id, project_type_id, title, description, estimated_cost_myr,
         status, ccpt_category_code, ccpt_scheme_version, asean_ff_code,
-        asean_ps_code, asean_scheme_version, classification_basis, created_by)
-     VALUES ($1,$2,$3,$4,NULL,'draft',$5,$6,$7,$8,$9,$10,$11)
-     RETURNING id, title, status, estimated_cost_myr, classification_basis`,
+        asean_ps_code, asean_scheme_version, classification_basis, created_by,
+        source_opportunity_id)
+     VALUES ($1,$2,$3,$4,NULL,'draft',$5,$6,$7,$8,$9,$10,$11,$12)
+     RETURNING id, title, status, estimated_cost_myr, classification_basis, source_opportunity_id`,
     [companyId, pt[0].id, pt[0].label_en, opp.rationale_en,
      stamp.ccpt_category_code, stamp.ccpt_scheme_version, stamp.asean_ff_code,
-     stamp.asean_ps_code, stamp.asean_scheme_version, stamp.classification_basis, userId]);
+     stamp.asean_ps_code, stamp.asean_scheme_version, stamp.classification_basis, userId,
+     opportunityId]);
 
   await query(
     `UPDATE esg_green_opportunities SET status='accepted', reviewed_by=$2, reviewed_at=now()

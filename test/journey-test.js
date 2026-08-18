@@ -367,19 +367,57 @@ test('EVERY statement in journeyEngine.js carries a tenant predicate, at the SQL
   }
 });
 
+/* ── ANCHOR ROT, FOUND BY P9 AND FIXED RATHER THAN LOOSENED ────────────────
+   This guard used to slice api.js from the journey anchor TO THE END OF THE
+   FILE. That was correct exactly as long as the journey block was the last
+   thing in the file, and it stopped being true the moment P9 appended six
+   endpoints after it — at which point the guard was reporting on a region that
+   was no longer the region it names, and it failed on P9's legitimate template
+   literals rather than on any SQL.
+
+   The slice is now BOUNDED at both ends, and the block that follows gets its
+   own assertion below. Both keep the original invariant; neither is weaker. */
+const API_SRC = fs.readFileSync(path.join(SRC, 'routes', 'api.js'), 'utf8');
+const JOURNEY_ANCHOR = 'THE JOURNEY, MISSIONS AND XP';
+const P9_ANCHOR = 'P9 · THE OPERATING WORKFLOW';
+
 test('the Run 52 API block issues no SQL of its own', () => {
   // Everything it needs comes from the engine, which is where the tenant
   // predicate lives. A second query path here is a second place for it to be
   // forgotten.
-  const api = fs.readFileSync(path.join(SRC, 'routes', 'api.js'), 'utf8');
-  const i = api.indexOf('THE JOURNEY, MISSIONS AND XP');
+  const i = API_SRC.indexOf(JOURNEY_ANCHOR);
   assert.ok(i > 0, 'the Run 52 API section is gone — the anchor moved');
-  const block = stripComments(api.slice(i));
+  const end = API_SRC.indexOf(P9_ANCHOR);
+  assert.ok(end > i, 'the P9 anchor is gone or has moved above the journey block — this guard is '
+    + 'reporting on a region that is no longer the one it names');
+  const block = stripComments(API_SRC.slice(i, end));
   const named = [...block.matchAll(/\b(esg_[a-z_]+)\b/g)].map((m) => m[1]);
   assert.deepStrictEqual(named, [],
     `the journey API block names a table directly: ${named.join(', ')} — everything it needs comes `
     + 'from the engine, which is where the tenant predicate lives');
   assert.ok(!block.includes('`'), 'the journey API block carries a template literal, which is where SQL would hide');
+});
+
+test('the P9 API block issues no SQL of its own either', () => {
+  /* THE SAME INVARIANT, TESTED DIRECTLY RATHER THAN BY PROXY.
+     The journey block above is checked for backticks because it legitimately
+     has none, so their absence is a cheap proxy for "no SQL hides here". The
+     P9 block genuinely needs template literals — a 400 that names the intent it
+     was given is a better error than one that does not — so the proxy would be
+     wrong, and the real invariant is asserted instead: it names no table, and
+     it contains no statement keyword pair. That is stronger than the proxy, not
+     weaker: a backtick-free block could still concatenate SQL with +. */
+  const i = API_SRC.indexOf(P9_ANCHOR);
+  assert.ok(i > 0, 'the P9 API section is gone — the anchor moved');
+  const block = stripComments(API_SRC.slice(i));
+  const named = [...block.matchAll(/\b(esg_[a-z_]+)\b/g)].map((m) => m[1]);
+  assert.deepStrictEqual(named, [],
+    `the P9 API block names a table directly: ${named.join(', ')} — every one of its six endpoints `
+    + 'goes through a service, which is where the tenant predicate lives');
+  const sql = [...block.matchAll(/\b(SELECT\b[\s\S]{0,200}?\bFROM|INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM)\b/gi)]
+    .map((m) => m[0].replace(/\s+/g, ' ').slice(0, 60));
+  assert.deepStrictEqual(sql, [],
+    `the P9 API block issues SQL directly: ${sql.join(' | ')}`);
 });
 
 test('routes/journey.js issues no SQL at all', () => {

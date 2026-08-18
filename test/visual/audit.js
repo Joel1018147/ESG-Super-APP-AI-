@@ -29,8 +29,20 @@ async (page) => {
     ['assessment-list', '/assessment'],
     ['frameworks', '/frameworks'],
     ['reports', '/reports'],
+    /* P9's three. /reports above is the SAME path and is now a real page
+       rather than an empty state, so it is measured as one for the first time.
+       /explain carries a live indicator id for the same reason /assessment
+       above carries an assessment id: with a bad one the probe measures a 404
+       and reports it clean. Check the page titles before believing a clean
+       run. */
+    ['improvement', '/improvement'],
+    ['consultation', '/consultation'],
+    ['explain', '/explain?intent=explain_requirement&subject=0543013c-e90a-4e65-8154-66a338b4ede2'],
   ];
-  const VIEWPORTS = [[1440, 900], [1280, 800], [1024, 800], [768, 900], [390, 844]];
+  /* 360 ADDED IN P9. The five above were P8's set; the directive names six and
+     360 is the one that was missing — it is the narrowest width this product
+     supports and the one where a 16rem grid track minimum has least room. */
+  const VIEWPORTS = [[1440, 900], [1280, 800], [1024, 800], [768, 900], [390, 844], [360, 780]];
 
   const probe = (mobile) => {
     const out = { overflow: null, collisions: [], tiny: [], targets: [], unstyled: 0, offscreen: [] };
@@ -105,13 +117,35 @@ async (page) => {
       }
     }
 
-    // interactive targets
+    /* interactive targets
+
+       WCAG 2.2's Target Size (Minimum) CARRIES AN "IN-LINE" EXCEPTION, and
+       this probe did not, so it reported a link inside a sentence as a defect
+       at every viewport. The exception is narrow and it is quoted rather than
+       paraphrased: "the target is in a sentence, or its size is otherwise
+       constrained by the line-height of non-target text". A link set in running
+       prose IS that, and enlarging it would break the paragraph it sits in.
+
+       The test below is the exception's own condition, not a convenience: the
+       anchor's PARENT must itself carry text outside the anchor. A link that
+       is the only content of its block is NOT in a sentence and is still
+       measured — which is what keeps a lone 16px link in a card from slipping
+       through this. Buttons and form controls are never exempt. */
+    const inSentence = (e) => {
+      if (e.tagName !== 'A') return false;
+      const parent = e.parentElement;
+      if (!parent) return false;
+      const own = e.textContent.trim();
+      const around = parent.textContent.trim();
+      return around.length > own.length + 12;
+    };
     document.querySelectorAll('a[href], button, input, select, textarea, summary').forEach((e) => {
       const c = getComputedStyle(e);
       if (c.display === 'none' || c.visibility === 'hidden') return;
       if (e.type === 'hidden') return;
       const r = e.getBoundingClientRect();
       if (r.height === 0) return;
+      if (inSentence(e)) return;
       const min = mobile ? 44 : 28;
       if (r.height < min) out.targets.push({ tag: e.tagName, cls: e.className, h: Math.round(r.height), txt: (e.textContent || e.name || '').trim().slice(0, 26) });
     });
