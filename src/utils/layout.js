@@ -28,6 +28,21 @@ const crypto = require('crypto');
 const CSS_PATH = path.join(__dirname, '../../public/css/modus-design-system.css');
 const MODUS_CSS = fs.existsSync(CSS_PATH) ? fs.readFileSync(CSS_PATH, 'utf8') : '';
 
+// ── The ESG layer ───────────────────────────────────────────────────────────
+//
+// A SECOND, ADDITIVE sheet — never an edit to the one above. MODUS_UI_CONTRACT
+// §1 makes a per-repo edit to the master a defect and §1b makes any addition a
+// thirteen-path fan-out; test/dashboard-test.js pins the master's md5 and fails
+// the moment either happens. That pin is untouched and must stay untouched.
+//
+// Linked rather than inlined for the same reason the master is: an inline
+// <style> is re-sent on every navigation. It loads AFTER the master so that,
+// for the few places both could match, the local layer is the more specific
+// one by document order — but nothing in it overrides a master component. Every
+// class it defines is `esg-` prefixed.
+const ESG_CSS_PATH = path.join(__dirname, '../../public/css/esg-system.css');
+const ESG_CSS = fs.existsSync(ESG_CSS_PATH) ? fs.readFileSync(ESG_CSS_PATH, 'utf8') : '';
+
 // ── How the design system is delivered ──────────────────────────────────────
 //
 // LINKED, with the token block inlined as a floor.
@@ -98,6 +113,20 @@ for (const [what, present] of [
 const CSS_VERSION = crypto.createHash('sha256').update(MODUS_CSS).digest('hex').slice(0, 8);
 const CSS_HREF = `/css/modus-design-system.css?v=${CSS_VERSION}`;
 
+// Its own cache-buster, derived from its own bytes. The ESG layer changes on a
+// different cadence from the master sync, so sharing one version would either
+// re-fetch both on any change or serve a stale layer after a local edit.
+const ESG_CSS_VERSION = crypto.createHash('sha256').update(ESG_CSS).digest('hex').slice(0, 8);
+const ESG_CSS_HREF = `/css/esg-system.css?v=${ESG_CSS_VERSION}`;
+
+// Boot-time assertion, matching the one below it. A missing layer is silent:
+// every esg- class stops applying and pages render as unstyled blocks inside
+// styled chrome, which reads as a broken page rather than a missing file.
+if (!ESG_CSS) {
+  console.warn('⚠️  public/css/esg-system.css is missing or empty — every esg- component ' +
+               'will render unstyled. The master sheet cannot substitute for it.');
+}
+
 // Boot-time assertion. If the accent block is missing, every page renders in
 // Commerce blue and nobody notices for a month.
 if (MODUS_CSS && !MODUS_CSS.includes('[data-platform="esg"]')) {
@@ -105,49 +134,109 @@ if (MODUS_CSS && !MODUS_CSS.includes('[data-platform="esg"]')) {
                'the ESG accent will silently fall back to the :root default.');
 }
 
-// One entry per requirement section, grouped. `group` drives the sidebar
-// headings, and GROUPS decides the order the headings appear in.
+// ═══════════════════════════════════════════════════════════════════════════
+// THE NAVIGATION MODEL                                              (Run 62/P3)
+// ───────────────────────────────────────────────────────────────────────────
+// TIER IS PRIORITY. BUILT IS STATE. They are two axes and were previously one.
 //
-// CONTIGUITY IS NOT LOAD-BEARING, and this comment said it was until Run 47.
-// The renderer below is `GROUPS.map(g => MODULES.filter(m => m.group === g))` —
-// it FILTERS, so an entry sitting anywhere in this array renders under its own
-// heading regardless of what surrounds it. Keeping the groups contiguous is
-// still worth doing because it makes the array readable, but a future edit that
-// breaks contiguity breaks nothing, and a comment that overstates a constraint
-// is the kind of thing someone later designs around. The artefact wins.
-const GROUPS = ['ASSESS', 'FINANCE', 'EVIDENCE', 'INTELLIGENCE', 'ADMINISTRATION'];
-
-const MODULES = [
-  { key: 'dashboard',    group: 'ASSESS',         icon: '⊞',  label: 'Dashboard',       path: '/dashboard' },
-  // ONE entry, not two. Missions live on the journey page because a mission is
-  // a stage's predicate with an XP price on it — the same fact, from the same
-  // function — and two pages rendering one set of facts is how the two
-  // renderings end up disagreeing. Nothing was removed to make room, and
-  // BOTTOM_NAV_KEYS is untouched (see the comment below it for why that must
-  // never happen as a side effect).
-  { key: 'journey',      group: 'ASSESS',         icon: '🧭', label: 'ESG Journey',     path: '/journey' },
-  { key: 'company',      group: 'ASSESS',         icon: '🏢', label: 'Company Profile', path: '/company' },
-  { key: 'assessment',   group: 'ASSESS',         icon: '📋', label: 'ESG Assessment',  path: '/assessment' },
-  { key: 'carbon',       group: 'ASSESS',         icon: '🌱', label: 'Carbon',          path: '/carbon' },
-  { key: 'greenFinance', group: 'FINANCE',        icon: '💰', label: 'Green Finance',   path: '/green-finance' },
-  { key: 'documents',    group: 'EVIDENCE',       icon: '📁', label: 'Evidence',        path: '/documents' },
-  { key: 'frameworks',   group: 'EVIDENCE',       icon: '📚', label: 'Frameworks',      path: '/frameworks' },
-  { key: 'reports',      group: 'EVIDENCE',       icon: '📄', label: 'Reports',         path: '/reports' },
-  { key: 'analytics',    group: 'INTELLIGENCE',   icon: '📈', label: 'Analytics',       path: '/analytics' },
-  { key: 'kpis',         group: 'INTELLIGENCE',   icon: '🎯', label: 'KPIs',            path: '/kpis' },
-  { key: 'assistant',    group: 'INTELLIGENCE',   icon: '🤖', label: 'AI Assistant',    path: '/assistant' },
-  { key: 'workflow',     group: 'ADMINISTRATION', icon: '🔀', label: 'Workflow',        path: '/workflow' },
-  { key: 'users',        group: 'ADMINISTRATION', icon: '👥', label: 'Users & Roles',   path: '/users' },
-  { key: 'integrations', group: 'ADMINISTRATION', icon: '🔌', label: 'Integrations',    path: '/integrations' },
-  { key: 'governance',   group: 'ADMINISTRATION', icon: '🔎', label: 'Governance & Recognition', path: '/governance' },
+// The old model grouped by subject matter — ASSESS / FINANCE / EVIDENCE /
+// INTELLIGENCE / ADMINISTRATION — which described the route list rather than
+// the product. It put seven unbuilt pages at the same level as working ones,
+// gave the whole INTELLIGENCE heading to three placeholders, and promoted
+// Reports (unbuilt) into the five-item phone bar while Green Finance and the
+// Journey fell off it entirely.
+//
+//   tier   what this destination is FOR, and therefore how prominent it is
+//   built  whether it does anything yet
+//
+// An unbuilt destination renders in ONE collapsed group at the bottom, whatever
+// its tier — it is not hidden (the product's honesty rule says an absent
+// capability is stated, not concealed) and it is not promoted. When it ships,
+// flip `built` and it appears under its own tier with no other edit.
+//
+// EXTENSIBILITY IS THE POINT. P7's Impact / SustNET / Certification
+// destinations are new rows with a tier, and the sidebar, the phone bar and the
+// overflow sheet all follow from that. No structural rewrite.
+const TIERS = [
+  { key: 'primary',        label: 'ESG programme' },
+  { key: 'secondary',      label: 'What it unlocks' },
+  { key: 'impact',         label: 'Impact' },
+  { key: 'contextual',     label: 'Reference' },
+  { key: 'administrative', label: 'Administration' },
 ];
 
-// The bottom nav is FIVE, named explicitly. It used to be `MODULES.slice(0, 5)`,
-// which was correct only while MODULES happened to start with the five that
-// belong on a phone. Adding Carbon at position four would have silently pushed
-// Reports out and pulled Carbon in — a nav change nobody made, caused by an
-// edit somewhere else entirely.
-const BOTTOM_NAV_KEYS = ['dashboard', 'company', 'assessment', 'documents', 'reports'];
+// A 16px stroke glyph set, replacing the emoji the audit identified as the
+// strongest "generated template" signal in the interface: fifteen multi-coloured
+// emoji in a monochrome dark UI, at fifteen different optical weights, fighting
+// the status colours that actually carry meaning. These are one weight, one
+// size, and inherit currentColor, so an active item's icon changes with it.
+const ICONS = {
+  dashboard:  '<path d="M2.5 2.5h5v5h-5zM8.5 2.5h5v5h-5zM2.5 8.5h5v5h-5zM8.5 8.5h5v5h-5"/>',
+  journey:    '<path d="M4 13.5c0-3 8-3 8-6a2.5 2.5 0 0 0-5 0"/><circle cx="4" cy="13.5" r="1.4"/><circle cx="12" cy="4" r="1.4"/>',
+  assessment: '<path d="M4 2.5h8v11H4zM6.2 6h3.6M6.2 9h3.6"/>',
+  evidence:   '<path d="M3 4.5h4l1.2 1.5H13v7H3zM3 4.5v-1h3"/>',
+  carbon:     '<path d="M8 14V7M8 7c0-2.5 2-4.5 5-4.5 0 3-2 4.5-5 4.5M8 9.5C8 8 6.5 6.5 4 6.5c0 2 1.5 3 4 3"/>',
+  finance:    '<circle cx="8" cy="8" r="5.5"/><path d="M8 5v6M6.3 6.4h3.4M6.3 9.6h3.4"/>',
+  projects:   '<path d="M8 2.5 14 6l-6 3.5L2 6zM2 10l6 3.5L14 10"/>',
+  ai:         '<path d="M8 2.5v11M2.5 8h11M4.4 4.4l7.2 7.2M11.6 4.4l-7.2 7.2"/>',
+  company:    '<path d="M3 13.5v-9l5-2v11M8 13.5h5v-7H8M5 6.5h1M5 9h1M10.4 9h1"/>',
+  frameworks: '<path d="M2.5 3.5h4v9h-4zM7 3.5h3v9H7zM11 4l2.5.6-1.8 8.2L11 12"/>',
+  governance: '<path d="M8 2.2 13 4v4.2c0 3-2.2 4.7-5 5.6-2.8-.9-5-2.6-5-5.6V4z"/><path d="M6 8l1.5 1.6L10.3 6.6"/>',
+  future:     '<circle cx="8" cy="8" r="5.5" stroke-dasharray="2.2 2.2"/>',
+  more:       '<path d="M2.5 5h11M2.5 8h11M2.5 11h11"/>',
+  // The three empty states, drawn so they cannot be mistaken for each other:
+  // nothing is wired, wired but waiting, and measured.
+  unplugged:  '<path d="M5.5 2.5v4M10.5 2.5v4M3.5 6.5h9v2a4.5 4.5 0 0 1-9 0zM8 13v.5"/>',
+  waiting:    '<circle cx="8" cy="8" r="5.5"/><path d="M8 4.8V8l2.2 1.6"/>',
+  measured:   '<circle cx="8" cy="8" r="5.5"/><path d="M5.4 8.2l1.8 1.8 3.4-3.8"/>',
+};
+
+function icon(name) {
+  const d = ICONS[name] || ICONS.future;
+  return `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${d}</svg>`;
+}
+
+const MODULES = [
+  // ── PRIMARY · the loop ────────────────────────────────────────────────────
+  { key: 'dashboard',   tier: 'primary', built: true, bottom: true, icon: 'dashboard',  label: 'Dashboard',      short: 'Home',     path: '/dashboard' },
+  { key: 'journey',     tier: 'primary', built: true, bottom: true, icon: 'journey',    label: 'ESG Journey',    short: 'Journey',  path: '/journey' },
+  { key: 'assessment',  tier: 'primary', built: true, bottom: true, icon: 'assessment', label: 'ESG Assessment', short: 'Assess',   path: '/assessment' },
+  { key: 'documents',   tier: 'primary', built: true, bottom: true, icon: 'evidence',   label: 'Evidence',       short: 'Evidence', path: '/documents' },
+  { key: 'carbon',      tier: 'primary', built: true,               icon: 'carbon',     label: 'Carbon',         short: 'Carbon',   path: '/carbon' },
+
+  // ── SECONDARY · what running the loop unlocks ─────────────────────────────
+  // The last two were REACHABLE ONLY BY TYPING THE URL. Nothing linked them,
+  // yet journey stages 9 and 10 require them, so two required stages had no
+  // route from the interface. Giving them a home is a navigation fix, not a
+  // new feature.
+  { key: 'greenFinance',  tier: 'secondary', built: true, icon: 'finance',  label: 'Green Finance',  path: '/green-finance' },
+  { key: 'greenProjects', tier: 'secondary', built: true, icon: 'projects', label: 'Green projects', path: '/green-finance/projects' },
+  { key: 'readiness',     tier: 'secondary', built: true, icon: 'finance',  label: 'Finance readiness', path: '/green-finance/readiness' },
+  { key: 'opportunities', tier: 'secondary', built: true, icon: 'ai',       label: 'AI suggestions', path: '/green-finance/opportunities' },
+
+  // ── CONTEXTUAL · consulted while doing the work, not a destination ────────
+  { key: 'impact',     tier: 'impact',     built: true, icon: 'carbon',     label: 'ESG Impact',      path: '/impact' },
+  { key: 'company',    tier: 'contextual', built: true, icon: 'company',    label: 'Company Profile', path: '/company' },
+  { key: 'frameworks', tier: 'contextual', built: true, icon: 'frameworks', label: 'Frameworks',      path: '/frameworks' },
+  { key: 'governance', tier: 'contextual', built: true, icon: 'governance', label: 'Governance & Recognition', path: '/governance' },
+
+  // ── NOT BUILT · stated, never promoted ────────────────────────────────────
+  { key: 'reports',      tier: 'secondary',      built: false, icon: 'future', label: 'Reports',       path: '/reports' },
+  { key: 'analytics',    tier: 'secondary',      built: false, icon: 'future', label: 'Analytics',     path: '/analytics' },
+  { key: 'kpis',         tier: 'secondary',      built: false, icon: 'future', label: 'KPIs',          path: '/kpis' },
+  { key: 'assistant',    tier: 'secondary',      built: false, icon: 'future', label: 'AI Assistant',  path: '/assistant' },
+  { key: 'workflow',     tier: 'administrative', built: false, icon: 'future', label: 'Workflow',      path: '/workflow' },
+  { key: 'users',        tier: 'administrative', built: false, icon: 'future', label: 'Users & Roles', path: '/users' },
+  { key: 'integrations', tier: 'administrative', built: false, icon: 'future', label: 'Integrations',  path: '/integrations' },
+];
+
+// DERIVED, NOT LISTED. The old array was five hand-written keys with a comment
+// explaining that an earlier `slice(0, 5)` had silently swapped Carbon in and
+// Reports out. Deriving from an explicit per-module `bottom: true` keeps that
+// safety — a module cannot enter the bar by accident of ordering — without the
+// list drifting from the modules it names. The fifth slot is always the
+// overflow, so the bar holds four destinations and a way to everything else.
+const BOTTOM_NAV = MODULES.filter((m) => m.bottom && m.built);
 
 // ── Framework display names ────────────────────────────────────────────────
 // The seed data is TRUE: the working framework really was authored by Modus AI
@@ -177,6 +266,33 @@ function esc(s) {
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+/** A CALENDAR DAY, WRITTEN AS ONE.
+ *
+ *  node-postgres hands a `date` column back as a JavaScript Date, and
+ *  `esc(row.period_start)` therefore ran Date.prototype.toString: the carbon
+ *  table was printing "Wed Oct 01 2025 00:00:00 GMT+0800 (Malaysia Time)" in a
+ *  cell meant to hold "2025-10-01". Two of those per row made the table
+ *  1468px wide at every viewport and pushed the kg CO2e column — the value the
+ *  page exists to show — into a horizontal scroll it did not need. P8 measured
+ *  it; it had been there since the page was written.
+ *
+ *  ISO rather than a localised long form, deliberately: this is a reporting
+ *  period on a compliance record, the rest of the product writes periods this
+ *  way, and an unambiguous date beats a pretty one on a document a bank reads.
+ *
+ *  A string that is already a plain date passes through untouched, so a column
+ *  that a future driver hands back as text does not start being reformatted. */
+function dayOf(v) {
+  if (v === null || v === undefined || v === '') return '';
+  if (typeof v === 'string') return /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : v;
+  const d = v instanceof Date ? v : new Date(v);
+  if (Number.isNaN(d.getTime())) return String(v);
+  // The column is a DATE, not a timestamp: it has no zone, and converting to
+  // UTC first would move 2025-01-01 in Kuala Lumpur back to 2024-12-31.
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 /** Chrome-free shell for signed-out pages: login, register, 404 and the error
  *  page. Same tokens, same theme toggle, no navigation. */
 function bareLayout(title, content) {
@@ -191,6 +307,7 @@ function bareLayout(title, content) {
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>${TOKENS_CSS}</style>
 <link rel="stylesheet" href="${CSS_HREF}">
+<link rel="stylesheet" href="${ESG_CSS_HREF}">
 <style>
 body{background:var(--bg)}
 .bare-wrap{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px}
@@ -206,9 +323,17 @@ body{background:var(--bg)}
 </div>
 <script>
 (function(){
-  var KEY='modus-theme', saved=null;
+  var KEY='modus-theme', saved=null, el=document.documentElement;
   try{saved=localStorage.getItem(KEY);}catch(e){console.warn('theme preference unreadable:',e&&e.message);}
-  if(saved)document.documentElement.setAttribute('data-theme',saved);
+  if(saved)el.setAttribute('data-theme',saved);
+  /* THE USER AGENT DRAWS THINGS THIS STYLESHEET CANNOT REACH (P8): the select
+     popup list, the date picker panel, the number spinners and the scrollbars.
+     Those follow color-scheme, and the design system ships none — so on a dark
+     app they were all rendering light. It is set HERE rather than in CSS
+     because the ESG layer may not author a [data-theme] block (it reads master
+     tokens instead of re-declaring theme), and because this is the one place
+     that already knows which theme won. */
+  el.style.colorScheme=el.getAttribute('data-theme')==='light'?'light':'dark';
 })();
 </script>
 </body></html>`;
@@ -245,22 +370,111 @@ function layout(title, content, user, activePath = '') {
   // authored (the sidebar reads --brand, which is dark in BOTH themes — that
   // is the command-centre surface, deliberately), and this file no longer has
   // an opinion about colour or spacing at all.
-  const nav = GROUPS.map((g) => {
-    const items = MODULES.filter((m) => m.group === g);
+  const isActive = (m) => activePath === m.path;
+  const navLink = (m, cls) => `<a class="${cls}${isActive(m) ? ' active' : ''}" href="${esc(m.path)}"${isActive(m) ? ' aria-current="page"' : ''}>
+        <span class="sidebar-item-icon">${icon(m.icon)}</span>${esc(m.label)}</a>`;
+
+  // Built destinations, by tier. A tier with nothing in it renders nothing at
+  // all rather than an empty heading — which is what the old INTELLIGENCE
+  // heading did once its three placeholders moved out.
+  const nav = TIERS.map((t) => {
+    const items = MODULES.filter((m) => m.tier === t.key && m.built);
     if (!items.length) return '';
-    const links = items.map((m) => {
-      const active = activePath === m.path ? ' active' : '';
-      return `<a class="sidebar-item${active}" href="${esc(m.path)}"${activePath === m.path ? ' aria-current="page"' : ''}>
-        <span class="sidebar-item-icon" aria-hidden="true">${m.icon}</span>${esc(m.label)}</a>`;
-    }).join('');
-    return `<div class="sidebar-section-label">${esc(g)}</div>${links}`;
+    return `<div class="sidebar-section-label">${esc(t.label)}</div>${items.map((m) => navLink(m, 'sidebar-item')).join('')}`;
   }).join('');
 
-  const bottomNav = BOTTOM_NAV_KEYS.map((k) => MODULES.find((m) => m.key === k)).filter(Boolean).map((m) => {
-    const active = activePath === m.path ? ' active' : '';
-    return `<a class="bottom-nav-item${active}" href="${esc(m.path)}"${activePath === m.path ? ' aria-current="page"' : ''}>
-      <span class="bottom-nav-item-icon" aria-hidden="true">${m.icon}</span>${esc(m.label)}</a>`;
-  }).join('');
+  // Everything not built, in ONE collapsed disclosure. Stated, never promoted —
+  // the product's own rule is that an absent capability is said out loud, and
+  // its own copy says a button that opens nothing is worse than no button.
+  const unbuilt = MODULES.filter((m) => !m.built);
+  const unbuiltNav = unbuilt.length ? `
+    <details class="esg-sidebar-future">
+      <summary>
+        <span class="esg-sidebar-future__label">Not built yet</span>
+        <span class="esg-sidebar-future__count">${unbuilt.length}</span>
+      </summary>
+      <div class="esg-sidebar-future__list">
+        ${unbuilt.map((m) => `<a class="esg-sidebar-future__link${isActive(m) ? ' active' : ''}" href="${esc(m.path)}"${isActive(m) ? ' aria-current="page"' : ''}>${esc(m.label)}</a>`).join('')}
+      </div>
+    </details>` : '';
+
+  // ── The phone bar ─────────────────────────────────────────────────────────
+  // Four destinations and an overflow that reaches EVERY remaining one. The
+  // audit found eleven of sixteen unreachable below 768px with no hamburger,
+  // no drawer and no "More" — including Green Finance, Carbon and the Journey,
+  // while one of the five that survived was an unbuilt placeholder.
+  //
+  // <details> and nothing else: this app ships no client-side JavaScript, and a
+  // disclosure that needs none cannot break when it does.
+  const bottomNav = BOTTOM_NAV.map((m) => `<a class="bottom-nav-item${isActive(m) ? ' active' : ''}" href="${esc(m.path)}"${isActive(m) ? ' aria-current="page"' : ''}>
+      <span class="bottom-nav-item-icon">${icon(m.icon)}</span>${esc(m.short || m.label)}</a>`).join('');
+
+  const overflow = MODULES.filter((m) => !m.bottom);
+  const sheet = TIERS.map((t) => {
+    const items = overflow.filter((m) => m.tier === t.key && m.built);
+    if (!items.length) return '';
+    return `<div class="esg-nav-sheet__group">${esc(t.label)}</div>${items.map((m) => `
+        <a class="esg-nav-sheet__link${isActive(m) ? ' active' : ''}" href="${esc(m.path)}"${isActive(m) ? ' aria-current="page"' : ''}>
+          <span class="sidebar-item-icon">${icon(m.icon)}</span>${esc(m.label)}</a>`).join('')}`;
+  }).join('') + (unbuilt.length ? `
+      <div class="esg-nav-sheet__group">Not built yet</div>
+      ${unbuilt.map((m) => `<a class="esg-nav-sheet__link esg-nav-sheet__link--unbuilt" href="${esc(m.path)}">${esc(m.label)}</a>`).join('')}` : '');
+
+  /* THE SHEET NEVER SHIPS OPEN.
+   *
+   * It used to carry `open` whenever the current page lived inside it, meaning
+   * to answer "where am I". What it actually did on a phone was cover the page
+   * the user had just navigated to: measured at 390px, the sheet occupied
+   * roughly 60% of the viewport on arrival at /company and /governance, and
+   * the first thing a reader had to do on every one of those pages was dismiss
+   * a menu they had not opened. A disclosure that opens itself is not a
+   * disclosure.
+   *
+   * The signal it was carrying is real and is kept — just carried the way the
+   * OTHER FOUR items in this bar already carry it, which is the point: the bar
+   * had two conventions for "you are here" and only one of them was the
+   * master's. `.bottom-nav-item.active` is colour plus aria-current, so the
+   * overflow item is now colour plus aria-current too.
+   *
+   * §6 — state is never colour alone. For the four links the word IS the
+   * label, so the label carries it. "More" cannot, so the accessible name
+   * names the section instead: a screen reader gets "you are in Governance &
+   * Recognition" where a sighted user gets the accent. */
+  const overflowCurrent = overflow.find(isActive) || null;
+  const bottomMore = `
+    <details class="esg-nav-more${overflowCurrent ? ' esg-nav-more--current' : ''}">
+      <summary${overflowCurrent ? ' aria-current="true"' : ''} aria-label="${overflowCurrent
+    ? `More sections — you are in ${esc(overflowCurrent.label)}` : 'More sections'}">
+        <span class="bottom-nav-item-icon">${icon('more')}</span>More
+      </summary>
+      <nav class="esg-nav-sheet" aria-label="More sections">${sheet}</nav>
+    </details>`;
+
+  // ── Top bar context ───────────────────────────────────────────────────────
+  // Rendered only from what shellContext actually loaded. No context, no chips:
+  // an empty chip rail is a truthful "not known", a zeroed one is a claim.
+  const shell = user && user.shell;
+  const companyChip = shell ? `
+      <span class="esg-topbar__company" title="${esc(shell.companyName)}">
+        <span class="esg-topbar__company-name">${esc(shell.companyName)}</span>
+        ${shell.reportingYear ? `<span class="esg-topbar__company-year">${esc(shell.reportingYear)}</span>` : ''}
+      </span>` : '';
+
+  // The review chip is WORK, and it links to the queue rather than to a bell
+  // that opens a list nothing writes to. At zero it still renders, saying so —
+  // "nothing waiting" is a result the user asked for, not an absence.
+  const reviewChip = shell ? (shell.review.total > 0
+    ? `<a class="esg-topbar__chip esg-topbar__chip--attention" href="/dashboard">
+         <span class="esg-topbar__chip-count">${esc(shell.review.total)}</span> need review
+       </a>`
+    : `<span class="esg-topbar__chip esg-topbar__chip--quiet">Nothing waiting</span>`) : '';
+
+  // Global AI access, pointing at the one surface where the AI's own output is
+  // reviewed. It was previously reachable only by typing the URL.
+  const aiChip = shell ? `
+      <a class="esg-topbar__chip esg-topbar__chip--ai" href="/green-finance/opportunities">
+        ${icon('ai')} AI${shell.review.suggestions > 0 ? ` <span class="esg-topbar__chip-count">${esc(shell.review.suggestions)}</span>` : ''}
+      </a>` : '';
 
   return `<!DOCTYPE html>
 <html lang="en" data-platform="esg" data-theme="dark">
@@ -274,6 +488,7 @@ function layout(title, content, user, activePath = '') {
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
 <style>${TOKENS_CSS}</style>
 <link rel="stylesheet" href="${CSS_HREF}">
+<link rel="stylesheet" href="${ESG_CSS_HREF}">
 <style>
 /* Three layout utilities and one state border. Nothing themeable: every value
    below is geometry or a token, and there is no colour literal in this file.
@@ -311,10 +526,18 @@ function layout(title, content, user, activePath = '') {
   <aside class="app-sidebar">
     <a class="sidebar-logo" href="/dashboard">
       <span class="sidebar-brand-dot" aria-hidden="true">ESG</span>
-      <span class="sidebar-brand">Malaysia SMEs ESG e-Reporting System<em>Governance &amp; Recognition</em></span>
+      <!-- "Malaysia SMEs ESG e-Reporting System" wrapped to three lines in a
+           240px rail and pushed the first nav item below the fold. The full
+           name is the <title> of every page and the login screen's heading;
+           the rail carries the short form and keeps the full one for a
+           tooltip and for screen readers. -->
+      <span class="sidebar-brand" title="Malaysia SMEs ESG e-Reporting System">
+        <span class="esg-brand-name">ESG Reporting</span>
+        <em>Malaysia SME programme</em>
+      </span>
     </a>
-    <nav class="sidebar-nav" aria-label="Sections">${nav}</nav>
-    <div class="sidebar-footer">
+    <nav class="sidebar-nav esg-sidebar-nav" aria-label="Sections">${nav}${unbuiltNav}</nav>
+    <div class="sidebar-footer esg-sidebar-footer">
       <a class="sidebar-user" href="/company">
         <span class="sidebar-user-avatar" aria-hidden="true">${esc(initials)}</span>
         <span class="sidebar-user-info">
@@ -326,8 +549,16 @@ function layout(title, content, user, activePath = '') {
     </div>
   </aside>
   <header class="app-topbar">
-    <h1 class="topbar-title">${esc(title)}</h1>
+    <!-- The title and the company are ONE unit: "which page" is meaningless
+         without "whose data". The audit found a top bar carrying a page name
+         and a theme toggle and nothing else, on a multi-tenant product. -->
+    <div class="esg-topbar__identity">
+      <h1 class="topbar-title esg-topbar__title">${esc(title)}</h1>
+      ${companyChip}
+    </div>
     <div class="topbar-right">
+      ${reviewChip}
+      ${aiChip}
       <!-- .btn rather than .btn-sm: at 8px padding on a 13px line it is the
            largest touch target the design system offers. It measured ~29px
            against §6's 44px until RUN 54 added a 44px minimum inside the
@@ -337,19 +568,31 @@ function layout(title, content, user, activePath = '') {
       <button class="btn btn-outline" id="themeBtn" type="button" aria-label="Switch between light and dark">◐</button>
     </div>
   </header>
-  <main class="app-main" id="main-content">${content}</main>
+  <main class="app-main esg-canvas" id="main-content">${content}</main>
 </div>
-<nav class="app-bottom-nav" aria-label="Sections"><div class="bottom-nav-inner">${bottomNav}</div></nav>
+<nav class="app-bottom-nav" aria-label="Sections"><div class="bottom-nav-inner">${bottomNav}${bottomMore}</div></nav>
 <script>
 (function(){
   var KEY='modus-theme';
-  var saved=null;
+  var saved=null, el=document.documentElement;
   try{saved=localStorage.getItem(KEY);}catch(e){console.warn('theme preference unreadable:',e&&e.message);}
-  if(saved)document.documentElement.setAttribute('data-theme',saved);
+  if(saved)el.setAttribute('data-theme',saved);
+  /* THE USER AGENT DRAWS THINGS THE STYLESHEET CANNOT REACH (P8): the select
+     popup list, the date picker panel, the number spinners and the scrollbars.
+     All of those follow color-scheme, and the design system ships none — so on
+     a dark app they were rendering light, which is most of why the assessment
+     and readiness forms read as unfinished even after §17 styled the boxes
+     themselves. Set here rather than in CSS because the ESG layer may not
+     author a [data-theme] block, and because this is the one place that
+     already knows which theme won. ONE function, used on boot and on toggle,
+     so the two cannot disagree. */
+  function applyScheme(){ el.style.colorScheme=el.getAttribute('data-theme')==='light'?'light':'dark'; }
+  applyScheme();
   var b=document.getElementById('themeBtn');
   if(b)b.addEventListener('click',function(){
-    var next=document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark';
-    document.documentElement.setAttribute('data-theme',next);
+    var next=el.getAttribute('data-theme')==='dark'?'light':'dark';
+    el.setAttribute('data-theme',next);
+    applyScheme();
     try{localStorage.setItem(KEY,next);}catch(e){console.warn('theme preference not saved:',e&&e.message);}
   });
 })();
@@ -384,27 +627,32 @@ function layout(title, content, user, activePath = '') {
 function emptyState(state, opts = {}) {
   const map = {
     uninstrumented: {
-      icon: '🧩',
+      icon: icon('unplugged'),
       title: opts.title || 'Not connected yet',
       body: opts.body || 'Nothing writes to this yet. It is not switched on, rather than empty.',
     },
     instrumented_but_empty: {
-      icon: '⏳',
+      icon: icon('waiting'),
       title: opts.title || 'Ready, but nothing recorded',
       body: opts.body || 'This is switched on and working — nobody has entered anything yet.',
     },
     zero: {
-      icon: '✓',
+      icon: icon('measured'),
       title: opts.title || 'Genuinely zero',
       body: opts.body || 'This has been measured and the answer is zero.',
     },
   };
   const s = map[state] || map.instrumented_but_empty;
+  // THE MARK IS DRAWN, NOT TYPED. These were three emoji, at three different
+  // optical weights and in full colour, inside a monochrome interface — the
+  // strongest "generated template" signal the audit found. Each state keeps a
+  // DISTINCT mark, because telling the three apart at a glance is the whole
+  // point of having three.
   return `<div class="empty-state"><div class="es-icon">${s.icon}</div>
     <h3>${esc(s.title)}</h3><p>${esc(s.body)}</p></div>`;
 }
 
 module.exports = {
-  layout, bareLayout, esc, emptyState, MODULES, GROUPS, BOTTOM_NAV_KEYS,
+  layout, bareLayout, esc, dayOf, emptyState, MODULES, TIERS, BOTTOM_NAV, icon,
   frameworkLabel, TOKENS_CSS, CSS_HREF, CSS_VERSION,
 };

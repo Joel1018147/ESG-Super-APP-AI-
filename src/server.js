@@ -195,6 +195,35 @@ app.get('/', (req, res) => {
 });
 app.use('/auth', require('./routes/auth'));
 app.use('/api',  requireAuth, denyWritesForReadOnly, require('./routes/api'));
+
+// ── Shell context ───────────────────────────────────────────────────────────
+//
+// The chrome shows the company, what needs review and what the AI has produced,
+// on EVERY page. Loading it here rather than in each route means the shell can
+// never differ between two pages because one of them forgot.
+//
+// IT HANGS OFF req.user ON PURPOSE. passport.serializeUser stores only user.id
+// and deserializeUser rebuilds this object from the database on every request,
+// so a property added here is per-request and is NEVER written to the session.
+// The alternative was threading a fifth argument through 39 layout() calls, and
+// a shell that renders context only where someone remembered to pass it is the
+// inconsistency this middleware exists to remove.
+//
+// IT DOES NOT SWALLOW. An earlier draft caught the error and carried on with a
+// null context, so a broken database produced a page that looked fine with no
+// chips — the exact shape RULE 6 bans, and the same defect class as a count
+// query rendering 0 when the connection is down. `.catch(next)` hands the real
+// error to the error handler, which is the only place that decides what a user
+// is told. The promise form is here because Express 4 hangs a request on an
+// unhandled rejection from async middleware rather than 500-ing.
+const shellContext = require('./services/shellContext');
+app.use((req, res, next) => {
+  if (!req.user || !req.user.company_id) return next();
+  shellContext.load(req.user.company_id)
+    .then((ctx) => { req.user.shell = ctx; next(); })
+    .catch(next);
+});
+
 app.use('/',     requireAuth, denyWritesForReadOnly, require('./routes/documents'));
 app.use('/',     requireAuth, denyWritesForReadOnly, require('./routes/carbonImport'));
 app.use('/',     requireAuth, denyWritesForReadOnly, require('./routes/greenFinance'));

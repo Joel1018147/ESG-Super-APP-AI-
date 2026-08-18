@@ -96,34 +96,53 @@ function rail(stages, opts = {}) {
   </div></div>`;
 }
 
-function missionCard(m, opts = {}) {
-  const classes = ['mission-card'];
-  if (opts.deep) classes.push('mission-card--deep');
-  if (m.state === 'completed') classes.push('is-complete');
-  return `<div class="${classes.join(' ')}">
-    <div class="mission-title">${esc(m.label_en)}</div>
-    <div class="mission-meta">${esc(stateWords(m))} · ${esc(m.xp_award)} XP</div>
-    ${m.description_en ? `<p class="text-sm">${esc(m.description_en)}</p>` : ''}
-    ${progressBar(m.done, m.total)}
-  </div>`;
-}
+/* missionCard() and xpBlock() WERE HERE, AND P8 DELETED THEM.
+   Both were already unreachable — P5 replaced the card grid with the arc map
+   and the P5 report listed them as an available cleanup pass — and both
+   rendered the chrome P8's directive rules out: a level chip, an XP bar, and a
+   per-card "· 60 XP". Leaving a dead renderer for a metaphor the product has
+   decided against is how it comes back, so it is gone rather than commented.
 
-/** The XP chrome: a level chip, a bar and the numbers as TEXT. The text is not
- *  a caption on the bar — it is the answer, and the bar is the picture of it.
- *  §3.4 rule 4: if a figure animates, the final value is in the DOM before any
- *  script runs. Nothing here needs a script at all. */
-function xpBlock(xp, weekXp) {
-  const pct = xp.max_xp > 0 ? Math.round((xp.total / xp.max_xp) * 100) : 0;
-  return `<div class="card-body">
-    <p><span class="level-chip">Level ${esc(xp.level)} · ${esc(xp.label)}</span></p>
-    <div class="xp-bar"><span style="width:${pct}%"></span></div>
-    <p class="text-sm">${esc(xp.total)} XP of ${esc(xp.max_xp)} available${
-  weekXp > 0 ? ` · ${esc(weekXp)} earned in the last 7 days` : ''}. ${xp.next_level_min_xp === null
-    ? 'This is the highest level in the ladder.'
-    : `Next level at ${esc(xp.next_level_min_xp)} XP.`}</p>
-    <p class="text-sm">The level names are a choice this product made. They are not a rating, and
-       your ESG band — which is one — is computed separately by the scoring engine.</p>
-  </div>`;
-}
+   Nothing about the ENGINE changed: computeXp, xpSince, esg_missions.xp_award
+   and GET /api/xp are untouched and still derive from committed rows, and
+   test/journey-test.js still asserts that deleting a source row lowers the
+   total. What was removed is the presentation of it, in one file. */
 
-module.exports = { NODE_CLASS, stateWords, stageNode, rail, missionCard, xpBlock, progressBar };
+
+/* ── WHERE A STAGE IS ACTUALLY DONE ────────────────────────────────────────
+   The dashboard's next action and the journey's current mission both link
+   here, so the two cannot send a user to different screens for the same stage.
+   It lives beside stateWords() because it is the same kind of fact: how a
+   stage is PRESENTED, not what it means.
+
+   An unlisted code falls back to /journey, which is always correct if never
+   specific — a stage with no destination yet is a stage you read about. */
+const STAGE_LINK = Object.freeze({
+  COMPANY_PROFILE:     '/company',
+  DOCUMENTS_UPLOADED:  '/documents',
+  EXTRACTION_RUN:      '/documents',
+  PROPOSALS_REVIEWED:  '/documents',
+  ASSESSMENT_ANSWERED: '/assessment',
+  ASSESSMENT_SCORED:   '/assessment',
+  CARBON_DATA:         '/carbon',
+  RECOMMENDATIONS:     '/assessment',
+  GREEN_PROJECT:       '/green-finance/projects',
+  CARBON_BASELINE:     '/green-finance/projects',
+});
+const STAGE_CTA = Object.freeze({
+  COMPANY_PROFILE:     'Complete your profile',
+  DOCUMENTS_UPLOADED:  'Upload a document',
+  EXTRACTION_RUN:      'Open evidence',
+  PROPOSALS_REVIEWED:  'Review the proposals',
+  ASSESSMENT_ANSWERED: 'Answer the assessment',
+  ASSESSMENT_SCORED:   'Calculate the score',
+  CARBON_DATA:         'Add carbon data',
+  RECOMMENDATIONS:     'Read the roadmap',
+  GREEN_PROJECT:       'Define a project',
+  CARBON_BASELINE:     'Compute the baseline',
+});
+
+/** Two digits, so a rail of thirteen stages does not jump between 9 and 10. */
+const pad2 = (n) => String(n).padStart(2, '0');
+
+module.exports = { NODE_CLASS, STAGE_LINK, STAGE_CTA, pad2, stateWords, stageNode, rail, progressBar };

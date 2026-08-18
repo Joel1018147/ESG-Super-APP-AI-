@@ -2,7 +2,9 @@
 
 const express = require('express');
 const { query } = require('../db');
-const { layout, esc, emptyState, frameworkLabel } = require('../utils/layout');
+const { layout, esc, dayOf, emptyState, frameworkLabel, icon } = require('../utils/layout');
+const { STAGE_LINK, STAGE_CTA } = require('../utils/journeyView');
+const readiness = require('../services/readinessService');
 const sedg = require('../data/sedgV2');
 const { scoreAssessment, loadActiveScheme } = require('../services/scoringEngine');
 const { generateRecommendations } = require('../services/aiAdvisor');
@@ -15,7 +17,6 @@ const router = express.Router();
 
 const companyIdOf = (req) => req.user && req.user.company_id;
 const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
-const DAY_MS = 24 * 3600 * 1000;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // THE DASHBOARD                                            (Run 53 · Run 55)
@@ -81,6 +82,20 @@ const PANEL_STAGE = Object.freeze({
   evidence: 'DOCUMENTS_UPLOADED',
   carbon: 'CARBON_DATA',
 });
+
+// STAGE_LINK / STAGE_CTA moved to utils/journeyView.js in P5 so the journey
+// page and this one cannot send a user to different screens for the same
+// stage. Imported below rather than copied.
+// NAMED, NEVER SCORED. SustNET publishes no methodology mapping a company's
+// activity to these, so the platform states the mission and stops there. The
+// moment a published methodology exists, this list stops being decoration and
+// starts being an axis — and that is a different run, from the real source.
+const SUSTNET_PILLARS = Object.freeze([
+  'Biodiversity and food security',
+  'Shared prosperity and economic balance',
+  'Sustainable education for all',
+  'Social values and value creation',
+]);
 
 const pad2 = (n) => String(n).padStart(2, '0');
 
@@ -165,10 +180,20 @@ router.get('/dashboard', async (req, res, next) => {
     const journeyReady = stages.length > 0 && missions.length > 0 && levels.length > 0;
     const j = journeyReady ? journey.computeJourney(facts, stages) : null;
     const m = journeyReady ? journey.computeMissions(facts, missions) : null;
-    const xp = journeyReady ? journey.computeXp(facts, missions, levels) : null;
-    // The clock lives here, not in the engine: computeXp stays pure, and the
-    // week filter applies to each award's own source-row timestamp.
-    const weekXp = xp ? journey.xpSince(xp.awards, new Date(Date.now() - 7 * DAY_MS).toISOString()) : 0;
+    // P8 REMOVED THE XP CHROME FROM THIS PAGE, not the XP engine.
+    //
+    // The directive rules out points, levels and a ladder as the metaphor: the
+    // product is a MISSION PROGRESSION, and "60 XP · Level 3, Sapling" under a
+    // financing-readiness figure reads as a different, smaller product than the
+    // one the sentence above it belongs to. What the line said that was true —
+    // where this mission sits and how many are done — is still said, in those
+    // words, below.
+    //
+    // computeXp, xpSince, esg_missions.xp_award and GET /api/xp are all
+    // UNTOUCHED. This is a rendering decision, and the day a genuine product
+    // requirement for points appears the arithmetic is still there and still
+    // derived. `levels` stays in the destructure above because loadDefinitions
+    // returns it and journeyReady is asserted against all three tables.
 
     const a = facts.assessment;
     let by = {};
@@ -275,423 +300,623 @@ router.get('/dashboard', async (req, res, next) => {
       </div>`;
     }
 
-    /* ── ROW A · the four counters ──────────────────────────────────────── */
+    /* ═══════════════════════════════════════════════════════════════════════
+       THE DASHBOARD, AS ONE STORY                                    (P4)
+       ─────────────────────────────────────────────────────────────────────
+       WHERE AM I → WHAT IS MY POSITION → WHAT HAS THE AI DONE → WHAT NEEDS ME
+       → WHAT NEXT → WHERE CAN THIS GO.
+
+       Everything below is read from the queries above. Not one figure is
+       invented, and three capabilities that the platform cannot currently
+       compute — Green Finance Readiness, SustNET Impact and SustNET ESG
+       Certification — are rendered as RESERVED rather than as zero, because a
+       zero is a claim and "not configured" is the truth.
+       ═════════════════════════════════════════════════════════════════════ */
+
+    const shellCtx = (req.user && req.user.shell) || {};
     const reachable = j ? j.total_stages - j.counts.blocked : 0;
     const journeyPct = reachable > 0 ? Math.round((j.counts.completed / reachable) * 100) : 0;
     const active = j ? j.stages.find((s) => s.stage_code === j.active_stage_code) : null;
     const activeMission = (m && active)
       ? m.missions.find((x) => x.stage_code === active.stage_code) : null;
 
-    const statCards = journeyReady ? `<div class="grid-12 reveal">
-      <div class="col-3">${statCard('Journey progress', `${journeyPct}%`,
-    `${esc(j.counts.completed)} of ${esc(reachable)} stages you can reach${
-      j.counts.blocked ? ` · ${esc(j.counts.blocked)} blocked` : ''}`)}</div>
-      <div class="col-3">${statCard('Answers completed',
-    a ? `${esc(answers.done)} / ${esc(answers.total)}` : '—',
-    a ? esc(frameworkLabel(a.framework_code, a.framework_version))
-      : 'No assessment started yet, so there is no denominator to count against')}</div>
-      <div class="col-3">${statCard('XP earned', esc(xp.total),
-    `${weekXp > 0 ? `${esc(weekXp)} in the last 7 days · ` : ''}Level ${esc(xp.level)} · ${esc(xp.label)}`)}</div>
-      <div class="col-3">${statCard('Next milestone', active ? esc(active.label_en) : 'Nothing waiting',
-    active
-      ? (activeMission ? `${esc(view.stateWords(activeMission))} · ${esc(activeMission.xp_award)} XP` : 'No mission on this stage')
-      : 'Every stage you can reach is done',
-    Boolean(active))}</div>
-    </div>` : emptyState('uninstrumented', {
-      title: 'The journey has not been set up on this deployment',
-      body: 'No stage, mission or level is defined, so there is nothing to measure your position '
-          + 'against. That is a configuration gap, not an empty account.' });
+    // ── 1 · HERO ────────────────────────────────────────────────────────────
+    // The score is the single primary visualisation. The three pillars are a
+    // BREAKDOWN beside it, not three more dials competing with it — the audit
+    // found four identical donuts on one card, which is four things claiming to
+    // be the most important.
+    // THE MASTER'S RING, not a local one. P2 built .esg-score__dial before
+    // checking, and the master already ships .score-ring with hero/inline
+    // sizes, a --ring-thickness token and its own geometry guards — so the
+    // local dial was the one thing the ESG layer is not allowed to be: a
+    // duplicate of a master component. It has been removed from the layer.
+    const heroScore = wholeScore(overall && overall.score_0_100);
+    const scoreDial = overall
+      ? scoreRing(heroScore, null, `ESG score ${heroScore} out of 100`, { size: 'hero', den: 100 })
+      : '';
 
-    /* ── ROW B · the score ──────────────────────────────────────────────────
-       A HERO RING AND THREE INLINE ONES, which is what replaced the radar. The
-       radar plotted three numbers on three axes; three rings state the same
-       three numbers, each with the ratio it was computed from underneath, and
-       cost nothing to load.
+    const heroLeft = overall
+      ? `<div>
+          <p class="esg-hero__eyebrow">${esc(shellCtx.companyName || 'Your company')}${
+  a ? ` · ${esc(a.reporting_year)}` : ''}</p>
+          <div class="esg-hero__score">
+            ${scoreDial}
+            <div class="esg-score__band">
+              ${bandLabel ? `<span class="esg-chip esg-chip--done">${esc(overall.band_code)} · ${esc(bandLabel)}</span>` : ''}
+              <span class="esg-score__bandname">${esc(bandLabel || 'Scored')}</span>
+              <span class="esg-score__basis"><span class="esg-num">${esc(answers.done)} / ${esc(answers.total)}</span>
+                indicators answered${overall.indicators_na ? `, ${esc(overall.indicators_na)} not applicable` : ''}.
+                Computed by the scoring engine at weighting version ${esc(overall.weighting_version)} — no part
+                of it is generated by AI.</span>
+            </div>
+          </div>
+        </div>`
+    // P8. THIS USED TO BE emptyState(), WHICH IS A CENTRED COMPONENT.
+    //
+    // Dropped into the hero's left column it produced the measured defect in
+    // the before-shot: a 430px panel holding one small centre-aligned block,
+    // with the company name left-aligned above it and 180px of nothing under
+    // it. The generic empty state is right in a card and wrong as a hero,
+    // because a hero states a POSITION and a position is read from the left
+    // edge like every other line on the page.
+    //
+    // The three lines below are the same eyebrow / headline / sub the finance
+    // readiness hero already uses for its own not-yet-assessable case, so the
+    // unscored dashboard and the partly-assessed readiness page now read as
+    // one product. NOTHING IS CLAIMED THAT WAS NOT CLAIMED BEFORE: the state
+    // is still named, the denominator is still real, and there is still no
+    // provisional figure.
+      : `<div>
+          <p class="esg-hero__eyebrow">${esc(shellCtx.companyName || 'Your company')}${
+  a ? ` · ${esc(a.reporting_year)}` : ''}</p>
+          ${a
+    ? `<h2 class="esg-hero__headline">Assessment started, not scored yet</h2>
+          <p class="esg-hero__sub">The score is computed from your own answers when you submit the
+            assessment. <span class="esg-num">${esc(answers.done)} / ${esc(answers.total)}</span>
+            indicators are answered so far. Nothing is estimated in the meantime, so there is no
+            provisional figure to show you.</p>`
+    : `<h2 class="esg-hero__headline">No assessment started yet</h2>
+          <p class="esg-hero__sub">Scoring is switched on and working — there is nothing to score
+            until an assessment exists, so there is no denominator to count against either.</p>`}
+        </div>`;
 
-       NOT .panel--deep. That variant paints --surface-deep, and §50's
-       .score-ring::before fills its centre with --surface — the disc would sit
-       on the wrong colour in the middle of the ring. A component's backdrop is
-       part of its contract. */
-    const pillarRings = ['E', 'S', 'G'].map((p) => {
-      const s = by[p] || {};
-      const unanswered = !s.indicators_answered;
-      const shown = unanswered ? null : wholeScore(s.score_0_100);
-      return ringWrap(
-        scoreRing(shown, p,
-          `${PILLAR_NAME[p]} score ${shown === null ? 'not yet available' : `${shown} out of 100`}`,
-          { size: 'inline' }),
-        `${esc(PILLAR_NAME[p])}<br>${esc(s.indicators_answered || 0)} of ${esc(s.indicators_total || 0)} answered${
-          s.indicators_na > 0 ? ` · ${esc(s.indicators_na)} N/A` : ''}`);
-    }).join('');
-
-    const overallShown = overall ? wholeScore(overall.score_0_100) : null;
-
-    /* ── THE SEEDED RATING LADDER (Run 56) ────────────────────────────────
-       THE ROWS WERE ALREADY IN HAND AND SIX OF SEVEN WERE BEING DISCARDED.
-       The band query returns the whole ladder ordered by sort_order; the page
-       used one row of it for the chip and dropped Leading, Advanced,
-       Established, Progressing, Developing and Starting Out on the floor. This
-       costs no query, invents nothing, and answers what a single number cannot
-       — what 34 MEANS, and what the next band would take.
-
-       It is also what fills the left column of Row B. Deleting the two
-       methodology paragraphs left a 250px panel beside a 900px journey rail,
-       and a hole that size reads as unfinished rather than as calm. The answer
-       is not to put the prose back: it is to put something TRUE there, and the
-       ladder was already loaded.
-
-       §52's .checklist is the component, and its three states are exactly a
-       ladder read top-down — bands above you are not reached, yours is where
-       you are, bands below are cleared. Each states its status in WORDS as
-       well as by mark (§6: state is never colour alone). `cleared` is computed
-       from the seeded min_score, not from the ordering, so a reseeded ladder
-       stays correct. */
-    const ladder = (overall && bandList.length) ? `
-        <div class="stat-label">Rating ladder</div>
-        <div class="checklist">${bandList.map((b) => {
-    const lo = num(b.min_score);
-    const hi = num(b.max_score);
-    const here = Boolean(overall.band_code) && b.band_code === overall.band_code;
-    const cleared = !here && lo !== null && overallShown !== null && overallShown >= lo;
-    const state = here ? 'is-active' : (cleared ? 'is-done' : 'is-pending');
-    const word = here ? 'You are here' : (cleared ? 'Cleared' : 'Not reached');
-    return `<div class="checklist-item ${state}">
-            <span class="checklist-mark" aria-hidden="true">${cleared ? '✓' : ''}</span>
-            <span>${esc(b.band_code)} · ${esc(b.band_label)}</span>
-            <span class="checklist-status">${lo === null || hi === null
-    ? esc(word) : `${esc(lo)}–${esc(hi)} · ${esc(word)}`}</span>
-          </div>`;
-  }).join('')}</div>` : '';
-
-    const scorePanel = overall ? `<div class="panel">
-      <div class="panel-head">
-        <h3 class="panel-title">ESG score overview</h3>
-        <span class="panel-meta">${esc(frameworkLabel(a.framework_code, a.framework_version))} · ${
-  esc(a.reporting_year)}</span>
-      </div>
-      <div class="panel-body">
-        <div class="flex flex-wrap items-center gap-5">
-          ${ringWrap(
-    scoreRing(overallShown, null,
-      `Overall ESG score ${overallShown} out of 100`, { size: 'hero', den: '100' }),
-    `${esc(overall.indicators_answered)} of ${esc(overall.indicators_total)} indicators answered`,
-    `<span class="badge badge-accent">${esc(overall.band_code || 'Not banded')}${
-      bandLabel ? ` · ${esc(bandLabel)}` : ''}</span>`)}
-          <div class="flex flex-wrap gap-4 items-start">${pillarRings}</div>
+    // The ONE next action. It comes from the journey engine's active stage, so
+    // it cannot disagree with the mission map further down the page.
+    const nextPanel = active ? `
+      <div class="esg-next">
+        <span class="esg-next__label">Next mission</span>
+        <h2 class="esg-next__title">${esc(active.label_en)}</h2>
+        <p class="esg-next__why">${esc(active.description_en || '')}</p>
+        <div class="esg-next__actions">
+          <a class="btn btn-primary" href="${esc(STAGE_LINK[active.stage_code] || '/journey')}">${
+  esc(STAGE_CTA[active.stage_code] || 'Continue')}</a>
+          <a class="btn btn-outline" href="/journey">See the whole journey</a>
         </div>
-        ${ladder}
-        <!-- NO PROSE FOLLOWS THE RINGS, AND THAT IS THE CHANGE (Run 56).
-             This panel ended with two paragraphs: the weighting and engine
-             versions plus "every figure here is arithmetic over your own
-             answers, no part of it is generated by AI", and a note that there
-             is no peer cohort to compare against. Both were true and both were
-             ENGINEERING JUSTIFICATION, sitting directly under the most
-             important number in the product — which is most of why the page
-             read as unfinished. Honesty is structural: a real number with a
-             real source, and an empty state that names which of the three it
-             is. A paragraph about having been honest is a different thing, and
-             it costs the panel its hierarchy.
-             Where each half went instead:
-               provenance   the panel header's metadata line already names the
-                            framework and the reporting year, and /governance
-                            exists for the methodology in full
-               peer cohort  a named emptyState('uninstrumented') at the foot of
-                            the page, in the card that registers absences
-             Run 55 had already cut the peer note from a full empty state down
-             to one line here for the same reason, measured off a screenshot;
-             this run finishes the move rather than shortening it again. -->
-      </div>
-    </div>` : `<div class="panel">
-      <div class="panel-head"><h3 class="panel-title">ESG score overview</h3></div>
-      <div class="panel-body">${a
-    ? emptyState('instrumented_but_empty', {
-      title: 'Assessment started, not scored yet',
-      body: 'The score is computed from your answers when you submit the assessment. Nothing is '
-          + 'estimated in the meantime, so there is no provisional figure to show you.' })
-      + `<p class="text-center"><a class="btn btn-primary" href="/assessment/${esc(a.id)}">Continue the assessment</a></p>`
-    : emptyState('instrumented_but_empty', {
-      title: 'No assessment yet',
-      body: 'This is switched on and working — you have not started one. Your ESG score is '
-          + 'calculated from an assessment, so it begins there.' })
-      + '<p class="text-center"><a class="btn btn-primary" href="/assessment">Start an assessment</a></p>'}
-      </div>
-    </div>`;
+        ${activeMission ? `<span class="esg-meta">${esc(view.stateWords(activeMission))} · mission ${
+  esc(j.stages.indexOf(active) + 1)} of ${esc(j.total_stages)} · ${esc(m.completed)} of ${
+  esc(m.total)} complete</span>` : ''}
+      </div>`
+      : `<div class="esg-next">
+          <span class="esg-next__label">Next mission</span>
+          <h2 class="esg-next__title">Nothing is waiting for you</h2>
+          <p class="esg-next__why">Every stage you can currently reach is done. The stages that
+            remain are blocked on something outside this platform, and each one says what.</p>
+          <div class="esg-next__actions"><a class="btn btn-outline" href="/journey">Review the journey</a></div>
+        </div>`;
 
-    const railPanel = journeyReady ? `<div class="panel">
-      <div class="panel-head">
-        <h3 class="panel-title">Your ESG journey</h3>
-        <span class="panel-meta">${esc(j.counts.completed)} of ${esc(j.total_stages)} stages</span>
-      </div>
-      <div class="panel-body">
-        ${view.rail(j.stages, { compact: true })}
-        <!-- No sentence explaining what "Blocked" means. journeyView renders
-             each blocked stage's own reason on the node itself, which says it
-             at the place it applies to instead of in a general note above the
-             fold. Run 56, §3.-1. -->
-        <p><a class="btn btn-outline btn-sm" href="/journey">Open the journey</a></p>
-      </div>
-    </div>` : '';
+    const hero = `<section class="esg-hero esg-enter">
+      ${heroLeft}
+      ${nextPanel}
+    </section>`;
 
-    /* ── ROW C · review queue, roadmap, green finance ───────────────────── */
-
-    // THE COUNTS ARE .tag, NOT .chip, AND THAT IS A DELIBERATE DEVIATION from
-    // the brief. §52's own header draws the line: ".tag is a LABEL — it
-    // describes something. A chip is a CONTROL: it is pressed, it has an active
-    // state." Nothing on this deployment filters a review queue — /documents
-    // takes no status parameter and proposals are reviewed per document — so
-    // three pressable-looking chips that do not filter would be three dead
-    // controls (§4.3c), in the panel whose whole job is to be actioned. The
-    // .chip-row is kept, because it is the row layout; the one real control is
-    // the link beneath it.
-    const missing = a ? Math.max(0, answers.total - answers.done) : 0;
-    const reviewPanel = panel('review', 'Review queue', `
-      <div class="chip-row">
-        <span class="tag">All proposals <b class="chip-count">${esc(props.proposals_live)}</b></span>
-        <span class="tag tag-amber">Review required <b class="chip-count">${esc(props.proposals_pending)}</b></span>
-        <span class="tag">Unanswered indicators <b class="chip-count">${esc(missing)}</b></span>
-      </div>
-      ${props.proposals_live > 0
-    // ONE SENTENCE, AND IT TELLS THE USER WHAT THEY WILL SEE when they follow
-    // the link. The argument for why there is no confidence percentage is a
-    // methodology point and it lives in "On the design, not on this page".
-    ? `<p class="text-sm">Each proposal carries a verbatim quote from the document it came from.</p>
-       <p><a class="btn btn-outline btn-sm" href="/documents">Open evidence to review</a></p>`
-    : emptyState(docs.n > 0 ? 'instrumented_but_empty' : 'uninstrumented', {
-      title: docs.n > 0 ? 'Nothing waiting for you' : 'No documents to read yet',
-      body: docs.n > 0
-        ? 'Your documents have been read and no proposal is outstanding. That is a measured '
-          + 'result — the queue is empty rather than switched off.'
-        : 'Proposals are produced by reading the documents you upload. Nothing has been '
-          + 'uploaded, so there is nothing to propose.' })}`);
-
-    const priorityBadge = (p) => `<span class="badge badge-${
-      p === 'high' ? 'red' : p === 'medium' ? 'amber' : 'gray'}">${esc(p || 'unrated')}</span>`;
-
-    const roadmapPanel = panel('roadmap', 'Improvement roadmap', recs.length
-      ? `${recs.slice(0, 3).map((r) => `<div class="metric-row">
-          <span class="metric-row-label">${esc(PILLAR_NAME[r.pillar] || r.pillar || 'General')}</span>
-          <span class="flex-1"><span class="tag tag-accent">+${esc(r.points_missed)} points</span>
-            ${priorityBadge(r.priority)}</span>
-          <span class="metric-row-value">${esc(r.points_missed)}</span>
+    // ── 2 · POSITION · the pillar breakdown ─────────────────────────────────
+    // ONE DENOMINATOR CONVENTION ON THE PAGE. The hero counts answered against
+    // APPLICABLE indicators (the journey engine excludes not-applicable ones);
+    // the pillar rows were counting against the raw total, so the same screen
+    // read "39 / 39" above "13 of 14" and looked like it disagreed with itself.
+    // The audit found exactly this. Both now exclude N/A and name it separately.
+    const pillar = (scope, name) => {
+      const s = by[scope];
+      if (!s) return '';
+      const v = wholeScore(s.score_0_100);
+      return `<div class="esg-pillar">
+        <div class="esg-pillar__head">
+          <!-- NO LABEL ON THE INLINE RING (P8). The master renders
+               .score-ring-label at 9px on the inline size, which the audit
+               measured as the smallest text in the product — and it was
+               printing "E" directly beside the word "Environmental". Dropping
+               the label removes a duplicate AND the 9px, without touching a
+               master component. The aria-label still names the pillar. -->
+          ${scoreRing(v, null, `${name} ${v === null ? 'not scored' : v} out of 100`, { size: 'inline' })}
+          <span class="esg-pillar__name">${esc(name)}</span>
         </div>
-        <p class="text-sm">${esc(r.narrative_en)}${
-  r.source === 'fallback_template' ? ' — written offline; the model was unavailable.' : ''}</p>`).join('')}
-      <!-- The paragraph that stood here explained that the engine computes the
-           points, that the model never writes a number, and that there is
-           deliberately no progress bar. All three are true, none of them is
-           something the owner of this company needs to read above a list of
-           three actions, and the last one is an argument with a design nobody
-           on this screen can see. /governance carries the methodology. -->
-      <p><a class="btn btn-outline btn-sm" href="/reports">See every recommendation</a></p>`
-      : (overall
-        ? emptyState('zero', {
-          title: 'No gaps worth listing',
-          body: 'The engine found nothing above the reporting threshold for this assessment. That '
-              + 'is a measured result, not a missing one.' })
-        : emptyState('instrumented_but_empty', {
-          title: 'Nothing to improve yet',
-          body: 'The roadmap is produced when the assessment is scored. It is switched on and '
-              + 'working — there is no scored assessment to build it from.' })));
-
-    // TWO KPI TILES, BECAUSE TWO IS WHAT IS REAL. Readiness has not shipped —
-    // no table, no route, nothing writes one — so the panel says so by name
-    // rather than showing a readiness figure of zero, which would read as
-    // "assessed and found wanting" instead of "not built".
-    const greenPanel = panel('green', 'Green finance', `
-      <div class="grid-12 grid--dense">
-        <div class="col-6"><div class="kpi-tile">
-          <span class="kpi-tile-icon" aria-hidden="true">🌿</span>
-          <span><span class="kpi-tile-value">${esc(green.projects)}</span>
-            <span class="kpi-tile-label">${green.projects === 1 ? 'project defined' : 'projects defined'}</span></span>
-        </div></div>
-        <div class="col-6"><div class="kpi-tile">
-          <span class="kpi-tile-icon" aria-hidden="true">🏦</span>
-          <span><span class="kpi-tile-value">${esc(register.products)}</span>
-            <span class="kpi-tile-label">products on the register</span></span>
-        </div></div>
-      </div>
-      ${green.projects > 0
-    // Same judgement as the score panel. With projects on file the panel is
-    // populated, so the missing MATCHING is a footnote; with none it is the
-    // whole state of the region and gets the full named empty state.
-    ? `<p class="text-sm text-muted">Nothing matches you to a product yet — readiness is not built,
-         so a match shown now would be a guess.</p>`
-    : emptyState('uninstrumented', {
-      title: 'Nothing matches you to a product yet',
-      body: 'The register is a public reference list and the projects are yours. Nothing joins the '
-          + 'two — readiness is not built, so no product here has been assessed against your '
-          + 'position, and a match shown now would be a guess.' })}
-      <p><a class="btn btn-outline btn-sm" href="/green-finance">Open green finance</a></p>`);
-
-    /* ── ROW D · evidence and carbon ────────────────────────────────────── */
-    const DOC_STATUS = {
-      pending: ['Not analysed', 'badge'],
-      extracting: ['Reading…', 'badge badge-amber'],
-      extracted: ['Text extracted', 'badge badge-green'],
-      no_text_layer: ['No text layer', 'badge badge-amber'],
-      failed: ['Could not read', 'badge badge-red'],
+        <span class="esg-pillar__basis">${esc(s.indicators_answered)} of ${
+  esc(Number(s.indicators_total) - Number(s.indicators_na || 0))} answered${
+  s.indicators_na ? `, ${esc(s.indicators_na)} not applicable` : ''}</span>
+      </div>`;
     };
 
-    const evidencePanel = panel('evidence', 'Evidence', docs.n > 0
-      ? `${recentDocs.map((d) => {
-        const [label, cls] = DOC_STATUS[d.text_status] || ['Unknown state', 'badge'];
-        return `<div class="file-row">
-          <span class="file-row-icon" aria-hidden="true">📄</span>
-          <span class="file-row-main">
-            <span class="file-row-name">${esc(d.filename)}</span>
-            <span class="file-row-meta">${esc(fileSize(d.byte_size))}</span>
-          </span>
-          <span class="file-row-status"><span class="${cls}">${esc(label)}</span></span>
-        </div>`;
-      }).join('')}
-      <p class="text-sm">${esc(docs.n)} ${docs.n === 1 ? 'document' : 'documents'} on file ·
-         ${esc(fileSize(docs.bytes))} in total${
-  docs.n > recentDocs.length ? ` · the ${esc(recentDocs.length)} most recent shown` : ''}.</p>
-      <p><a class="btn btn-outline btn-sm" href="/documents">Open evidence</a></p>`
-      : emptyState('instrumented_but_empty', {
-        title: 'No documents yet',
-        body: 'Uploading is switched on and working — nothing has been uploaded. Documents are '
-            + 'what the assessment draws its evidence from, so this is where the shortest path '
-            + 'to a score begins.' })
-        + '<p><a class="btn btn-primary" href="/documents">Upload a document</a></p>');
+    // The ladder is where you sit among the bands. It is TERTIARY — it was 40%
+    // of the score card and six of its seven rows were bands this company is
+    // not in — so it discloses rather than occupies.
+    const ladder = bandList.length ? `
+      <details class="esg-stage__more">
+        <summary>Where ${esc(overall ? overall.band_code : 'this')} sits on the rating ladder</summary>
+        <div class="esg-table-scroll" tabindex="0" role="region" aria-label="Rating ladder">
+          <table class="esg-table esg-table--stack">
+            <thead><tr><th>Band</th><th>Range</th><th>Status</th></tr></thead>
+            <tbody>${bandList.slice().reverse().map((b) => {
+    const here = overall && b.band_code === overall.band_code;
+    const cleared = overall && Number(overall.score_0_100) >= Number(b.max_score);
+    return `<tr><td data-label="Band">${esc(b.band_code)} · ${esc(b.band_label)}</td>
+        <td data-label="Range" class="esg-td-nowrap">${esc(b.min_score)}–${esc(b.max_score)}</td>
+        <td data-label="Status">${here
+    ? '<span class="esg-chip esg-chip--current">You are here</span>'
+    : (cleared ? '<span class="esg-chip esg-chip--done">Cleared</span>'
+      : '<span class="esg-chip esg-chip--blocked">Not reached</span>')}</td></tr>`;
+  }).join('')}</tbody>
+          </table>
+        </div>
+      </details>` : '';
 
-    const carbonPanel = panel('carbon', 'Carbon', carbon.entries > 0
-      ? `<div class="grid-12 grid--dense">
-        <div class="col-6"><div class="kpi-tile">
-          <span class="kpi-tile-icon" aria-hidden="true">📊</span>
-          <span><span class="kpi-tile-value">${esc(carbon.entries)}</span>
-            <span class="kpi-tile-label">${carbon.entries === 1 ? 'entry on file' : 'entries on file'}</span></span>
-        </div></div>
-        <div class="col-6"><div class="kpi-tile">
-          <span class="kpi-tile-icon" aria-hidden="true">🕓</span>
-          <span><span class="kpi-tile-value">${esc(carbon.provisional)}</span>
-            <span class="kpi-tile-label">provisional</span></span>
-        </div></div>
+    const positionSection = overall ? `<section class="esg-section">
+      <div class="esg-section__head">
+        <h2 class="esg-section__title">Where the score comes from</h2>
+        <span class="esg-section__note">${esc(frameworkLabel(a.framework_code, a.framework_version))}</span>
       </div>
-      <p class="text-sm">Covering ${esc(String(carbon.period_from).slice(0, 10))} to
-         ${esc(String(carbon.period_to).slice(0, 10))}.${carbon.provisional > 0
-    ? ' A provisional entry used an unverified factor and can be recomputed.'
-    : ' Every entry used a verified factor.'}</p>
-      <p><a class="btn btn-outline btn-sm" href="/carbon">Open carbon</a></p>`
-      : emptyState('instrumented_but_empty', {
-        title: 'No energy or fuel data yet',
-        body: 'The factors are loaded and the calculator is working — you have not entered a '
-            + 'period. Nothing is estimated on your behalf, so there is no provisional figure '
-            + 'standing in for one.' })
-        + '<p><a class="btn btn-primary" href="/carbon">Record a period</a></p>');
+      <div class="esg-pillars">
+        ${pillar('E', 'Environmental')}
+        ${pillar('S', 'Social')}
+        ${pillar('G', 'Governance')}
+      </div>
+      ${ladder}
+    </section>` : '';
 
-    /* ── what the mock shows and this page will not ───────────────────────
-       THE INDUSTRY COMPARISON IS THE FIRST THING IN HERE, and it is a full
-       named empty state rather than a table row or a line under the score.
-       Annotation §1.1 calls it the most dangerous element on the mock and
-       requires it NAMED rather than hidden — emptyState('uninstrumented') is
-       exactly the instrument for that, and this card is the page's own register
-       of absences, so the block is the right size for what it says here in a
-       way it was not in the score panel. The other five stay as table rows:
-       they are shorter facts and a wall of five empty states would be the same
-       mistake at five times the volume. */
-    const notShown = `<div class="card">
-      <div class="card-header"><h3 class="card-title">On the design, not on this page</h3></div>
-      <div class="card-body">
-        ${emptyState('uninstrumented', {
+    // ── 3 · WHAT THE AI HAS DONE, AND WHAT NEEDS A PERSON ───────────────────
+    // The product's rule, stated on its own journey page: a proposal is a
+    // proposal until a person accepts it. So this section separates what the
+    // model produced from what a human has confirmed, and never merges them.
+    const aiState = (() => {
+      if (!docs.n) {
+        return emptyState('instrumented_but_empty', {
+          title: 'No documents to read yet',
+          body: 'Document reading is switched on and working. It reads what you already hold — a '
+              + 'utility bill, a policy, a certificate — and proposes answers with a verbatim quote '
+              + 'from the page it found them on. It has not been given a document yet.' });
+      }
+      if (props.proposals_pending > 0) {
+        return `<div class="esg-ai esg-ai--done">
+          <span class="esg-ai__dot" style="color:var(--esg-done)" aria-hidden="true"></span>
+          <div class="esg-ai__body">
+            <p class="esg-ai__title">${esc(props.proposals_pending)} proposal${props.proposals_pending === 1 ? '' : 's'} waiting for you</p>
+            <p class="esg-ai__detail">Each one carries a verbatim quote from the document it came from.
+              Nothing an AI read raises your score on its own — accepting is what does.</p>
+          </div></div>`;
+      }
+      if (props.proposals_live > 0) {
+        return `<div class="esg-ai esg-ai--done">
+          <span class="esg-ai__dot" style="color:var(--esg-done)" aria-hidden="true"></span>
+          <div class="esg-ai__body">
+            <p class="esg-ai__title">Every proposal has been reviewed</p>
+            <p class="esg-ai__detail">${esc(props.proposals_live)} were put to you and none is outstanding.
+              That is a measured result — the queue is empty rather than switched off.</p>
+          </div></div>`;
+      }
+      return `<div class="esg-ai esg-ai--empty">
+        <span class="esg-ai__dot" style="color:var(--esg-blocked)" aria-hidden="true"></span>
+        <div class="esg-ai__body">
+          <p class="esg-ai__title">Read, and proposed nothing</p>
+          <p class="esg-ai__detail">Your ${esc(docs.n)} document${docs.n === 1 ? ' was' : 's were'} read and
+            checked for statements that answer a disclosure. None carried one that could be quoted
+            verbatim, so nothing was proposed rather than something being guessed.</p>
+        </div></div>`;
+    })();
+
+    const attentionSection = `<section class="esg-section">
+      <div class="esg-section__head">
+        <h2 class="esg-section__title">What the platform did, and what needs you</h2>
+        <span class="esg-section__note">AI proposes · a person verifies</span>
+      </div>
+      <div class="esg-grid esg-grid-2">
+        ${aiState}
+        <div class="esg-ai ${carbon.provisional > 0 ? 'esg-ai--idle' : 'esg-ai--done'}">
+          <span class="esg-ai__dot" style="color:var(--${carbon.provisional > 0 ? 'esg-caution' : 'esg-done'})" aria-hidden="true"></span>
+          <div class="esg-ai__body">
+            <p class="esg-ai__title">${carbon.entries
+    ? `${esc(carbon.entries)} carbon entr${carbon.entries === 1 ? 'y' : 'ies'} on file`
+    : 'No carbon data yet'}</p>
+            <p class="esg-ai__detail">${carbon.entries
+    ? (carbon.provisional > 0
+      ? `${esc(carbon.provisional)} use an unverified emission factor and are marked provisional. They can
+         be recomputed when a sourced Malaysian figure is published.`
+      : 'Every entry stamps the emission factor it used, so last year&rsquo;s tonnage does not move when a new factor is published.')
+    : 'Electricity, diesel and petrol. Each entry stamps the factor it used at the time.'}</p>
+          </div>
+        </div>
+      </div>
+    </section>`;
+
+    // ── 4 · IMPROVEMENT ─────────────────────────────────────────────────────
+    // Recommendations carry points_missed from the SCORING ENGINE. The model
+    // writes the sentence around the number and never the number itself.
+    const improvementSection = recs.length ? `<section class="esg-section">
+      <div class="esg-section__head">
+        <h2 class="esg-section__title">What would move the score</h2>
+        <span class="esg-section__note">Points are computed by the scoring engine, not by the model</span>
+      </div>
+      <div class="esg-card"><div class="esg-card__body">
+        ${recs.slice(0, 3).map((r) => `<div class="esg-rec">
+          <span class="esg-rec__points esg-num">+${esc(Number(r.points_missed).toFixed(1))}</span>
+          <span class="esg-rec__head">${esc(PILLAR_NAME[r.pillar] || r.pillar)}</span>
+          <span class="esg-chip esg-chip--${r.priority === 'high' ? 'current' : 'blocked'}">${esc(r.priority)}</span>
+          <p class="esg-rec__text">${esc(r.narrative_en || '')}</p>
+        </div>`).join('')}
+      </div></div>
+      ${recs.length > 3 ? `<div class="esg-row"><a class="btn btn-outline" href="/assessment/${esc(a.id)}">See every recommendation</a></div>` : ''}
+    </section>` : '';
+
+    // The engine reads eight scoped aggregates of its own. Awaited here rather
+    // than folded into the waves above because it is a SERVICE call, not a
+    // query this route owns — the route must not know its shape.
+    const ready = await readiness.calculate(cid);
+
+    /* ── Green Finance Readiness, from the ENGINE ─────────────────────────
+       P6.5 replaced a hardcoded "Not configured" string with a real service.
+       The step now renders whatever readinessService reports, so the dashboard
+       cannot claim a different state from the engine — including the day the
+       engine can finally calculate, which needs no edit here.
+
+       A HEADLINE FIGURE IS RENDERED ONLY WHEN `score` IS NON-NULL, which the
+       engine permits only when every criterion was assessable. Below that the
+       step shows what IS assessed and how much is still unassessable, because
+       "42 of 50 assessable points" and "42/100" are different claims. */
+    const READINESS_WORD = {
+      not_configured:     'Not configured',
+      insufficient_data:  'Data required',
+      partially_assessed: 'Partly assessed',
+      calculated:         null,   // the number speaks for itself
+    };
+    const readinessStep = (() => {
+      if (!ready) {
+        return `<div class="esg-pathway__step esg-pathway__step--reserved">
+          <span class="esg-pathway__n">04</span>
+          <span class="esg-pathway__name">Green Finance Readiness</span>
+          <span class="esg-pathway__value">Not configured</span>
+          <span class="esg-pathway__note">The readiness model is defined but nothing could be read
+            for this company yet.</span>
+        </div>`;
+      }
+      const calculated = ready.score !== null;
+      const gap = ready.maximum - ready.assessable;
+      // The criterion with the LARGEST unassessable gap, not merely the first
+      // one reporting data_required. An earlier draft named "financial
+      // information" as the chief gap from a hardcoded fallback, and kept
+      // saying so after the company supplied its financials and the real gap
+      // moved to the green project.
+      const biggestGap = [...ready.criteria]
+        .map((c) => ({ name: c.name, missing: c.weight - c.assessable }))
+        .filter((c) => c.missing > 0)
+        .sort((a, b) => b.missing - a.missing)[0] || null;
+      return `<div class="esg-pathway__step${calculated ? '' : ' esg-pathway__step--reserved'}">
+        <span class="esg-pathway__n">04</span>
+        <span class="esg-pathway__name">Green Finance Readiness</span>
+        <span class="esg-pathway__value${calculated ? ' esg-num' : ''}">${calculated
+    ? esc(Math.round(ready.score))
+    : esc(READINESS_WORD[ready.status] || 'Not configured')}</span>
+        <span class="esg-pathway__note">${calculated
+    ? `Every criterion in the model could be assessed. A readiness assessment, never a financing approval.`
+    : `${esc(ready.earned)} of ${esc(ready.assessable)} assessable points earned. ${esc(gap)} of
+       ${esc(ready.maximum)} points cannot be assessed yet${biggestGap ? `, chiefly ${esc(biggestGap.name)}` : ''}.`}</span>
+      </div>`;
+    })();
+
+    // ── 5 · THE PATHWAY ─────────────────────────────────────────────────────
+    // ESG → improvement → green opportunity → finance readiness, as one object.
+    // The last step is RESERVED: there is no readiness engine in this platform,
+    // so a figure here would be invented. It says so.
+    const pathwaySection = `<section class="esg-section">
+      <div class="esg-section__head">
+        <h2 class="esg-section__title">Where this leads</h2>
+        <span class="esg-section__note">A readiness assessment, never a financing approval</span>
+      </div>
+      <div class="esg-pathway">
+        <div class="esg-pathway__step">
+          <span class="esg-pathway__n">01</span>
+          <span class="esg-pathway__name">ESG position</span>
+          <span class="esg-pathway__value esg-num">${overall ? esc(Math.round(overall.score_0_100)) : '—'}</span>
+          <span class="esg-pathway__note">${overall ? esc(`Band ${overall.band_code}`) : 'Not scored yet'}</span>
+        </div>
+        <div class="esg-pathway__step">
+          <span class="esg-pathway__n">02</span>
+          <span class="esg-pathway__name">Improvements identified</span>
+          <span class="esg-pathway__value esg-num">${esc(recs.length)}</span>
+          <span class="esg-pathway__note">${recs.length ? 'Each with the points it is costing you' : 'None yet — the roadmap is written when the score is'}</span>
+        </div>
+        <div class="esg-pathway__step">
+          <span class="esg-pathway__n">03</span>
+          <span class="esg-pathway__name">Green projects defined</span>
+          <span class="esg-pathway__value esg-num">${esc(green.projects)}</span>
+          <span class="esg-pathway__note">${green.projects
+    ? 'A project is what a lender is actually told about'
+    : 'A lender asks about a project, not a score'}</span>
+        </div>
+        ${readinessStep}
+      </div>
+      <div class="esg-row">
+        <a class="btn btn-outline" href="/green-finance">Open Green Finance</a>
+        <a class="btn btn-outline" href="/green-finance/opportunities">AI suggestions</a>
+      </div>
+    </section>`;
+
+    // ── 6 · STRATEGICALLY RESERVED ──────────────────────────────────────────
+    // Named, positioned, and explicitly not operational. No score, no bar, no
+    // percentage — SustNET publishes no methodology mapping company activity to
+    // its pillars, and no certification scheme, so any number here would be
+    // this product inventing one.
+    const reservedSection = `<section class="esg-section">
+      <div class="esg-section__head">
+        <h2 class="esg-section__title">Reserved for what comes next</h2>
+        <span class="esg-section__note">Defined, and deliberately not yet operational</span>
+      </div>
+      <div class="esg-stack">
+        <div class="esg-reserved">
+          <span class="esg-reserved__mark" aria-hidden="true">${icon('journey')}</span>
+          <div>
+            <h3 class="esg-reserved__title">SustNET Impact</h3>
+            <p class="esg-reserved__body">Your company will be able to explore its contribution to
+              SustNET&rsquo;s four mission pillars once the applicable impact methodology is configured.
+              Until one is published, this platform will not claim a contribution level.</p>
+          </div>
+          <span class="esg-reserved__status">Methodology required</span>
+          <div class="esg-pillars-named">
+            ${SUSTNET_PILLARS.map((p) => `<span class="esg-pillar-name">${esc(p)}</span>`).join('')}
+          </div>
+        </div>
+        <div class="esg-reserved">
+          <span class="esg-reserved__mark" aria-hidden="true">${icon('governance')}</span>
+          <div>
+            <h3 class="esg-reserved__title">SustNET ESG Certification</h3>
+            <p class="esg-reserved__body">Certification pathways will become available when the
+              applicable SustNET certification criteria are configured. This platform assesses; it does
+              not certify, and it will not render a certificate or a progress figure toward one.</p>
+          </div>
+          <span class="esg-reserved__status">Certification framework required</span>
+        </div>
+      </div>
+    </section>`;
+
+    const body = `<div class="esg-page">
+      ${hero}
+      ${positionSection}
+      ${attentionSection}
+      ${improvementSection}
+      ${pathwaySection}
+      ${reservedSection}
+      <section class="esg-section">
+        <div class="esg-section__head">
+          <h2 class="esg-section__title">What is deliberately not on this page</h2>
+          <span class="esg-section__note">Absent, and said out loud</span>
+        </div>
+        <div class="esg-card"><div class="esg-card__body">
+          ${emptyState('uninstrumented', {
     title: 'No industry comparison',
-    body: 'Nothing writes a peer cohort and no industry group is recorded, so there is no industry '
-        + 'to compare you against — it is not switched on rather than empty. Even once it exists, a '
-        + 'percentile must never be computable back to one competitor\'s score, so it needs opt-in '
+    body: 'Nothing writes a peer cohort and no industry group is recorded, so there is no industry to '
+        + 'compare you against — it is not switched on rather than empty. Even once it exists, a '
+        + 'percentile must never be computable back to one competitor’s score, so it needs opt-in '
         + 'and a minimum cohort size before it could be shown at all.' })}
-        <div class="table-wrap"><table>
-          <thead><tr><th>Element</th><th>Why it is not here</th></tr></thead>
-          <tbody>
-            <tr><td>Your impact on the four pillars</td>
-                <td>No published methodology maps company activity to a pillar. Claiming a
-                    contribution level would attribute a mapping to an organisation that has
-                    authored none.</td></tr>
-            <tr><td>AI confidence percentage</td>
-                <td>There is deliberately no confidence column. What exists is stronger: a verbatim
-                    quote checked against the document, or the proposal is discarded before you
-                    see it.</td></tr>
-            <tr><td>ESG certification</td>
-                <td>No certification scheme is published. This platform assesses; it does not
-                    certify, and it will not render a downloadable certificate.</td></tr>
-            <tr><td>Expert consultation</td>
-                <td>Not built. A button that opens nothing is worse than an absent feature, because
-                    you would believe the capability exists and stop looking.</td></tr>
-          </tbody>
-        </table></div>
-      </div>
+          <div class="esg-rec"><span class="esg-rec__head">No AI confidence percentage</span>
+            <p class="esg-rec__text">There is deliberately no confidence column. What exists is stronger:
+              a verbatim quote checked against the document, or the proposal is discarded before you see it.</p></div>
+          <div class="esg-rec"><span class="esg-rec__head">No expert consultation</span>
+            <p class="esg-rec__text">Not built. A button that opens nothing is worse than an absent
+              feature, because you would believe the capability exists and stop looking.</p></div>
+        </div></div>
+      </section>
     </div>`;
-
-    // THE ORDER IS THE DESIGN DECISION. With a score, the mock's order stands
-    // and the score takes the wider column. Without one, the rail leads AND
-    // takes .col-7 — it is the only block fully populated on day one, and it
-    // answers both "where am I" and "what next" when nothing else can.
-    const rowB = overall
-      ? `<div class="grid-12 reveal">
-          <div class="col-7">${scorePanel}</div>
-          <div class="col-5">${railPanel}</div>
-        </div>`
-      : `<div class="grid-12 reveal">
-          <div class="col-7">${railPanel}</div>
-          <div class="col-5">${scorePanel}</div>
-        </div>`;
-
-    const rowC = `<div class="grid-12 reveal">
-      <div class="col-4">${reviewPanel}</div>
-      <div class="col-4">${roadmapPanel}</div>
-      <div class="col-4">${greenPanel}</div>
-    </div>`;
-
-    const rowD = `<div class="grid-12 reveal">
-      <div class="col-6">${evidencePanel}</div>
-      <div class="col-6">${carbonPanel}</div>
-      <div class="col-12">${notShown}</div>
-    </div>`;
-
-    const body = overall
-      ? `${statCards}${rowB}${rowC}${rowD}`
-      : `${rowB}${statCards}${rowC}${rowD}`;
 
     res.send(layout('Dashboard', body, req.user, '/dashboard'));
   } catch (err) { next(err); }
 });
 
 // ── Company profile ────────────────────────────────────────────────────────
-router.get('/company', async (req, res, next) => {
+/** The profile form, rendered for both GET and the POST error path.
+ *
+ *  `opts.values` is what the user just typed. On the error path it is rendered
+ *  INSTEAD of the stored row, because re-reading the database would hand back
+ *  the old values and quietly discard the edit the user is trying to correct. */
+/* THE THREE GRIDS, IN ONE PLACE.
+ *
+ * They were written twice — once as <option> labels and, from P8's profile
+ * summary, once more as a display value — and two hand-kept copies of a label
+ * is how a dropdown ends up saying something the summary below it does not.
+ *
+ * It also fixes a live defect the migration surfaced: the Sabah option carried
+ * a hand-written `&amp;` in its label, and opt() escapes what it is given, so
+ * the dropdown rendered the literal text "Sabah &amp; Labuan (SESB)". The
+ * ampersand is a plain character here and esc() is the only thing that touches
+ * it. Order is the order the options are offered in. */
+const GRID_OPTIONS = Object.freeze([
+  ['peninsular', 'Peninsular Malaysia (TNB)'],
+  ['sabah', 'Sabah & Labuan (SESB)'],
+  ['sarawak', 'Sarawak (Sarawak Energy)'],
+]);
+const GRID_LABEL = Object.freeze(Object.fromEntries(GRID_OPTIONS));
+
+async function renderCompanyForm(req, res, next, opts = {}) {
   try {
     const { rows } = await query(
       `SELECT id, name, ssm_number, msic_code, industry_label, employee_count,
               annual_revenue_myr, state, grid_region, esg_maturity
          FROM esg_companies WHERE id = $1`, [companyIdOf(req)]);
-    const c = rows[0] || {};
+    const c = { ...(rows[0] || {}), ...(opts.values || {}) };
+    const err = opts.error || null;
     const opt = (v, cur, label) => `<option value="${esc(v)}"${cur === v ? ' selected' : ''}>${esc(label)}</option>`;
+    // aria-describedby + aria-invalid so the message is announced with the
+    // field rather than only being visible next to it.
+    const fieldError = (name) => (err && err.field === name
+      ? `<span id="${esc(name)}-error" class="field-error" role="alert">${esc(err.message)}</span>` : '');
+    const invalid = (name) => (err && err.field === name
+      ? ` class="input-error" aria-invalid="true" aria-describedby="${esc(name)}-error"` : '');
+
+    const banner = err
+      ? `<div class="alert alert-warning" role="alert"><div class="alert-body">
+           <strong>Your profile was not saved.</strong> ${esc(err.message)}
+           Everything else you entered is still here.</div></div>`
+      : (req.query.saved
+        ? `<div class="alert alert-success" role="status" aria-live="polite">
+             <div class="alert-body"><strong>Profile saved.</strong></div></div>` : '');
+
+    /* ═══════════════════════════════════════════════════════════════════════
+       P8 CLEANUP · THE COMPANY PROFILE, ON THE ESG DESIGN LAYER
+       ─────────────────────────────────────────────────────────────────────
+       The form itself is UNCHANGED — same six fields, same names, same
+       `required`, same POST target, same per-field error wiring and the same
+       aria-describedby / aria-invalid pairing. Nothing about editing, saving,
+       validation, permissions or the API moved. What changed is the page it
+       sits on: a bare `<form class="card">` with a page-length column of
+       inputs, no heading, and no statement of what any of it is for.
+
+       WHAT THE SECOND SECTION IS, AND WHY IT IS NOT A NEW FIELD.
+       esg_companies has three columns — industry_label, state and esg_maturity
+       — that are READ in three places and WRITTEN in none:
+         · GET /api/company returns them (always null)
+         · this route SELECTs them and discarded them
+         · opportunityService puts all three into the AI opportunity prompt,
+           where they render as "Industry: unknown", "State: unknown" and
+           "Self-reported ESG maturity: unknown" on every scan ever run
+       That is the same shape counted-tables-have-writers-test.js exists to
+       catch, one level down: a column with readers and no writer. P8 does NOT
+       add form fields for them — that is a functional change and this is a
+       visual migration — but it stops the page pretending they do not exist.
+       They render as §20's ABSENT facts, naming what consumes them and saying
+       plainly that nothing on this platform records them. See the report. */
+
+    // Every stored column, what it feeds, and whether anything can write it.
+    // `writable: false` is a statement about the PLATFORM, not about this
+    // company — which is why those rows say "nothing records this" rather than
+    // "you have not filled this in".
+    // `text: true` marks a value that is a NAME rather than a figure, so it
+    // renders at body size instead of in 20px display type — see §20's
+    // .esg-fact--text. The three writable figures keep the display treatment.
+    const PROFILE = [
+      { label: 'Company name', value: c.name, text: true, from: 'Shown on every screen and in the top bar', writable: true },
+      { label: 'SSM registration number', value: c.ssm_number, text: true, from: 'Self-declared · unique across the platform', writable: true },
+      { label: 'MSIC code', value: c.msic_code, from: 'Sent to the AI opportunity scan as an industry code', writable: true },
+      { label: 'Employees', value: c.employee_count, from: 'Sent to the AI scan as a band, never as a headcount', writable: true },
+      { label: 'Annual revenue', value: c.annual_revenue_myr === null || c.annual_revenue_myr === undefined
+        ? null : `RM ${Number(c.annual_revenue_myr).toLocaleString('en-MY')}`,
+      from: 'Scored by the finance readiness model', writable: true },
+      { label: 'Electricity grid', value: GRID_LABEL[c.grid_region] || null, text: true,
+        from: 'Required for every Scope 2 calculation', writable: true },
+      { label: 'Industry', value: c.industry_label, text: true,
+        from: 'Read by the AI opportunity scan · nothing on this platform records it, so it reads "unknown" on every scan', writable: false },
+      { label: 'State', value: c.state, text: true,
+        from: 'Read by the AI opportunity scan · nothing on this platform records it', writable: false },
+      { label: 'ESG maturity', value: c.esg_maturity, text: true,
+        from: 'Read by the AI opportunity scan · nothing on this platform records it', writable: false },
+    ];
+    const recorded = PROFILE.filter((f) => f.writable && f.value !== null && f.value !== undefined && f.value !== '').length;
+    const editable = PROFILE.filter((f) => f.writable).length;
+
     res.send(layout('Company Profile', `
-      <form class="card" method="post" action="/company">
-        <div class="form-group"><label for="name">Company name</label>
-          <input id="name" name="name" value="${esc(c.name || '')}" required></div>
-        <div class="form-group"><label for="ssm_number">SSM registration number</label>
-          <input id="ssm_number" name="ssm_number" value="${esc(c.ssm_number || '')}"></div>
-        <div class="form-group"><label for="msic_code">MSIC code</label>
-          <input id="msic_code" name="msic_code" value="${esc(c.msic_code || '')}"></div>
-        <div class="form-group"><label for="employee_count">Number of employees</label>
-          <input id="employee_count" name="employee_count" type="number" min="0" value="${esc(c.employee_count ?? '')}"></div>
-        <div class="form-group"><label for="annual_revenue_myr">Annual revenue (RM)</label>
-          <input id="annual_revenue_myr" name="annual_revenue_myr" type="number" min="0" step="0.01" value="${esc(c.annual_revenue_myr ?? '')}"></div>
-        <div class="form-group"><label for="grid_region">Electricity grid</label>
-          <select id="grid_region" name="grid_region" required>
-            <option value="">Select…</option>
-            ${opt('peninsular', c.grid_region, 'Peninsular Malaysia (TNB)')}
-            ${opt('sabah', c.grid_region, 'Sabah &amp; Labuan (SESB)')}
-            ${opt('sarawak', c.grid_region, 'Sarawak (Sarawak Energy)')}
-          </select>
-          <small class="text-muted">Required for Scope 2. The three grids differ by up to 3.7x, so this cannot be defaulted.</small></div>
-        <button class="btn btn-primary" type="submit">Save</button>
-      </form>`, req.user, '/company'));
-  } catch (err) { next(err); }
-});
+      <div class="esg-page">
+        <header class="esg-page-header esg-enter">
+          <div class="esg-page-header__text">
+            <h2 class="esg-h1">Company profile</h2>
+            <p class="esg-page-header__intro">The facts every other screen is computed against.
+              The electricity grid decides your Scope 2 figure, revenue is scored by the finance
+              readiness model, and the rest is what the AI scan is told about you.</p>
+          </div>
+        </header>
+
+        ${banner}
+
+        <section class="esg-section esg-enter" style="--esg-i:1">
+          <div class="esg-section__head">
+            <h3 class="esg-section__title">Your company details</h3>
+            <span class="esg-section__note"><span class="esg-num">${esc(recorded)} of ${esc(editable)}</span> recorded</span>
+          </div>
+          <form class="esg-card" method="post" action="/company">
+            <div class="esg-card__body">
+              <div class="form-grid">
+                <div class="form-group"><label for="name">Company name</label>
+                  <input id="name" name="name" value="${esc(c.name || '')}" required></div>
+                <div class="form-group"><label for="ssm_number">SSM registration number</label>
+                  <input id="ssm_number" name="ssm_number" value="${esc(c.ssm_number || '')}"${invalid('ssm_number')}>
+                  ${fieldError('ssm_number')}</div>
+                <div class="form-group"><label for="msic_code">MSIC code</label>
+                  <input id="msic_code" name="msic_code" value="${esc(c.msic_code || '')}"></div>
+                <div class="form-group"><label for="employee_count">Number of employees</label>
+                  <input id="employee_count" name="employee_count" type="number" min="0" value="${esc(c.employee_count ?? '')}"></div>
+                <div class="form-group"><label for="annual_revenue_myr">Annual revenue (RM)</label>
+                  <input id="annual_revenue_myr" name="annual_revenue_myr" type="number" min="0" step="0.01" value="${esc(c.annual_revenue_myr ?? '')}"></div>
+                <div class="form-group"><label for="grid_region">Electricity grid</label>
+                  <select id="grid_region" name="grid_region" required>
+                    <option value="">Select…</option>
+                    ${GRID_OPTIONS.map(([v, label]) => opt(v, c.grid_region, label)).join('')}
+                  </select>
+                  <!-- .esg-small, not .text-muted: the master's utility renders at
+                       11.67px, which is under §3's 12px floor and was the smallest
+                       text on this page. -->
+                  <span class="esg-small">Required for Scope 2. The three grids differ by up to
+                    3.7x, so this cannot be defaulted.</span></div>
+              </div>
+            </div>
+            <div class="esg-card__footer">
+              <button class="btn btn-primary" type="submit">Save</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="esg-section esg-enter" style="--esg-i:2">
+          <div class="esg-section__head">
+            <h3 class="esg-section__title">What this profile feeds</h3>
+            <span class="esg-section__note">Every value, and what reads it</span>
+          </div>
+          <div class="esg-facts">
+            ${PROFILE.map((f) => {
+    const missing = f.value === null || f.value === undefined || f.value === '';
+    return `<div class="esg-fact${missing ? ' esg-fact--absent' : ''}${f.text ? ' esg-fact--text' : ''}">
+              <span class="esg-fact__label">${esc(f.label)}</span>
+              <span class="esg-fact__value">${missing
+    ? (f.writable ? 'Not recorded yet' : 'Nothing records this')
+    : esc(f.value)}</span>
+              <span class="esg-fact__from">${esc(f.from)}</span>
+            </div>`;
+  }).join('')}
+          </div>
+          <p class="esg-small esg-prose">Industry, state and ESG maturity are read by the AI
+            opportunity scan and there is no field on this platform that writes them, so the scan
+            is told &ldquo;unknown&rdquo; for all three every time it runs. That is a gap in the
+            product, not something you have failed to fill in.</p>
+        </section>
+      </div>`, req.user, '/company'));
+  } catch (e) { next(e); }
+}
+
+router.get('/company', (req, res, next) => renderCompanyForm(req, res, next));
+
+// A UNIQUE violation here is a PERSON MAKING A NORMAL MISTAKE, not a fault.
+// It was reaching the generic error handler, which replaces the whole page —
+// so the user lost every value they had typed, was told only "Something went
+// wrong", and was given no route back and no clue which field was at fault.
+// (In development that handler also printed the raw Postgres text, constraint
+// name included; production already substituted a generic sentence, so the
+// disclosure was dev-only. The lost work was not.)
+//
+// Mapped by CONSTRAINT NAME rather than by parsing the message: the message is
+// English prose Postgres is free to reword, the constraint name is schema.
+const COMPANY_FIELD_ERRORS = {
+  uq_esg_companies_ssm: {
+    field: 'ssm_number',
+    message: 'This SSM registration number is already registered to another company. '
+           + 'Check the number, or contact us if you believe this is your company.',
+  },
+};
 
 router.post('/company', async (req, res, next) => {
+  const b = req.body;
   try {
-    const b = req.body;
     const grid = ['peninsular', 'sabah', 'sarawak'].includes(b.grid_region) ? b.grid_region : null;
     await query(
       `UPDATE esg_companies SET name=$2, ssm_number=NULLIF($3,''), msic_code=NULLIF($4,''),
@@ -699,8 +924,15 @@ router.post('/company', async (req, res, next) => {
         WHERE id=$1`,
       [companyIdOf(req), String(b.name || '').trim(), String(b.ssm_number || '').trim(),
        String(b.msic_code || '').trim(), num(b.employee_count), num(b.annual_revenue_myr), grid]);
-    res.redirect('/company');
-  } catch (err) { next(err); }
+    res.redirect('/company?saved=1');
+  } catch (err) {
+    // 23505 = unique_violation. Anything else is a genuine fault and still goes
+    // to the error handler — this catch narrows one known case, it does not
+    // swallow the class.
+    const mapped = err && err.code === '23505' && COMPANY_FIELD_ERRORS[err.constraint];
+    if (!mapped) return next(err);
+    return renderCompanyForm(req, res, next, { error: mapped, values: b });
+  }
 });
 
 // ── Assessment ─────────────────────────────────────────────────────────────
@@ -806,13 +1038,27 @@ router.get('/assessment/:id', async (req, res, next) => {
     if (!a[0]) return res.status(404).send(layout('Not found',
       emptyState('zero', { title: 'Assessment not found', body: 'It may belong to another company.' }), req.user, '/assessment'));
 
-    const [{ rows: inds }, { rows: resp }] = await Promise.all([
+    const [{ rows: inds }, { rows: resp }, { rows: props }] = await Promise.all([
       query(`SELECT id, code, pillar, tier, question_en, guidance_en, response_type, unit,
                     weight, allows_na, mapping_status, line_items
                FROM esg_indicators WHERE framework_id = $1 AND is_active ORDER BY pillar, sort_order`,
             [a[0].framework_id]),
-      query(`SELECT indicator_id, option_code, value_numeric, value_text, value_json, is_na, evidence_tier
+      // document_id added in P6: it is the only marker distinguishing an answer
+      // a person accepted from a document from one they typed, and the page now
+      // says which is which.
+      query(`SELECT indicator_id, option_code, value_numeric, value_text, value_json, is_na,
+                    evidence_tier, document_id
                FROM esg_responses WHERE assessment_id = $1`, [req.params.id]),
+      // What the platform proposed for THIS assessment, and what happened to it.
+      // Joined to esg_documents for the filename and, load-bearing, for the
+      // company predicate — an extraction row carries no company_id of its own.
+      query(`SELECT e.id, e.indicator_id, e.proposed_option_code, e.evidence_quote, e.page_no,
+                    e.quote_verified, e.status, e.model, e.reviewed_at,
+                    e.document_id, d.filename
+               FROM esg_document_extractions e
+               JOIN esg_documents d ON d.id = e.document_id
+              WHERE e.assessment_id = $1 AND d.company_id = $2 AND e.status <> 'auto_rejected'
+              ORDER BY e.created_at`, [req.params.id, cid]),
     ]);
     const byInd = Object.fromEntries(resp.map((r) => [r.indicator_id, r]));
 
@@ -898,46 +1144,267 @@ router.get('/assessment/:id', async (req, res, next) => {
       return '';
     };
 
-    const section = (p, title) => {
+    /* ═══════════════════════════════════════════════════════════════════════
+       THE ASSESSMENT AS A VERIFICATION WORKFLOW                         (P6)
+       ─────────────────────────────────────────────────────────────────────
+       AI PROPOSES · A PERSON VERIFIES, and the page makes both halves visible.
+
+       Every state below is DERIVED from a real shape in the database. Nothing
+       is stored as a status field, so a badge cannot drift from the fact:
+
+         missing      no esg_responses row for this indicator
+         na           the row has is_na
+         review       a pending esg_document_extractions row exists
+         documented   the row carries a document_id (only acceptProposal sets
+                      one) or evidence_tier='documented'
+         verified     evidence_tier='verified' — third-party, above documented
+         declared     answered with no evidence attached
+         dismissed    every proposal for it was rejected by a person
+
+       THERE IS NO CONFIDENCE PERCENTAGE, and that is deliberate rather than
+       missing. esg_document_extractions carries no numeric column at all —
+       test/layer2-test.js asserts it does not exist, because a numeric column
+       is the first path by which a model-authored figure could reach a company.
+       What the extractor produces instead is STRONGER than a confidence score:
+       `quote_verified` records whether the quoted sentence was actually located
+       in the document's own extracted text, and acceptProposal REFUSES a
+       proposal whose quote was never found. A percentage would be the model
+       marking its own homework; this is the platform checking it.
+       ═════════════════════════════════════════════════════════════════════ */
+
+    const proposalsByIndicator = new Map();
+    for (const x of props) {
+      if (!proposalsByIndicator.has(x.indicator_id)) proposalsByIndicator.set(x.indicator_id, []);
+      proposalsByIndicator.get(x.indicator_id).push(x);
+    }
+    const pendingOf = (id) => (proposalsByIndicator.get(id) || []).filter((x) => x.status === 'pending');
+    const reviewedOf = (id) => (proposalsByIndicator.get(id) || []).filter((x) => x.status === 'accepted' || x.status === 'rejected');
+
+    const isAnswered = (r) => Boolean(r && (r.option_code != null || r.value_numeric != null
+      || (r.value_text != null && r.value_text !== '') || r.is_na
+      || (r.value_json && Object.keys(r.value_json).length)));
+
+    function answerState(i) {
+      const r = byInd[i.id];
+      if (pendingOf(i.id).length) return 'review';
+      if (!isAnswered(r)) {
+        return (proposalsByIndicator.get(i.id) || []).some((x) => x.status === 'rejected')
+          ? 'dismissed' : 'missing';
+      }
+      if (r.is_na) return 'na';
+      if (r.evidence_tier === 'verified') return 'verified';
+      if (r.document_id || r.evidence_tier === 'documented') return 'documented';
+      return 'declared';
+    }
+
+    const STATE_WORD = Object.freeze({
+      review:     'Needs your review',
+      missing:    'Not answered',
+      dismissed:  'Proposal dismissed',
+      na:         'Not applicable',
+      verified:   'Third-party verified',
+      documented: 'Verified from a document',
+      declared:   'Self-declared',
+    });
+
+    const stateChip = (state) => `<span class="esg-astate esg-astate--${esc(state)}">${esc(STATE_WORD[state])}</span>`;
+
+    // Human-readable option codes. The stored code IS the answer; this only
+    // decides how it reads to a person, and an unknown code shows itself rather
+    // than being dropped.
+    const OPTION_WORD = Object.freeze({
+      yes: 'Yes', no: 'No', partial: 'Partially',
+      0: 'Level 0', 1: 'Level 1', 2: 'Level 2', 3: 'Level 3', 4: 'Level 4',
+    });
+    const optionWord = (code) => (code == null ? '—' : (OPTION_WORD[code] !== undefined ? OPTION_WORD[code] : code));
+
+    /** One proposal, inside the question it answers.
+     *
+     *  The accept and dismiss controls are `form=` references to forms rendered
+     *  OUTSIDE the assessment form at the end of the page. Nesting a form inside
+     *  a form is invalid HTML and the inner one is dropped by the parser, so the
+     *  buttons would have silently submitted the whole assessment instead. */
+    const proposalBlock = (i, x) => `
+      <div class="esg-proposal">
+        <div class="esg-proposal__head">
+          <span class="esg-proposal__label">The platform proposes</span>
+          <span class="esg-proposal__answer">${esc(optionWord(x.proposed_option_code))}</span>
+          ${stateChip('review')}
+        </div>
+        <blockquote class="esg-quote">${esc(x.evidence_quote)}
+          <cite class="esg-quote__cite">${esc(x.filename)}${x.page_no ? `, page ${esc(x.page_no)}` : ''}</cite>
+        </blockquote>
+        <details class="esg-evidence">
+          <summary>Why it proposed this</summary>
+          <div class="esg-evidence__body">
+            <span class="esg-evidence__k">Source</span>
+            <span class="esg-evidence__v"><a href="/documents/${esc(x.document_id)}">${esc(x.filename)}</a>${
+  x.page_no ? `, page ${esc(x.page_no)}` : ''}</span>
+            <span class="esg-evidence__k">Quote</span>
+            <span class="esg-evidence__v">${x.quote_verified
+    ? 'Located in this document&rsquo;s own extracted text. A proposal whose quote cannot be found is discarded before you see it, so there is no confidence percentage here — the quote either checks out or the proposal does not exist.'
+    : 'NOT located in the document. This proposal cannot be accepted.'}</span>
+            <span class="esg-evidence__k">Proposed by</span>
+            <span class="esg-evidence__v">${esc(x.model || 'the extraction service')} — a proposal only. Accepting it is what writes your answer, and it is recorded against your name.</span>
+            <span class="esg-evidence__k">On accept</span>
+            <span class="esg-evidence__v">The answer becomes <strong>${esc(optionWord(x.proposed_option_code))}</strong> at evidence tier <strong>documented</strong>, which earns 85% of the available points instead of 60%.</span>
+          </div>
+        </details>
+        <div class="esg-proposal__actions">
+          ${x.quote_verified
+    ? `<button class="btn btn-sm btn-primary" type="submit" form="accept-${esc(x.id)}">Accept this answer</button>`
+    : '<span class="esg-astate esg-astate--dismissed">Quote not found — cannot be accepted</span>'}
+          <button class="btn btn-sm btn-outline" type="submit" form="reject-${esc(x.id)}">Dismiss</button>
+        </div>
+      </div>`;
+
+    // The out-of-form review actions, one pair per pending proposal.
+    const reviewForms = props.filter((x) => x.status === 'pending').map((x) => `
+      <form id="accept-${esc(x.id)}" method="post" action="/extractions/${esc(x.id)}/accept" hidden>
+        <input type="hidden" name="next" value="/assessment/${esc(a[0].id)}">
+      </form>
+      <form id="reject-${esc(x.id)}" method="post" action="/extractions/${esc(x.id)}/reject" hidden>
+        <input type="hidden" name="next" value="/assessment/${esc(a[0].id)}">
+        <input type="hidden" name="reason" value="Dismissed from the assessment">
+      </form>`).join('');
+
+    const PILLAR_TITLE = Object.freeze({ E: 'Environmental', S: 'Social', G: 'Governance' });
+
+    const section = (p) => {
       const list = inds.filter((i) => i.pillar === p);
       if (!list.length) return '';
-      return `<div class="card" style="margin-bottom:16px"><h3>${esc(title)}</h3>
+      const states = list.map(answerState);
+      const n = (s) => states.filter((x) => x === s).length;
+      const evidenced = n('documented') + n('verified');
+      const answered = list.length - n('missing') - n('review') - n('dismissed');
+      const pct = list.length ? Math.round((answered / list.length) * 100) : 0;
+
+      return `<section class="esg-stack-tight" style="margin-bottom:24px">
+        <div class="esg-pillar-head">
+          <h3 class="esg-pillar-head__name">${esc(PILLAR_TITLE[p] || p)}</h3>
+          <div class="esg-pillar-head__states">
+            <span class="esg-count esg-count--verified"><span class="esg-count__n">${esc(evidenced)}</span>
+              <span class="esg-count__label">evidenced</span></span>
+            ${n('review') ? `<span class="esg-count esg-count--review"><span class="esg-count__n">${esc(n('review'))}</span>
+              <span class="esg-count__label">need review</span></span>` : ''}
+            ${n('missing') ? `<span class="esg-count esg-count--missing"><span class="esg-count__n">${esc(n('missing'))}</span>
+              <span class="esg-count__label">not answered</span></span>` : ''}
+            ${n('na') ? `<span class="esg-count esg-count--na"><span class="esg-count__n">${esc(n('na'))}</span>
+              <span class="esg-count__label">not applicable</span></span>` : ''}
+          </div>
+          <span class="esg-pillar-head__bar esg-progress" role="img"
+                aria-label="${esc(answered)} of ${esc(list.length)} answered">
+            <span class="esg-progress__fill" style="width:${esc(pct)}%"></span></span>
+        </div>
         ${list.map((i) => {
-          const r = byInd[i.id] || {};
-          return `<div class="form-group" style="border-top:1px solid var(--border);padding-top:14px">
-            <label for="o_${esc(i.id)}"><strong>${esc(i.code)}</strong> ${esc(i.question_en)}
-              ${mappingBadge(i.mapping_status)}
-            </label>
-            ${i.guidance_en ? `<small class="text-muted">${esc(i.guidance_en)}</small>` : ''}
-            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
-              <div style="flex:2;min-width:180px">${field(i)}</div>
-              <div style="flex:1;min-width:150px">
-                <select name="e_${esc(i.id)}" aria-label="Evidence level">
-                  <option value="self_declared"${r.evidence_tier === 'self_declared' || !r.evidence_tier ? ' selected' : ''}>Self-declared</option>
-                  <option value="documented"${r.evidence_tier === 'documented' ? ' selected' : ''}>Documented</option>
-                  <option value="verified"${r.evidence_tier === 'verified' ? ' selected' : ''}>Third-party verified</option>
-                </select></div>
-              ${i.allows_na ? `<label style="display:flex;align-items:center;gap:6px;font-size:13px">
-                <input type="checkbox" name="na_${esc(i.id)}"${r.is_na ? ' checked' : ''}> Not applicable</label>` : ''}
-            </div></div>`;
-        }).join('')}</div>`;
+    const r = byInd[i.id] || {};
+    const state = answerState(i);
+    const pend = pendingOf(i.id);
+    const done = reviewedOf(i.id);
+    return `<div class="esg-q${state === 'review' ? ' esg-q--review' : ''}" id="q-${esc(i.code)}">
+          <div class="esg-q__head">
+            <span class="esg-q__code">${esc(i.code)}</span>
+            <span class="esg-q__text">${esc(i.question_en)}</span>
+            ${stateChip(state)}
+            ${i.mapping_status ? `<span class="esg-q__map" title="${esc({
+    draft: 'Platform-authored wording, not yet reconciled against the official framework document',
+    official: 'Verbatim from the publisher&rsquo;s own document',
+    reconciled: 'Platform-authored, checked against the official framework document',
+  }[i.mapping_status] || i.mapping_status)}">${esc(i.mapping_status)}</span>` : ''}
+          </div>
+          ${i.guidance_en ? `<p class="esg-q__guide">${esc(i.guidance_en)}</p>` : ''}
+          ${pend.map((x) => proposalBlock(i, x)).join('')}
+          <div class="esg-q__controls">
+            <div class="esg-q__control">
+              <label for="o_${esc(i.id)}">Your answer</label>
+              ${field(i)}
+            </div>
+            <div class="esg-q__control">
+              <label for="e_${esc(i.id)}">Evidence level</label>
+              <select id="e_${esc(i.id)}" name="e_${esc(i.id)}">
+                <option value="self_declared"${r.evidence_tier === 'self_declared' || !r.evidence_tier ? ' selected' : ''}>Self-declared</option>
+                <option value="documented"${r.evidence_tier === 'documented' ? ' selected' : ''}>Documented</option>
+                <option value="verified"${r.evidence_tier === 'verified' ? ' selected' : ''}>Third-party verified</option>
+              </select>
+            </div>
+            ${i.allows_na ? `<label class="esg-q__na">
+              <input type="checkbox" name="na_${esc(i.id)}"${r.is_na ? ' checked' : ''}> Not applicable</label>` : '<span></span>'}
+          </div>
+          ${done.length ? `<details class="esg-evidence">
+            <summary>${esc(done.length)} proposal${done.length === 1 ? '' : 's'} already reviewed</summary>
+            <div class="esg-evidence__body">
+              ${done.map((x) => `<span class="esg-evidence__k">${esc(x.status === 'accepted' ? 'Accepted' : 'Dismissed')}</span>
+                <span class="esg-evidence__v">${esc(optionWord(x.proposed_option_code))} — from ${esc(x.filename)}${
+  x.page_no ? `, page ${esc(x.page_no)}` : ''}${x.reviewed_at ? `, reviewed ${esc(String(x.reviewed_at).slice(0, 10))}` : ''}</span>`).join('')}
+            </div>
+          </details>` : ''}
+        </div>`;
+  }).join('')}
+      </section>`;
     };
 
-    res.send(layout(`Assessment ${a[0].reporting_year}`, `
-      <div class="ai-insight" style="margin-bottom:16px">
-        <strong>How this is scored.</strong> Answers marked <em>self-declared</em> earn 60% of the
-        available points, <em>documented</em> 85%, <em>third-party verified</em> 100%. That is
-        deliberate: a screening that awards full marks for unevidenced self-assessment is worth
-        nothing to the bank or buyer reading it. Attaching documents you already hold is the
-        cheapest way to raise your score.
-      </div>
-      <form method="post" action="/assessment/${esc(a[0].id)}">
-        ${section('E', 'Environmental')}${section('S', 'Social')}${section('G', 'Governance')}
-        <div style="display:flex;gap:12px">
-          <button class="btn btn-primary" type="submit" name="action" value="save">Save</button>
-          <button class="btn btn-primary" type="submit" name="action" value="submit">Save &amp; calculate score</button>
+    // ── The queue, stated once at the top ───────────────────────────────────
+    const allStates = inds.map(answerState);
+    const totalReview = allStates.filter((s) => s === 'review').length;
+    const totalMissing = allStates.filter((s) => s === 'missing').length;
+    const totalEvidenced = allStates.filter((s) => s === 'documented' || s === 'verified').length;
+    const firstReview = inds.find((i) => answerState(i) === 'review');
+
+    const queue = totalReview > 0 ? `
+      <div class="esg-next">
+        <span class="esg-next__label">Review queue</span>
+        <h2 class="esg-next__title">${esc(totalReview)} answer${totalReview === 1 ? '' : 's'} the platform prepared for you</h2>
+        <p class="esg-next__why">Each one quotes the sentence it came from, in a document you
+          uploaded. Nothing it read has changed your assessment — accepting is what does that, and
+          the answer is then recorded against your name.</p>
+        <div class="esg-next__actions">
+          <a class="btn btn-primary" href="#q-${esc(firstReview.code)}">Go to the first one</a>
+          <a class="btn btn-outline" href="/documents">See the documents they came from</a>
         </div>
-      </form>`, req.user, '/assessment'));
+      </div>` : `
+      <div class="esg-ai esg-ai--${props.length ? 'done' : 'empty'}">
+        <span class="esg-ai__dot" style="color:var(--${props.length ? 'esg-done' : 'esg-blocked'})" aria-hidden="true"></span>
+        <div class="esg-ai__body">
+          <p class="esg-ai__title">${props.length
+    ? 'Every proposal has been reviewed'
+    : 'Nothing has been proposed for this assessment'}</p>
+          <p class="esg-ai__detail">${props.length
+    ? `${esc(props.length)} were put to you and none is outstanding. That is a measured result — the queue is empty rather than switched off.`
+    : 'The platform reads documents you upload and proposes answers with the sentence it found them in. It has not proposed anything for this assessment yet.'}</p>
+        </div>
+      </div>`;
+
+    res.send(layout(`Assessment ${a[0].reporting_year}`, `
+      <div class="esg-page">
+        <div class="esg-section__head">
+          <h2 class="esg-section__title">${esc(frameworkLabel(a[0].framework_code, a[0].framework_version))}</h2>
+          <span class="esg-section__note">${esc(totalEvidenced)} of ${esc(inds.length)} evidenced${
+  totalMissing ? ` · ${esc(totalMissing)} not answered` : ''}</span>
+        </div>
+
+        ${queue}
+
+        <div class="esg-ai esg-ai--idle">
+          <span class="esg-ai__dot" style="color:var(--border-2)" aria-hidden="true"></span>
+          <div class="esg-ai__body">
+            <p class="esg-ai__title">How this is scored</p>
+            <p class="esg-ai__detail">An answer marked <strong>self-declared</strong> earns 60% of the
+              available points, <strong>documented</strong> 85%, <strong>third-party verified</strong> 100%.
+              A screening that awards full marks for unevidenced self-assessment is worth nothing to
+              the bank or buyer reading it, so attaching a document you already hold is the cheapest
+              way to raise your score.</p>
+          </div>
+        </div>
+
+        <form method="post" action="/assessment/${esc(a[0].id)}">
+          ${section('E')}${section('S')}${section('G')}
+          <div class="esg-row">
+            <button class="btn btn-primary" type="submit" name="action" value="submit">Save and calculate the score</button>
+            <button class="btn btn-outline" type="submit" name="action" value="save">Save without scoring</button>
+          </div>
+        </form>
+        ${reviewForms}
+      </div>`, req.user, '/assessment'));
   } catch (err) { next(err); }
 });
 
@@ -1045,42 +1512,93 @@ router.get('/carbon', async (req, res, next) => {
     ]);
     const grid = co[0] && co[0].grid_region;
 
-    const table = entries.length ? `<table><thead><tr>
-      <th>Period</th><th>Scope</th><th>Activity</th><th>Factor</th><th>kg CO2e</th></tr></thead><tbody>
-      ${entries.map((e) => `<tr${e.is_provisional ? ' class="provisional"' : ''}>
-        <td>${esc(e.period_start)} → ${esc(e.period_end)}</td>
-        <td>Scope ${esc(e.scope)}</td>
-        <td>${esc(e.activity_amount)} ${esc(e.activity_unit)}</td>
-        <td><small>${esc(e.factor_value_used)} · v${esc(e.factor_version_used)}
-          ${e.is_provisional ? '<span class="badge badge-amber">provisional</span>' : ''}</small></td>
-        <td><strong>${esc(e.kg_co2e)}</strong></td></tr>`).join('')}
-      </tbody></table>` : emptyState('instrumented_but_empty', { title: 'No carbon entries yet' });
+    /* P8 · ONTO THE DESIGN LAYER, AND OFF .table-wrap.
+       This is the table D1 was written about: at 390px it measured 464px
+       inside a 354px box, so the kg CO2e column — the value the page exists to
+       show — sat off-screen with no gesture that could reveal it. §5's
+       .esg-table-scroll is the component that fixes it, and this page was
+       still not using it. The 🤖 on the import button and the four inline
+       `style=` attributes went at the same time. */
+    const table = entries.length ? `
+      <div class="esg-table-scroll" tabindex="0" role="region" aria-label="Carbon entries">
+        <table class="esg-table esg-table--stack">
+          <thead><tr>
+            <th>Period</th><th>Scope</th><th>Activity</th><th>Factor</th><th class="esg-td-num">kg CO2e</th>
+          </tr></thead>
+          <tbody>${entries.map((e) => `<tr${e.is_provisional ? ' class="esg-row-caution"' : ''}>
+            <td data-label="Period" class="esg-td-nowrap">${esc(dayOf(e.period_start))} → ${esc(dayOf(e.period_end))}</td>
+            <td data-label="Scope">Scope ${esc(e.scope)}</td>
+            <td data-label="Activity" class="esg-num">${esc(e.activity_amount)} ${esc(e.activity_unit)}</td>
+            <td data-label="Factor"><span class="esg-small esg-num">${esc(e.factor_value_used)} · v${esc(e.factor_version_used)}</span>${
+  e.is_provisional ? ' <span class="esg-astate esg-astate--missing">Provisional</span>' : ''}</td>
+            <td data-label="kg CO2e" class="esg-td-num"><strong>${esc(e.kg_co2e)}</strong></td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>`
+      : emptyState('instrumented_but_empty', {
+        title: 'No carbon entries yet',
+        body: 'The engine is switched on and working — nobody has recorded an activity for it to '
+            + 'compute against.' });
 
     res.send(layout('Carbon', `
-      ${!grid ? `<div class="ai-insight"><strong>Set your electricity grid first.</strong>
-        Scope 2 cannot be calculated without it — Peninsular and Sarawak factors differ by 3.7x.
-        <a href="/company">Company profile →</a></div>` : `
-      <div class="card"><h3>Add an entry</h3>
-        <a href="/carbon/import" class="btn btn-outline" style="float:right">🤖 Bulk Import (Excel)</a>
-        <form method="post" action="/carbon" style="display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
-          <div class="form-group" style="margin:0"><label for="kind">Type</label>
-            <select id="kind" name="kind">
-              <option value="electricity">Electricity (Scope 2)</option>
-              <option value="FUEL_DIESEL">Diesel (Scope 1)</option>
-              <option value="FUEL_PETROL">Petrol (Scope 1)</option>
-            </select></div>
-          <div class="form-group" style="margin:0"><label for="amount">Amount</label>
-            <input id="amount" name="amount" type="number" step="any" min="0" required></div>
-          <div class="form-group" style="margin:0"><label for="period_start">From</label>
-            <input id="period_start" name="period_start" type="date" required></div>
-          <div class="form-group" style="margin:0"><label for="period_end">To</label>
-            <input id="period_end" name="period_end" type="date" required></div>
-          <div style="display:flex;align-items:flex-end"><button class="btn btn-primary" type="submit">Add</button></div>
-        </form>
-        <small class="text-muted">Diesel and petrol factors are placeholders pending a sourced Malaysian
-        figure. Entries using them are stored and shown, and marked provisional — never presented as verified.</small>
-      </div>`}
-      <div class="table-wrap" style="margin-top:16px">${table}</div>`, req.user, '/carbon'));
+      <div class="esg-page">
+        <header class="esg-page-header esg-enter">
+          <div class="esg-page-header__text">
+            <h2 class="esg-h1">Carbon</h2>
+            <p class="esg-page-header__intro">Every figure here is your own activity multiplied by a
+              stamped emission factor. Nothing is estimated, and an entry whose factor is not yet
+              sourced says so on its own row.</p>
+          </div>
+          ${grid ? `<div class="esg-page-header__action">
+            <a class="btn btn-outline" href="/carbon/import">Bulk import from Excel</a>
+          </div>` : ''}
+        </header>
+
+        ${!grid ? `<div class="esg-ai esg-ai--idle">
+          <span class="esg-ai__dot" style="color:var(--esg-caution)" aria-hidden="true"></span>
+          <div class="esg-ai__body">
+            <p class="esg-ai__title">Set your electricity grid first</p>
+            <p class="esg-ai__detail">Scope 2 cannot be calculated without it — Malaysia has three
+              grids and their factors differ by a factor of 3.7.
+              <a href="/company">Open the company profile</a>.</p>
+          </div></div>` : `
+        <section class="esg-card esg-enter" style="--esg-i:1">
+          <div class="esg-card__header">
+            <h3 class="esg-card__title">Add an entry</h3>
+            <span class="esg-card__meta">Activity in, kg CO2e out</span>
+          </div>
+          <div class="esg-card__body esg-stack">
+            <form method="post" action="/carbon" class="esg-row esg-row-controls">
+              <div class="form-group"><label for="kind">Type</label>
+                <select id="kind" name="kind">
+                  <option value="electricity">Electricity (Scope 2)</option>
+                  <option value="FUEL_DIESEL">Diesel (Scope 1)</option>
+                  <option value="FUEL_PETROL">Petrol (Scope 1)</option>
+                </select></div>
+              <div class="form-group"><label for="amount">Amount</label>
+                <input id="amount" name="amount" type="number" step="any" min="0" required></div>
+              <div class="form-group"><label for="period_start">From</label>
+                <input id="period_start" name="period_start" type="date" required></div>
+              <div class="form-group"><label for="period_end">To</label>
+                <input id="period_end" name="period_end" type="date" required></div>
+              <button class="btn btn-primary" type="submit">Add</button>
+            </form>
+            <p class="esg-small esg-prose">Diesel and petrol factors are placeholders pending a
+              sourced Malaysian figure. Entries using them are stored and shown, and marked
+              provisional — never presented as verified.</p>
+          </div>
+        </section>`}
+
+        <section class="esg-section esg-enter" style="--esg-i:2">
+          <div class="esg-section__head">
+            <h3 class="esg-section__title">Recorded activity</h3>
+            <span class="esg-section__note">${entries.length
+    ? `${esc(entries.length)} entr${entries.length === 1 ? 'y' : 'ies'}, most recent first`
+    : 'Nothing recorded yet'}</span>
+          </div>
+          ${table}
+        </section>
+      </div>`, req.user, '/carbon'));
   } catch (err) { next(err); }
 });
 
@@ -1125,150 +1643,280 @@ router.get('/governance', async (req, res, next) => {
           ORDER BY name LIMIT 50`, [`%${q}%`]);
       results = rows;
     }
+    /* P8 CLEANUP · THE SEARCH AND ITS RESULTS, ON THE ESG LAYER.
+       The form was a three-property inline `style=` flex row and the results a
+       bare <table>. The table is the one that mattered: it is five columns of
+       registry metadata and it was rendering with no scroll container at all,
+       so on a phone it was the same silent-clipping shape as §5's D1. */
     const body = status.state === 'populated'
-      ? `<form method="get" style="display:flex;gap:10px;margin-bottom:16px;align-items:flex-end">
-           <div class="form-group" style="margin:0;flex:1">
+      ? `<form method="get" class="esg-row esg-row-controls">
+           <div class="form-group">
              <label for="verra-q">Search the registry mirror</label>
              <input id="verra-q" name="q" value="${esc(q)}" placeholder="Project, country or methodology">
            </div>
-           <button class="btn btn-primary">Search</button></form>
-         ${q ? (results.length ? `<table><thead><tr><th>ID</th><th>Name</th><th>Country</th><th>Methodology</th><th>Status</th></tr></thead><tbody>
-            ${results.map((r) => `<tr><td>${esc(r.verra_project_id)}</td><td>${esc(r.name)}</td>
-              <td>${esc(r.country)}</td><td>${esc(r.methodology_code)}</td><td>${esc(r.status)}</td></tr>`).join('')}
-            </tbody></table>
-            <small class="text-sm">Records mirrored from a public carbon crediting registry. Metadata and links only.</small>`
-          : emptyState('zero', { title: 'No matches', body: `Nothing in the mirror matches "${q}".` })) : ''}`
+           <button class="btn btn-primary">Search</button>
+         </form>
+         ${q ? (results.length ? `
+            <div class="esg-table-scroll" tabindex="0" role="region" aria-label="Registry mirror search results">
+              <table class="esg-table esg-table--stack">
+                <thead><tr><th>ID</th><th>Name</th><th>Country</th><th>Methodology</th><th>Status</th></tr></thead>
+                <tbody>${results.map((r) => `<tr>
+                  <td data-label="ID" class="esg-td-nowrap">${esc(r.verra_project_id)}</td>
+                  <td data-label="Name">${esc(r.name)}</td>
+                  <td data-label="Country">${esc(r.country)}</td>
+                  <td data-label="Methodology" class="esg-td-nowrap">${esc(r.methodology_code)}</td>
+                  <td data-label="Status">${esc(r.status)}</td>
+                </tr>`).join('')}</tbody>
+              </table>
+            </div>
+            <p class="esg-small esg-prose">Records mirrored from a public carbon crediting registry.
+              Metadata and links only.</p>`
+    : emptyState('zero', { title: 'No matches', body: `Nothing in the mirror matches "${q}".` })) : ''}`
       : emptyState(status.state, {
-          title: status.state === 'uninstrumented' ? 'Registry mirror is not switched on' : 'Registry mirror is empty',
-          body: status.state === 'uninstrumented'
-            ? 'Registry ingest has not been configured, so nothing writes to this table yet. See the deployment notes for the environment variables it needs.'
-            : 'Ingest is configured and working — the sync has not run yet or returned no records.' });
+        title: status.state === 'uninstrumented' ? 'Registry mirror is not switched on' : 'Registry mirror is empty',
+        body: status.state === 'uninstrumented'
+          ? 'Registry ingest has not been configured, so nothing writes to this table yet. See the deployment notes for the environment variables it needs.'
+          : 'Ingest is configured and working — the sync has not run yet or returned no records.' });
+
+    /* ═══════════════════════════════════════════════════════════════════════
+       P8 CLEANUP · GOVERNANCE, ON THE ESG DESIGN LAYER
+       ─────────────────────────────────────────────────────────────────────
+       This was the last page still built entirely from master components, and
+       it was not a cosmetic gap — four measured defects, all of which the ESG
+       layer already had the component to prevent:
+
+       1. SIX PADDING-COLLAPSED CARDS. `.card` fails OPEN (§4's D5): it carries
+          no padding and expects `.card-body` to supply it. Not one card here
+          had one, so every one measured `padding: 0px` and its text sat on the
+          border. .esg-card fails CLOSED — a bare one is padded.
+       2. EVERY BULLET DRAWN OUTSIDE ITS BOX. The master narrows `ul` to
+          `margin: 0; padding: 0` and leaves `list-style: disc`, so a disc
+          marker is painted outside the content box — in the card's padding, or
+          clipped by it. Five lists on this page. §23 fixes it in .esg-prose.
+       3. PROSE AT 1140px, about 145 characters a line. `p` has
+          `max-width: none`; .esg-prose caps at --esg-measure.
+       4. THE STAGE TABLE CLIPPED AT 390px. Measured 419px inside a 390px
+          viewport, inside the master's `.table-wrap { overflow: hidden }` —
+          and the column lost was "Status here", which is the only column the
+          table exists to show. That is D1's data-loss shape exactly.
+
+       NOTHING THIS PAGE SAYS HAS CHANGED. Every sentence, every list item and
+       every stage is the wording it had; what changed is the container it sits
+       in. The one addition is the third registry fact, and it publishes a value
+       the service already computes and this page was discarding — see below.
+       ═══════════════════════════════════════════════════════════════════════ */
+
+    // The stage ladder is DATA now rather than five hand-written rows, because
+    // the status word and the state class have to agree and two of them
+    // disagreeing is exactly the kind of thing nobody re-reads.
+    const STAGES = [
+      { n: 1, what: 'Self-assessment against the framework', who: 'The company', ours: true },
+      { n: 2, what: 'Evidence attached and reviewed by a person', who: 'The company', ours: true },
+      { n: 3, what: 'Independent verification of the disclosures', who: 'An external assurance provider', ours: false },
+      { n: 4, what: 'Certification against a published standard', who: 'A certification body', ours: false },
+      { n: 5, what: 'Investor or customer due diligence', who: 'The counterparty', ours: false },
+    ];
 
     res.send(layout('Governance & Recognition', `
-      <div class="card">
-        <h3 class="card-title">Governance &amp; Recognition</h3>
-        <p><strong>Registration.</strong> The Malaysia SMEs ESG e-Reporting System is
-        registered under the SMEs Sustainable Entrepreneur Organisation (SSEO) as the
-        official platform for participating SME organisations and ESG reporting
-        initiatives.</p>
-        <p><strong>Platform owner.</strong> SMEs Sustainable Entrepreneur Organisation (SSEO).
-        SSEO owns the assessment framework this platform runs on and is the body that
-        revises it — a new version is issued as a new framework record, never an edit
-        to the one companies have already been scored against.</p>
-        <p class="text-sm">Scores carry the framework version, the weighting version and
-        the engine version that produced them, so any result on this platform can be traced
-        back to the exact rules in force when it was calculated.</p>
-      </div>
+      <div class="esg-page">
+        <header class="esg-page-header esg-enter">
+          <div class="esg-page-header__text">
+            <h2 class="esg-h1">Governance &amp; Recognition</h2>
+            <p class="esg-page-header__intro">Who owns this platform, what it is for, and — the
+              part that matters when a bank or a buyer asks — exactly how far it goes and where
+              it stops.</p>
+          </div>
+        </header>
 
-      <div class="card">
-        <h3 class="card-title">Purpose</h3>
-        <p class="text-sm">The platform aims to:</p>
-        <ul>
-          <li>Accelerate ESG adoption among Malaysian SMEs.</li>
-          <li>Simplify ESG reporting through a user-friendly digital system.</li>
-          <li>Enhance ESG readiness for local and international supply chains.</li>
-          <li>Support access to sustainable finance and ESG-linked opportunities.</li>
-          <li>Strengthen SME competitiveness through improved governance and sustainability
-              practices.</li>
-        </ul>
-      </div>
+        <section class="esg-section esg-enter" style="--esg-i:1">
+          <div class="esg-section__head">
+            <h3 class="esg-section__title">Registration and ownership</h3>
+            <span class="esg-section__note">SMEs Sustainable Entrepreneur Organisation</span>
+          </div>
+          <div class="esg-card"><div class="esg-card__body esg-prose">
+            <p><strong>Registration.</strong> The Malaysia SMEs ESG e-Reporting System is
+              registered under the SMEs Sustainable Entrepreneur Organisation (SSEO) as the
+              official platform for participating SME organisations and ESG reporting
+              initiatives.</p>
+            <p><strong>Platform owner.</strong> SMEs Sustainable Entrepreneur Organisation (SSEO).
+              SSEO owns the assessment framework this platform runs on and is the body that
+              revises it — a new version is issued as a new framework record, never an edit
+              to the one companies have already been scored against.</p>
+            <p class="esg-small">Scores carry the framework version, the weighting version and
+              the engine version that produced them, so any result on this platform can be traced
+              back to the exact rules in force when it was calculated.</p>
+          </div></div>
+        </section>
 
-      <!-- OBJECTIVES ARE NOT A FEATURE LIST.
-           Two of the eight — peer benchmarking and report generation — describe
-           capability that renders an uninstrumented empty state today. They are
-           what the source document calls objectives, so they are rendered as
-           objectives: a prose block of its own, carrying no control, no badge and
-           no link to a working screen. A reader who mistakes this for an inventory
-           of what is built has been misled by the page, not by the list. Do not
-           put a button in this card. -->
-      <h3 class="section-title">Platform objectives</h3>
-      <div class="card">
-        <p class="text-sm">Stated by SSEO for the system as a whole. This is what the
-        platform is for — not a description of what this screen does. Where a capability
-        is not built yet, the page for it says so in its own words.</p>
-        <p class="text-sm">The system supports SMEs to:</p>
-        <ul>
-          <li>Register and establish their ESG profile.</li>
-          <li>Conduct ESG maturity assessments.</li>
-          <li>Perform ESG self-reporting.</li>
-          <li>Monitor ESG performance through real-time dashboards.</li>
-          <li>Generate ESG reports aligned with Malaysian and international frameworks.</li>
-          <li>Benchmark performance against industry peers.</li>
-          <li>Receive AI-driven recommendations for continuous improvement.</li>
-          <li>Prepare for external verification, certification, and investor or customer
-              due diligence.</li>
-        </ul>
-      </div>
+        <section class="esg-section esg-enter" style="--esg-i:2">
+          <div class="esg-section__head">
+            <h3 class="esg-section__title">Where this platform sits</h3>
+            <span class="esg-section__note">A starting point, never an endorsement</span>
+          </div>
+          <div class="esg-card"><div class="esg-card__body esg-stack">
+            <p class="esg-body esg-prose">This platform produces a
+              <strong>self-declared assessment supported by evidence</strong>. It is a starting
+              point, not an endorsement, and it deliberately stops before the steps that require
+              an independent party.</p>
+            <div class="esg-table-scroll" tabindex="0" role="region" aria-label="How far this platform goes">
+              <table class="esg-table esg-table--stack">
+                <thead><tr><th>Stage</th><th>Who does it</th><th>Status here</th></tr></thead>
+                <tbody>${STAGES.map((s) => `<tr>
+                  <td data-label="Stage">${esc(s.n)} · ${esc(s.what)}</td>
+                  <td data-label="Who does it">${esc(s.who)}</td>
+                  <td data-label="Status here"><span class="esg-astate esg-astate--${s.ours ? 'verified' : 'na'}">${
+  s.ours ? 'This platform' : 'Not part of this platform'}</span></td>
+                </tr>`).join('')}</tbody>
+              </table>
+            </div>
+            <p class="esg-small esg-prose">A score here does not certify anything and is not a
+              substitute for stages 3 to 5. It is designed to make those stages cheaper by having
+              the evidence already organised against the disclosures a counterparty will ask for.</p>
+          </div></div>
+        </section>
 
-      <div class="card">
-        <h3 class="card-title">Where this platform sits</h3>
-        <p>This platform produces a <strong>self-declared assessment supported by evidence</strong>.
-        It is a starting point, not an endorsement, and it deliberately stops before the
-        steps that require an independent party:</p>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Stage</th><th>Who does it</th><th>Status here</th></tr></thead>
-            <tbody>
-              <tr><td>1 · Self-assessment against the framework</td><td>The company</td>
-                  <td><span class="badge badge-green">This platform</span></td></tr>
-              <tr><td>2 · Evidence attached and reviewed by a person</td><td>The company</td>
-                  <td><span class="badge badge-green">This platform</span></td></tr>
-              <tr><td>3 · Independent verification of the disclosures</td><td>An external assurance provider</td>
-                  <td><span class="badge badge-amber">Not part of this platform</span></td></tr>
-              <tr><td>4 · Certification against a published standard</td><td>A certification body</td>
-                  <td><span class="badge badge-amber">Not part of this platform</span></td></tr>
-              <tr><td>5 · Investor or customer due diligence</td><td>The counterparty</td>
-                  <td><span class="badge badge-amber">Not part of this platform</span></td></tr>
-            </tbody>
-          </table>
-        </div>
-        <p class="text-sm">A score here does not certify anything and is not a substitute for
-        stages 3 to 5. It is designed to make those stages cheaper by having the evidence
-        already organised against the disclosures a counterparty will ask for.</p>
-      </div>
+        <section class="esg-section esg-enter" style="--esg-i:3">
+          <div class="esg-section__head">
+            <h3 class="esg-section__title">What the platform is for</h3>
+            <span class="esg-section__note">Stated by SSEO · not an inventory of what is built</span>
+          </div>
+          <div class="esg-grid esg-grid-2">
+            <div class="esg-card">
+              <div class="esg-card__header"><h4 class="esg-card__title">Purpose</h4></div>
+              <div class="esg-card__body esg-prose">
+                <p class="esg-small">The platform aims to:</p>
+                <ul>
+                  <li>Accelerate ESG adoption among Malaysian SMEs.</li>
+                  <li>Simplify ESG reporting through a user-friendly digital system.</li>
+                  <li>Enhance ESG readiness for local and international supply chains.</li>
+                  <li>Support access to sustainable finance and ESG-linked opportunities.</li>
+                  <li>Strengthen SME competitiveness through improved governance and sustainability
+                      practices.</li>
+                </ul>
+              </div>
+            </div>
 
-      <div class="card">
-        <h3 class="card-title">Stakeholder ecosystem</h3>
-        <p><strong>Platform owner</strong> — SMEs Sustainable Entrepreneur Organisation (SSEO)</p>
-        <p><strong>Supporting partners</strong></p>
-        <ul>
-          <li>Universities and Research Institutions</li>
-          <li>ESG Consultants</li>
-          <li>Professional Bodies</li>
-          <li>Financial Institutions</li>
-          <li>Technology Providers</li>
-          <li>Sustainability Assurance Partners</li>
-        </ul>
-      </div>
+            <!-- OBJECTIVES ARE NOT A FEATURE LIST.
+                 Two of the eight — peer benchmarking and report generation — describe
+                 capability that renders an uninstrumented empty state today. They are
+                 what the source document calls objectives, so they are rendered as
+                 objectives: a prose block of its own, carrying no control, no badge and
+                 no link to a working screen. A reader who mistakes this for an inventory
+                 of what is built has been misled by the page, not by the list. Do not
+                 put a button in this card.
+                 P8 note: it moved into an .esg-card beside Purpose and gained no
+                 control, no chip and no link in the process. The rule above is
+                 unchanged and still binding. -->
+            <div class="esg-card">
+              <div class="esg-card__header"><h4 class="esg-card__title">Platform objectives</h4></div>
+              <div class="esg-card__body esg-prose">
+                <p class="esg-small">Stated by SSEO for the system as a whole. This is what the
+                  platform is for — not a description of what this screen does. Where a capability
+                  is not built yet, the page for it says so in its own words.</p>
+                <p class="esg-small">The system supports SMEs to:</p>
+                <ul>
+                  <li>Register and establish their ESG profile.</li>
+                  <li>Conduct ESG maturity assessments.</li>
+                  <li>Perform ESG self-reporting.</li>
+                  <li>Monitor ESG performance through real-time dashboards.</li>
+                  <li>Generate ESG reports aligned with Malaysian and international frameworks.</li>
+                  <li>Benchmark performance against industry peers.</li>
+                  <li>Receive AI-driven recommendations for continuous improvement.</li>
+                  <li>Prepare for external verification, certification, and investor or customer
+                      due diligence.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </section>
 
-      <div class="card">
-        <h3 class="card-title">Expected outcomes</h3>
-        <ul>
-          <li>Increase ESG adoption among Malaysian SMEs.</li>
-          <li>Improve supply-chain sustainability readiness.</li>
-          <li>Enhance transparency and governance.</li>
-          <li>Enable access to green financing and investment opportunities.</li>
-          <li>Support Malaysia's ESG and Sustainable Development Goals (SDGs) agenda.</li>
-          <li>Build a nationally recognised digital ESG reporting ecosystem for SMEs.</li>
-        </ul>
-      </div>
+        <section class="esg-section esg-enter" style="--esg-i:4">
+          <div class="esg-section__head">
+            <h3 class="esg-section__title">Who is involved, and what it is meant to achieve</h3>
+          </div>
+          <div class="esg-grid esg-grid-2">
+            <div class="esg-card">
+              <div class="esg-card__header"><h4 class="esg-card__title">Stakeholder ecosystem</h4></div>
+              <div class="esg-card__body esg-prose">
+                <p><strong>Platform owner</strong> — SMEs Sustainable Entrepreneur Organisation (SSEO)</p>
+                <p><strong>Supporting partners</strong></p>
+                <ul>
+                  <li>Universities and Research Institutions</li>
+                  <li>ESG Consultants</li>
+                  <li>Professional Bodies</li>
+                  <li>Financial Institutions</li>
+                  <li>Technology Providers</li>
+                  <li>Sustainability Assurance Partners</li>
+                </ul>
+              </div>
+            </div>
+            <div class="esg-card">
+              <div class="esg-card__header"><h4 class="esg-card__title">Expected outcomes</h4></div>
+              <div class="esg-card__body esg-prose">
+                <ul>
+                  <li>Increase ESG adoption among Malaysian SMEs.</li>
+                  <li>Improve supply-chain sustainability readiness.</li>
+                  <li>Enhance transparency and governance.</li>
+                  <li>Enable access to green financing and investment opportunities.</li>
+                  <li>Support Malaysia&rsquo;s ESG and Sustainable Development Goals (SDGs) agenda.</li>
+                  <li>Build a nationally recognised digital ESG reporting ecosystem for SMEs.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </section>
 
-      <h3 class="section-title">Carbon Crediting Registry (public reference)</h3>
-      <div class="ai-insight" style="margin-bottom:16px">
-        <strong>What this is.</strong> A local mirror of a public carbon-crediting registry, for
-        carbon-credit lookup. That registry certifies individual carbon <em>projects</em> and issues
-        tradable carbon units — it does not rate companies on E, S and G, so nothing here feeds your
-        ESG score. The scoring engine refuses to score against it by design.
-        <br><br>
-        <strong>What is mirrored, and what is not.</strong> Projects are ingested. Methodology
-        records and credit issuances are <em>not</em> — nothing writes those tables, so this page
-        shows no count for them rather than a zero that would read as "none exist".
-      </div>
-      <div class="grid grid-3" style="margin-bottom:16px">
-        <div class="stat-card"><div class="stat-label">Projects mirrored</div><div class="stat-value">${esc(status.projects)}</div></div>
-        <div class="stat-card"><div class="stat-label">Last fetch</div><div class="stat-value" style="font-size:16px">${status.last_fetch ? esc(new Date(status.last_fetch).toISOString().slice(0, 10)) : '—'}</div></div>
-      </div>
-      ${body}`, req.user, '/governance'));
+        <section class="esg-section esg-enter" style="--esg-i:5">
+          <div class="esg-section__head">
+            <h3 class="esg-section__title">Carbon Crediting Registry</h3>
+            <span class="esg-section__note">Public reference · feeds no score</span>
+          </div>
+
+          <div class="esg-ai esg-ai--idle">
+            <span class="esg-ai__dot" style="color:var(--esg-info)" aria-hidden="true"></span>
+            <div class="esg-ai__body">
+              <p class="esg-ai__title">What this is, and what it is not</p>
+              <p class="esg-ai__detail">A local mirror of a public carbon-crediting registry, for
+                carbon-credit lookup. That registry certifies individual carbon <em>projects</em>
+                and issues tradable carbon units — it does not rate companies on E, S and G, so
+                nothing here feeds your ESG score. The scoring engine refuses to score against it
+                by design.</p>
+              <p class="esg-ai__detail">Projects are ingested. Methodology records and credit
+                issuances are <em>not</em> — nothing writes those tables, so this page shows no
+                count for them rather than a zero that would read as &ldquo;none exist&rdquo;.</p>
+            </div>
+          </div>
+
+          <!-- THE THIRD FACT IS NOT A NEW CLAIM. verraService.mirrorStatus()
+               already returns methodologies_state: 'uninstrumented', and this
+               page was computing it and throwing it away — so a reader saw two
+               tiles and no indication that a third thing exists at all. It
+               renders as §20's ABSENT fact, which states what is missing and
+               why; it is still not a count, which is what the note above
+               requires. -->
+          <div class="esg-facts">
+            <div class="esg-fact esg-fact--verified">
+              <span class="esg-fact__label">Projects mirrored</span>
+              <span class="esg-fact__value esg-num">${esc(status.projects)}</span>
+              <span class="esg-fact__from">Ingested from the public registry</span>
+            </div>
+            <div class="esg-fact${status.last_fetch ? '' : ' esg-fact--absent'}">
+              <span class="esg-fact__label">Last fetch</span>
+              <span class="esg-fact__value esg-num">${status.last_fetch ? esc(dayOf(status.last_fetch)) : 'Never run'}</span>
+              <span class="esg-fact__from">${status.last_fetch
+    ? 'The most recent successful sync' : 'No sync has completed on this deployment'}</span>
+            </div>
+            <div class="esg-fact esg-fact--absent">
+              <span class="esg-fact__label">Methodologies mirrored</span>
+              <span class="esg-fact__value">Not mirrored</span>
+              <span class="esg-fact__from">Nothing ingests them, so there is no number that could
+                be true — not a count of zero</span>
+            </div>
+          </div>
+
+          ${body}
+        </section>
+      </div>`, req.user, '/governance'));
   } catch (err) { next(err); }
 });
 
@@ -1499,6 +2147,291 @@ router.get('/integrations', (req, res) => {
       'Document storage for evidence files',
       'Export to a customer’s supplier portal',
     ])}`, req.user, '/integrations'));
+});
+
+
+// ── The design-system reference ────────────────────────────────────────────
+//
+// NOT A FEATURE, and deliberately not in the navigation: this is the surface
+// the ESG layer is DEVELOPED and INSPECTED against. Every component in
+// public/css/esg-system.css appears here once, with real ESG content rather
+// than "Lorem" — a swatch page proves a colour, a page built from the product's
+// own sentences proves the component holds the product's own text.
+//
+// Withheld in production. A style reference is not something an SME owner has
+// any use for, and a route that exists only for us should not be reachable by
+// them. It 404s there through the normal handler, which is the same answer any
+// unknown path gets.
+router.get('/design-system', (req, res, next) => {
+  if (process.env.NODE_ENV === 'production') return next();
+
+  const card = (title, meta, body) => `
+    <section class="esg-card">
+      <div class="esg-card__header">
+        <h2 class="esg-card__title">${esc(title)}</h2>
+        ${meta ? `<span class="esg-card__meta">${esc(meta)}</span>` : ''}
+      </div>
+      <div class="esg-card__body">${body}</div>
+    </section>`;
+
+  const scaleRow = (token, label) => `
+    <div class="esg-row esg-row-between" style="border-bottom:1px solid var(--border);padding:8px 0">
+      <span style="font-size:var(--${token})">${esc(label)}</span>
+      <span class="esg-meta">--${esc(token)}</span>
+    </div>`;
+
+  res.send(layout('Design system', `
+    <div class="esg-stack-loose esg-stack">
+
+      <header class="esg-card">
+        <h1 class="esg-display">The ESG design system</h1>
+        <p class="esg-body-2 esg-prose">
+          The local layer that sits on top of the shared Modus design system. It adds only what
+          the master does not provide — a spacing scale, a type scale, a reading measure, a card
+          that cannot collapse, a table that cannot clip — and never edits the master. Every
+          component below is rendered by the same stylesheet the application loads.
+        </p>
+      </header>
+
+      ${card('Type scale', 'D3 — the master ships none', `
+        <div class="esg-prose-wide">
+          ${scaleRow('esg-text-4xl', 'The score, and nothing else')}
+          ${scaleRow('esg-text-3xl', 'Page display')}
+          ${scaleRow('esg-text-2xl', 'Section heading')}
+          ${scaleRow('esg-text-xl', 'Card heading')}
+          ${scaleRow('esg-text-lg', 'Card title')}
+          ${scaleRow('esg-text-md', 'Body — the default')}
+          ${scaleRow('esg-text-sm', 'Supporting text')}
+          ${scaleRow('esg-text-xs', 'Labels and table headers')}
+          ${scaleRow('esg-text-2xs', 'Provenance and legal only')}
+        </div>
+        <p class="esg-small" style="margin-top:16px">
+          The floor is 11px and 11px is reserved for provenance. The audit found 48 elements below
+          12px on the dashboard alone, and card titles rendering smaller than the body they headed.
+        </p>`)}
+
+      ${card('Reading measure', 'D4 — the master ships none', `
+        <p class="esg-body esg-prose">
+          This paragraph is capped at <code>--esg-measure</code>, 68 characters. The audit measured
+          explanatory text on Green Finance running to 145 characters per line and dashboard copy to
+          138. A line that long loses the reader on the return sweep, and no amount of type styling
+          repairs it.
+        </p>
+        <p class="esg-small" style="margin-top:12px">Wide, scanned content uses --esg-measure-wide (92ch) instead.</p>`)}
+
+      ${card('Card composition', 'D5 — the master card fails open', `
+        <div class="esg-stack">
+          <div class="esg-card">
+            <h3 class="esg-h3">A bare card</h3>
+            <p class="esg-body-2 esg-prose">No header, no body wrapper — and still padded. The
+            master's <code>.card</code> would render this text one pixel from its border, which is
+            what 30 of 37 cards in this app currently do.</p>
+          </div>
+          <div class="esg-card">
+            <div class="esg-card__header">
+              <h3 class="esg-card__title">A composed card</h3>
+              <span class="esg-card__meta">header · body · footer</span>
+            </div>
+            <div class="esg-card__body">
+              <p class="esg-body-2 esg-prose">The card yields its padding to the parts. The two
+              cards above cannot touch: an adjacent-sibling margin makes the measured 0px gap
+              impossible.</p>
+            </div>
+            <div class="esg-card__footer"><span class="esg-small">Footer</span></div>
+          </div>
+        </div>`)}
+
+      ${card('Table', 'D1 — the master clips with no scroll', `
+        <div class="esg-table-scroll" tabindex="0" role="region" aria-label="Example emissions table">
+          <table class="esg-table esg-table--stack">
+            <thead><tr>
+              <th>Period</th><th>Scope</th><th>Activity</th><th>Factor</th><th class="esg-td-num">kg CO2e</th>
+            </tr></thead>
+            <tbody>
+              <tr>
+                <td data-label="Period" class="esg-td-nowrap">Oct – Dec 2025</td>
+                <td data-label="Scope">Scope 2</td>
+                <td data-label="Activity" class="esg-td-num">42,600 kWh</td>
+                <td data-label="Factor">0.74 · v2022-2024</td>
+                <td data-label="kg CO2e" class="esg-td-num">31,524</td>
+              </tr>
+              <tr class="esg-row-caution">
+                <td data-label="Period" class="esg-td-nowrap">Jul – Dec 2025</td>
+                <td data-label="Scope">Scope 1</td>
+                <td data-label="Activity" class="esg-td-num">3,350 litre</td>
+                <td data-label="Factor">2.68 · placeholder <span class="esg-chip esg-chip--caution">provisional</span></td>
+                <td data-label="kg CO2e" class="esg-td-num">8,978</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="esg-small" style="margin-top:12px">
+          Scrolls horizontally, is focusable so a keyboard can scroll it, and below 640px each row
+          becomes a labelled block with nothing off-screen. The period is a period, not a
+          <code>Date.toString()</code>.
+        </p>`)}
+
+      ${card('ESG score', 'the product’s central output', `
+        <div class="esg-score">
+          ${scoreRing(68, null, 'ESG score 68 out of 100', { size: 'hero', den: 100 })}
+          <div class="esg-score__band">
+            <span class="esg-chip esg-chip--done">A · Established</span>
+            <span class="esg-score__bandname">Established</span>
+            <span class="esg-score__basis">39 of 40 indicators answered, 1 not applicable. Computed by the scoring engine at weighting version 1.0.</span>
+          </div>
+        </div>
+        <div class="esg-pillars" style="margin-top:24px">
+          <div class="esg-pillar">
+            <div class="esg-pillar__head"><span class="esg-pillar__name">Environmental</span><span class="esg-pillar__value esg-num">59</span></div>
+            <span class="esg-progress"><span class="esg-progress__fill" style="width:59%"></span></span>
+            <span class="esg-pillar__basis">13 of 14 answered · 1 N/A</span>
+          </div>
+          <div class="esg-pillar">
+            <div class="esg-pillar__head"><span class="esg-pillar__name">Social</span><span class="esg-pillar__value esg-num">71</span></div>
+            <span class="esg-progress"><span class="esg-progress__fill" style="width:71%"></span></span>
+            <span class="esg-pillar__basis">13 of 13 answered</span>
+          </div>
+          <div class="esg-pillar">
+            <div class="esg-pillar__head"><span class="esg-pillar__name">Governance</span><span class="esg-pillar__value esg-num">76</span></div>
+            <span class="esg-progress"><span class="esg-progress__fill" style="width:76%"></span></span>
+            <span class="esg-pillar__basis">13 of 13 answered</span>
+          </div>
+        </div>`)}
+
+      ${card('Journey stages', 'four states that cannot look alike', `
+        <div class="esg-stage esg-stage--done">
+          <span class="esg-stage__node" aria-hidden="true">✓</span>
+          <div>
+            <h3 class="esg-stage__title">Answer the assessment <span class="esg-chip esg-chip--done">Done</span></h3>
+            <p class="esg-stage__why">Every indicator the framework asks for, minus the ones marked not applicable.</p>
+          </div>
+        </div>
+        <div class="esg-stage esg-stage--current">
+          <span class="esg-stage__node" aria-hidden="true"></span>
+          <div>
+            <h3 class="esg-stage__title">Review what it proposed <span class="esg-chip esg-chip--current">Next</span></h3>
+            <p class="esg-stage__why">A proposal is a proposal until a person accepts it. Nothing an AI read out of a PDF raises your score on its own.</p>
+          </div>
+        </div>
+        <div class="esg-stage esg-stage--next">
+          <span class="esg-stage__node" aria-hidden="true"></span>
+          <div>
+            <h3 class="esg-stage__title">Define a green project</h3>
+            <details class="esg-stage__more"><summary>Why this matters</summary>
+              <p class="esg-stage__why">A project is what a lender is actually told about, in the vocabulary a Malaysian bank's credit paper uses.</p>
+            </details>
+          </div>
+        </div>
+        <div class="esg-stage esg-stage--blocked">
+          <span class="esg-stage__node" aria-hidden="true"></span>
+          <div>
+            <h3 class="esg-stage__title">Certification <span class="esg-chip esg-chip--blocked">Blocked</span></h3>
+            <p class="esg-stage__why">No SustNET ESG certification scheme is published. This platform assesses; it does not certify.</p>
+          </div>
+        </div>`)}
+
+      ${card('AI states', 'five facts that must never render alike', `
+        <div class="esg-stack-tight">
+          <div class="esg-ai esg-ai--idle">
+            <span class="esg-ai__dot" style="color:var(--esg-blocked)" aria-hidden="true"></span>
+            <div class="esg-ai__body"><p class="esg-ai__title">Not run yet</p>
+            <p class="esg-ai__detail">The suggestion scan has not been started for this company.</p></div>
+          </div>
+          <div class="esg-ai esg-ai--running">
+            <span class="esg-ai__spinner" aria-hidden="true"></span>
+            <div class="esg-ai__body"><p class="esg-ai__title">Scanning</p>
+            <p class="esg-ai__detail">It runs in the background. This page will show what it proposed once it finishes.</p></div>
+          </div>
+          <div class="esg-ai esg-ai--done">
+            <span class="esg-ai__dot" style="color:var(--esg-done)" aria-hidden="true"></span>
+            <div class="esg-ai__body"><p class="esg-ai__title">Three suggestions to review</p>
+            <p class="esg-ai__detail">A suggestion is a suggestion until you accept it.</p></div>
+          </div>
+          <div class="esg-ai esg-ai--empty">
+            <span class="esg-ai__dot" style="color:var(--esg-blocked)" aria-hidden="true"></span>
+            <div class="esg-ai__body"><p class="esg-ai__title">Ran, and proposed nothing</p>
+            <p class="esg-ai__detail">The run is switched on and working. It found nothing for this company — which is a result, not an absence.</p></div>
+          </div>
+          <div class="esg-ai esg-ai--failed">
+            <span class="esg-ai__dot" style="color:var(--esg-problem)" aria-hidden="true"></span>
+            <div class="esg-ai__body"><p class="esg-ai__title">The run did not complete</p>
+            <p class="esg-ai__detail">Nothing below is missing because your company has no options — the analysis itself did not run.</p></div>
+          </div>
+          <div class="esg-skeleton" style="height:44px"></div>
+        </div>`)}
+
+      ${card('Status colour', 'one meaning per colour', `
+        <div class="esg-row">
+          <span class="esg-chip esg-chip--done">Done</span>
+          <span class="esg-chip esg-chip--current">In progress</span>
+          <span class="esg-chip esg-chip--blocked">Blocked</span>
+          <span class="esg-chip esg-chip--caution">Provisional</span>
+          <span class="esg-chip esg-chip--problem">Needs you</span>
+          <span class="esg-chip esg-chip--info">Reference</span>
+        </div>
+        <p class="esg-small esg-prose" style="margin-top:16px">
+          The audit found amber carrying five unrelated meanings — draft, provisional, Advanced tier,
+          Unclear availability and out-of-scope. Each slot above names a meaning, not a colour, and
+          resolves to a master token, so the palette stays the master's and only the mapping is ours.
+        </p>`)}
+
+      ${card('Green finance readiness', 'structure only — P6 decides the wording', `
+        <div class="esg-readiness">
+          <span class="esg-chip esg-chip--caution">Not yet</span>
+          <div>
+            <h3 class="esg-readiness__verdict">Two things stand between you and a green facility</h3>
+            <p class="esg-readiness__why">Readiness is measured against what an institution asks for, not against your score. Nothing here has been checked with any lender.</p>
+            <ul class="esg-readiness__gaps">
+              <li class="esg-readiness__gap"><span class="esg-chip esg-chip--problem">Missing</span> A defined project with a baseline</li>
+              <li class="esg-readiness__gap"><span class="esg-chip esg-chip--caution">Provisional</span> Two carbon entries use an unverified factor</li>
+            </ul>
+          </div>
+        </div>`)}
+
+      ${card('Scope ladder', 'where this platform stops', `
+        <div class="esg-ladder">
+          <div class="esg-ladder__step esg-ladder__step--ours">
+            <span class="esg-ladder__n">1</span>
+            <div><div class="esg-ladder__what">Self-assessment against the framework</div><div class="esg-ladder__who">The company</div></div>
+            <span class="esg-chip esg-chip--done">This platform</span>
+          </div>
+          <div class="esg-ladder__step esg-ladder__step--ours">
+            <span class="esg-ladder__n">2</span>
+            <div><div class="esg-ladder__what">Evidence attached and reviewed by a person</div><div class="esg-ladder__who">The company</div></div>
+            <span class="esg-chip esg-chip--done">This platform</span>
+          </div>
+          <div class="esg-ladder__step esg-ladder__step--not-ours">
+            <span class="esg-ladder__n">3</span>
+            <div><div class="esg-ladder__what">Independent verification of the disclosures</div><div class="esg-ladder__who">An external assurance provider</div></div>
+            <span class="esg-chip esg-chip--blocked">Not here</span>
+          </div>
+          <div class="esg-ladder__step esg-ladder__step--not-ours">
+            <span class="esg-ladder__n">4</span>
+            <div><div class="esg-ladder__what">Certification against a published standard</div><div class="esg-ladder__who">A certification body</div></div>
+            <span class="esg-chip esg-chip--blocked">Not here</span>
+          </div>
+        </div>`)}
+
+      ${card('Mobile navigation', 'no destination may be dropped', `
+        <p class="esg-body-2 esg-prose">At 768px the shared shell hides the sidebar for a five-item
+        bar, and eleven destinations became unreachable. The sheet below is built on
+        <code>&lt;details&gt;</code>, so every destination stays reachable with no client-side
+        JavaScript. P3 wires the shell to it.</p>
+        <details class="esg-nav-more" style="margin-top:16px">
+          <summary><span aria-hidden="true">≡</span> More</summary>
+          <div class="esg-nav-sheet">
+            <div class="esg-nav-sheet__group">Assess</div>
+            <a class="esg-nav-sheet__link" href="/journey">ESG Journey</a>
+            <a class="esg-nav-sheet__link" href="/carbon">Carbon</a>
+            <div class="esg-nav-sheet__group">Finance</div>
+            <a class="esg-nav-sheet__link" href="/green-finance" aria-current="page">Green Finance</a>
+            <div class="esg-nav-sheet__group">Intelligence</div>
+            <a class="esg-nav-sheet__link esg-nav-sheet__link--unbuilt" href="/analytics">Analytics</a>
+            <a class="esg-nav-sheet__link esg-nav-sheet__link--unbuilt" href="/kpis">KPIs</a>
+          </div>
+        </details>`)}
+
+    </div>`, req.user, ''));
 });
 
 

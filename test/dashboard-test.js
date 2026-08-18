@@ -29,6 +29,12 @@ const ROOT = path.join(__dirname, '..');
 const SRC = path.join(ROOT, 'src');
 const CSS_PATH = path.join(ROOT, 'public', 'css', 'modus-design-system.css');
 const CSS = fs.readFileSync(CSS_PATH, 'utf8');
+// The ESG layer (Run 62/P2). A SECOND sheet, never an edit to the one above —
+// the md5 pin further down still guards that and is untouched. It is included
+// in `AVAILABLE` because "every rendered class is defined" is a question about
+// the styles the page actually loads, and the shell links both.
+const ESG_CSS_PATH = path.join(ROOT, 'public', 'css', 'esg-system.css');
+const ESG_CSS = fs.existsSync(ESG_CSS_PATH) ? fs.readFileSync(ESG_CSS_PATH, 'utf8') : '';
 
 let passed = 0;
 const failures = [];
@@ -164,6 +170,26 @@ const FIXTURES = [
     entries: 2, period_from: '2026-01-01', period_to: '2026-06-30', provisional: 1 }]],
   [/AS projects FROM esg_green_projects/, [{ projects: 1 }]],
   [/AS products FROM esg_finance_products/, [{ products: 1 }]],
+  // ── readinessService (P6.5) reads these. Modelled explicitly rather than
+  //    left to fall through, because the populated stub REFUSES an unknown
+  //    query — an engine query nobody modelled must be a finding, not a zero.
+  [/FROM esg_finance_inputs/, []],
+  [/FROM esg_green_project_baselines/, [{ n: 1 }]],
+  [/count\(\*\) FILTER \(WHERE r\.document_id IS NOT NULL\)/, [{ n: 12, documented: 5 }]],
+  // `is_provisional` appears only in the carbon aggregate; an earlier draft
+  // keyed on "::int AS n, count(*) FILTER" and matched the RESPONSES aggregate
+  // too, which handed the engine carbon rows and produced a NaN score.
+  [/FILTER \(WHERE is_provisional\)/, [{ n: 2, provisional: 1 }]],
+  // ORDER BY is the disambiguator: the dashboard's own score query selects
+  // band_code and the indicator counts too, and matching on the first two
+  // columns stole it — which rendered a template hole and emptied the ladder.
+  [/ORDER BY s\.computed_at DESC/, [
+    { scope: 'OVERALL', score_0_100: 78 }, { scope: 'E', score_0_100: 82 }, { scope: 'G', score_0_100: 77 }]],
+  [/AS n FROM esg_documents/, [{ n: 4 }]],
+  [/SELECT id, project_type_id, estimated_cost_myr/, [
+    { id: 'p1', project_type_id: 't1', estimated_cost_myr: 250000, ccpt_category_code: 'RE-01', status: 'defined' }]],
+  [/SELECT id, annual_revenue_myr, employee_count/, [
+    { id: 'c1', annual_revenue_myr: 24500000, employee_count: 148, ssm_number: 'X', msic_code: '25999' }]],
   [/FROM esg_assessments a? ?WHERE|FROM esg_assessments\b[\s\S]*WHERE (a\.)?company_id/, [{
     id: ASSESSMENT_ID, framework_id: 'fw-1', framework_code: 'MODUS_SEDG_ALIGNED',
     framework_version: '0.9-draft', reporting_year: 2025, status: 'scored', overall: 78,
@@ -399,6 +425,17 @@ function newCompanyDb() {
       // The register is a PUBLIC reference list, not this company's data, so it
       // is populated on day one. A new company sees products and no match.
       if (/AS products FROM esg_finance_products/.test(sql)) return { rows: [{ products: 31 }] };
+      // readinessService (P6.5), for a company that has done nothing yet.
+      if (/FROM esg_finance_inputs/.test(sql)) return { rows: [], rowCount: 0 };
+      if (/FROM esg_green_project_baselines/.test(sql)) return { rows: [{ n: 0 }] };
+      if (/FILTER \(WHERE is_provisional\)/.test(sql)) return { rows: [{ n: 0, provisional: 0 }] };
+      if (/ORDER BY s\.computed_at DESC/.test(sql)) return { rows: [], rowCount: 0 };
+      if (/AS n FROM esg_documents/.test(sql)) return { rows: [{ n: 0 }] };
+      if (/FILTER \(WHERE r\.document_id IS NOT NULL\)/.test(sql)) return { rows: [{ n: 0, documented: 0 }] };
+      if (/SELECT id, project_type_id, estimated_cost_myr/.test(sql)) return { rows: [], rowCount: 0 };
+      if (/SELECT id, annual_revenue_myr, employee_count/.test(sql)) {
+        return { rows: [{ id: 'c1', annual_revenue_myr: null, employee_count: null, ssm_number: null, msic_code: null }] };
+      }
       if (/FROM esg_companies\b/.test(sql)) {
         // The company row exists — they registered. One field of five is set.
         return { rows: [{ id: 'c1', name: 'New Sdn Bhd', filled: 1, earned_at: '2026-08-17T00:00:00.000Z' }] };
@@ -449,11 +486,17 @@ function renderHandler(handler, req) {
  *  knows one of them goes silently vacuous the moment the other is in place —
  *  which is the failure mode it exists to catch. */
 function contentOf(html) {
-  for (const marker of ['<main class="app-main"', '<main class="content"']) {
-    const i = html.indexOf(marker);
-    if (i < 0) continue;
+  // Matched on the CLASS LIST, not on an exact attribute string. The previous
+  // form looked for `<main class="app-main"` including the closing quote, so
+  // adding a second class to the element — which P4 does — made every guard
+  // that depends on this helper report "the shell changed" and go silently
+  // vacuous. That is the exact failure mode this helper's comment warns about,
+  // committed by the helper itself.
+  const m = /<main\b[^>]*\bclass="([^"]*)"[^>]*>/i.exec(html);
+  if (m && /\b(app-main|content)\b/.test(m[1])) {
     const j = html.lastIndexOf('</main>');
-    if (j > i) return html.slice(html.indexOf('>', i) + 1, j);
+    const start = m.index + m[0].length;
+    if (j > start) return html.slice(start, j);
   }
   return null;
 }
@@ -520,7 +563,7 @@ let RENDERED = null;
       const content = contentOf(html);
       assert.ok(content !== null, `${p}: no .app-main content region — the shell changed`);
       const inline = [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((m) => m[1]).join('\n');
-      const available = `${CSS}\n${inline}`;
+      const available = `${CSS}\n${ESG_CSS}\n${inline}`;
       assert.ok(available.length > 50000, `${p}: the stylesheet did not load — this check would pass vacuously`);
       for (const t of classTokens(content)) {
         checked += 1;
@@ -550,7 +593,7 @@ let RENDERED = null;
       const content = contentOf(html);
       assert.ok(content !== null, `${pth}: no content region`);
       const inline = [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((m) => m[1]).join('\n');
-      const available = `${CSS}\n${inline}`;
+      const available = `${CSS}\n${ESG_CSS}\n${inline}`;
       for (const t of classTokens(content)) {
         if (isDefined(t, available)) continue;
         if (!undefinedBy.has(t)) undefinedBy.set(t, new Set());
@@ -577,7 +620,7 @@ let RENDERED = null;
     // look at because they were not that run's to fix.
     const { html } = RENDERED.pages[0];
     const inline = [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((m) => m[1]).join('\n');
-    const available = `${CSS}\n${inline}`;
+    const available = `${CSS}\n${ESG_CSS}\n${inline}`;
     const content = contentOf(html);
     const shell = html.replace(content, '');
     const bad = [...classTokens(shell)].filter((t) => !isDefined(t, available));
@@ -621,11 +664,11 @@ let RENDERED = null;
       const c = contentOf(html);
       assert.ok(c && c.length > 400, `${label}: content region is ${c && c.length} bytes`);
       assert.ok(!/undefined|NaN|\[object Object\]/.test(c), `${label}: a template hole rendered`);
-      assert.ok(/class="card/.test(c), `${label}: rendered no card`);
+      assert.ok(/class="(esg-)?card/.test(c), `${label}: rendered no card`);
     }
   });
 
-  await atest('THE EMPTY DASHBOARD LEADS WITH THE RAIL, and the full one leads with the numbers', async () => {
+  await atest('THE DASHBOARD LEADS WITH THE HERO, and only a scored one states a score', async () => {
     // The mock draws a mature account. The screen most users see first is the
     // empty one, and rendering the mature layout for it produces a grid of
     // zeroes that reads as broken rather than as new. The rail is the one
@@ -640,96 +683,70 @@ let RENDERED = null;
     // test is about; the box around it is not. Both anchors are asserted to
     // exist first, so a future rename fails loudly here instead of silently
     // comparing against -1.
+    // P4 REPLACED THE COMPOSITION THIS TEST WAS WRITTEN AGAINST. Run 55's
+    // reading order was "stat cards vs journey rail"; the dashboard is now one
+    // narrative and both of those anchors are gone by design. The INVARIANT
+    // survives and is asserted here in the new shape: the page leads with the
+    // hero, the hero always carries the next action, and the story runs
+    // position -> attention -> improvement -> pathway -> reserved.
     const e = contentOf(EMPTY_HTML);
     const f = contentOf(FULL_HTML);
+
     for (const [label, c] of [['empty', e], ['full', f]]) {
-      for (const anchor of ['journey-rail', 'stat-card']) {
+      for (const anchor of ['esg-hero', 'esg-next']) {
         assert.ok(c.includes(anchor),
           `the ${label} dashboard renders no .${anchor} — this test's anchor is gone, so its `
           + 'verdict means nothing until the anchor is updated');
       }
+      // The hero is FIRST. Anything above it is chrome that has leaked in.
+      // Only the .esg-page wrapper may precede it. A section that has drifted
+      // above the hero pushes this well past a wrapper's length.
+      assert.ok(c.indexOf('esg-hero') < 120,
+        `the ${label} dashboard puts ${c.indexOf('esg-hero')} characters above the hero`);
+      // The next action comes before the long-horizon sections, always.
+      assert.ok(c.indexOf('esg-next') < c.indexOf('esg-pathway'),
+        `the ${label} dashboard puts the pathway above the next action`);
+      assert.ok(c.indexOf('esg-pathway') < c.indexOf('esg-reserved'),
+        `the ${label} dashboard puts reserved capabilities above the pathway they follow`);
     }
-    assert.ok(e.indexOf('journey-rail') < e.indexOf('stat-card'),
-      'the empty dashboard puts the stat cards above the journey rail — a grid of zeroes first');
-    assert.ok(f.indexOf('stat-card') < f.indexOf('journey-rail'),
-      'the scored dashboard does not follow the reference image\'s reading order');
-    // Run 55: the wider column follows the reading order too. The block that
-    // leads gets .col-7, so the empty page does not lead with the rail and then
-    // give the larger half of the row to an empty state.
-    const rowB = (s) => s.slice(s.indexOf('col-7'), s.indexOf('col-5'));
-    assert.ok(rowB(e).includes('journey-rail'), 'the empty dashboard leads with the rail but gives it the narrow column');
-    assert.ok(rowB(f).includes('score-ring--hero'), 'the scored dashboard gives the wide column to something other than the score');
+
+    // The SCORED page states the score in the hero; the EMPTY one must not,
+    // and must name which empty state it is instead of showing a zero.
+    assert.ok(f.includes('score-ring--hero'),
+      'the scored dashboard does not carry the hero ring');
+    assert.ok(!e.includes('score-ring--hero'),
+      'the empty dashboard renders a hero ring — a ring with no score is a claim about an unassessed company');
+    assert.ok(/class="empty-state"/.test(e),
+      'the empty dashboard states no empty state where the score would be');
   });
 
-  await atest('THE DASHBOARD IS A GRID, NOT A STACK — and it collapses on a phone', async () => {
-    // Run 53 got the content right and left it a one-column stack, because the
-    // master had no column system. Run 54 added §52 and Run 55 composed onto
-    // it, so this asserts the SHAPE rather than the appearance: rows that are
-    // .grid-12, children that carry a span, and more than one span width — a
-    // page of nothing but .col-12 is a stack wearing a grid's class name.
+  await atest('THE DASHBOARD IS A COMPOSED NARRATIVE, NOT A GRID OF EQUAL CARDS', async () => {
+    // REPLACES Run 55's twelve-column assertion. That test protected against a
+    // one-column stack by demanding .grid-12 rows and three distinct column
+    // widths — and the thing it was protecting became the defect: the audit
+    // found a page of equal-weight panels where nothing led. P4's rule is the
+    // opposite, so this asserts the new shape with the same strictness.
+    const ESG_CSS_LOCAL = fs.readFileSync(ESG_CSS_PATH, 'utf8');
     for (const [label, html] of [['empty', EMPTY_HTML], ['full', FULL_HTML]]) {
       const c = contentOf(html);
-      const rows = [...c.matchAll(/class="grid-12[^"]*"/g)];
-      assert.ok(rows.length >= 3, `the ${label} dashboard has ${rows.length} grid rows — it is still a stack`);
-      const spans = [...c.matchAll(/class="col-(\d+)"/g)].map((m) => Number(m[1]));
-      assert.ok(spans.length >= 8, `the ${label} dashboard places ${spans.length} columns`);
-      assert.ok(new Set(spans).size >= 3,
-        `the ${label} dashboard uses ${new Set(spans).size} distinct column width(s) — a page of `
-        + 'equal columns is a stack in a grid class');
-      for (const s of spans) {
-        assert.ok(s >= 1 && s <= 12, `.col-${s} is outside the twelve-column grid`);
-      }
-      // Every row must add up to twelve or less, or a child silently wraps and
-      // the composition the brief specified is not what renders.
-      for (const row of c.split('class="grid-12').slice(1)) {
-        const inRow = [...row.slice(0, row.indexOf('</div></div>') + 1).matchAll(/class="col-(\d+)"/g)]
-          .map((m) => Number(m[1]));
-        if (inRow.length) {
-          assert.ok(inRow.reduce((x, y) => x + y, 0) <= 12 || inRow.length > 4,
-            `a ${label} row spans ${inRow.join('+')} = more than twelve columns`);
-        }
-      }
+      // A story of named sections, not a bag of panels.
+      const sections = [...c.matchAll(/class="esg-section"/g)];
+      assert.ok(sections.length >= 3,
+        `the ${label} dashboard has ${sections.length} narrative sections`);
+      const titles = [...c.matchAll(/class="esg-section__title">([^<]+)</g)].map((m) => m[1].trim());
+      assert.strictEqual(new Set(titles).size, titles.length,
+        `the ${label} dashboard repeats a section title: ${titles.join(' | ')}`);
+      // The hero is the only two-column block, and it is a real grid.
+      assert.ok(/class="esg-hero[ "]/.test(c), `the ${label} dashboard has no hero`);
+      // Cards are used WHERE GROUPING HELPS, never as the page's layout unit.
+      const cards = [...c.matchAll(/class="esg-card[ "]/g)].length;
+      assert.ok(cards <= sections.length,
+        `the ${label} dashboard renders ${cards} cards for ${sections.length} sections — the card `
+        + 'grid is back');
     }
-    // AND IT COLLAPSES. The span helpers are meaningless on a phone unless the
-    // master reduces them, and this repo cannot add that rule — so it asserts
-    // the master ships it rather than assuming §52 is still what Run 54 wrote.
-    const mobile = CSS.slice(CSS.indexOf('52. COMPOSITION LAYER'));
-    const block = mobile.slice(mobile.indexOf('@media (max-width: 768px)'));
-    assert.ok(block.startsWith('@media'), '§52 has no mobile block — every .col-* stays put on a phone');
-    const body = block.slice(0, block.indexOf('\n}\n') + 2);
-    assert.ok(/\.grid-12\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/.test(body),
-      '§52 no longer collapses .grid-12 to one column at ≤768px');
-    assert.ok(/\.col-1,[\s\S]*?\.col-12\s*\{\s*grid-column:\s*span 1/.test(body),
-      '§52 no longer collapses every .col-* to a single span at ≤768px');
-  });
-
-  test('EVERY PANEL NUMBER IS A REAL SEEDED STAGE', () => {
-    // Run 55 numbers the panels from esg_journey_stages so the number means
-    // something — reorder the seed and they renumber themselves. A code that is
-    // not in the seed renders with no index at all, which is the honest
-    // behaviour and also completely silent, so nothing on screen would tell you
-    // the map had rotted. This is the check that would.
-    //
-    // It is asserted against seed.sql rather than against the suite's own
-    // JOURNEY_FIXTURES, which carry FOUR stages where the product seeds
-    // THIRTEEN: in the screenshots taken this run only one panel showed a
-    // number, and that was the fixture, not the code. A test built on the
-    // fixture would have agreed with the screenshot and been wrong.
-    const routes = fs.readFileSync(path.join(SRC, 'routes/pages.js'), 'utf8');
-    const map = /const PANEL_STAGE = Object\.freeze\(\{([\s\S]*?)\}\);/.exec(routes);
-    assert.ok(map, 'PANEL_STAGE is gone from pages.js — the panels are numbered by something else now');
-    const codes = [...map[1].matchAll(/'([A-Z_]+)'/g)].map((m) => m[1]);
-    assert.ok(codes.length >= 5, `PANEL_STAGE names ${codes.length} stages`);
-
-    const seed = fs.readFileSync(path.join(SRC, 'db/seed.sql'), 'utf8');
-    const seeded = new Set([...seed.matchAll(/^\s*\('([A-Z_]+)',\s*\d+,/gm)].map((m) => m[1]));
-    assert.ok(seeded.size >= 10,
-      `only ${seeded.size} stage codes parsed out of seed.sql — the reader broke, so this test `
-      + 'would pass by finding nothing');
-    const orphans = codes.filter((c) => !seeded.has(c));
-    assert.deepStrictEqual(orphans, [],
-      `these panels point at a stage seed.sql does not create, so they render unnumbered and say `
-      + `nothing about it: ${orphans.join(', ')}`);
+    // And it genuinely collapses, in the stylesheet rather than by hope.
+    assert.ok(/@media \(max-width: 1100px\)[\s\S]{0,200}\.esg-hero \{ grid-template-columns: 1fr/.test(ESG_CSS_LOCAL),
+      'the hero never collapses to one column — it will crush on a laptop');
   });
 
   await atest('NOTHING BLOCKED IS RENDERED AS AVAILABLE — all six, by name', async () => {
@@ -903,7 +920,10 @@ let RENDERED = null;
        "you are here" mark that lands on the wrong rung or on none. A ladder with
        no current rung renders as seven identical rows and says nothing. */
     const c = contentOf(FULL_HTML);
-    const items = [...c.matchAll(/<div class="checklist-item ([^"]*)">([\s\S]*?)<\/div>/g)];
+    // The ladder is a TABLE in P4, disclosed rather than occupying 40% of the
+    // score card. Same rungs, same three words, same single current mark.
+    const items = [...c.matchAll(/<tr>(\s*<td data-label="Band">[\s\S]*?)<\/tr>/g)]
+      .map((m) => [m[0], m[0], m[0]]);
     const seeded = FIXTURES.find(([re]) => re.test('FROM esg_rating_bands'))[1];
     assert.strictEqual(items.length, seeded.length,
       `the ladder renders ${items.length} rungs for ${seeded.length} seeded bands`);
@@ -911,7 +931,7 @@ let RENDERED = null;
       assert.ok(c.includes(`${b.band_code} · ${b.band_label}`),
         `the seeded band ${b.band_code} is missing from the ladder`);
     }
-    const here = items.filter(([, cls]) => cls.includes('is-active'));
+    const here = items.filter(([row]) => row.includes('You are here'));
     assert.strictEqual(here.length, 1,
       `${here.length} rungs are marked as the company's current band — exactly one is`);
     assert.ok(here[0][2].includes('AA · Advanced') && here[0][2].includes('You are here'),
@@ -921,7 +941,7 @@ let RENDERED = null;
       assert.ok(c.includes(word), `the ladder never renders the state "${word}"`);
     }
     // And it is absent, not zeroed, when there is no score to place on it.
-    assert.ok(!/checklist-item/.test(contentOf(EMPTY_HTML)),
+    assert.ok(!/data-label="Band"/.test(contentOf(EMPTY_HTML)),
       'the ladder renders for a company with no score, so every rung reads "not reached" — which '
       + 'is a claim about a company that has not been assessed');
   });
@@ -940,13 +960,16 @@ let RENDERED = null;
        column on the scored render, and the slice asserts it found the hero ring
        before it counts anything — a scope that has silently moved reports zero
        sentences and passes. */
+    // Re-anchored from Run 55's col-7/col-5 row to P4's hero, which is where
+    // the score now lives. The rule is unchanged: at most one sentence of prose
+    // sits under the number.
     const c = contentOf(FULL_HTML);
-    const from = c.indexOf('col-7');
-    const to = c.indexOf('col-5');
-    assert.ok(from > 0 && to > from, 'Row B is gone from the scored dashboard — this check has no scope');
+    const from = c.indexOf('esg-hero');
+    const to = c.indexOf('esg-next');
+    assert.ok(from > -1 && to > from, 'the hero is gone from the scored dashboard — this check has no scope');
     const wide = c.slice(from, to);
     assert.ok(wide.includes('score-ring--hero'),
-      'the wide column of Row B does not hold the hero ring, so this slice is measuring the wrong panel');
+      'the hero does not hold the hero ring, so this slice is measuring the wrong block');
     const prose = [...wide.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/g)]
       .map((m) => m[1].replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim())
       .filter(Boolean);
@@ -978,24 +1001,58 @@ let RENDERED = null;
       'the topbar theme toggle is not bound to anything');
   });
 
-  await atest('the bottom nav still shows exactly the five named keys, and they are ≥44px tall', async () => {
-    const { BOTTOM_NAV_KEYS, MODULES } = require('../src/utils/layout');
-    assert.deepStrictEqual(BOTTOM_NAV_KEYS,
-      ['dashboard', 'company', 'assessment', 'documents', 'reports'],
-      'BOTTOM_NAV_KEYS changed — it is five, named explicitly, and adding to it displaces one');
-    // Anchored at the token boundary: `class="bottom-nav-item` also prefixes
-    // `bottom-nav-item-icon`, so an unanchored count reports ten items for five.
-    const items = (FULL_HTML.match(/class="bottom-nav-item[ "]/g) || []).length;
-    assert.strictEqual(items, 5, `the bottom nav renders ${items} items`);
-    for (const k of BOTTOM_NAV_KEYS) {
-      assert.ok(MODULES.some((m) => m.key === k), `${k} is in BOTTOM_NAV_KEYS but not in MODULES`);
+  await atest('the phone bar is four destinations plus a reachable overflow', async () => {
+    // REPLACES the Run 53 assertion that pinned five hand-written keys. P3
+    // changed the decision, not the protection: the bar is still explicit
+    // (a module opts in with `bottom: true`, so ordering cannot move it), it is
+    // still pinned here so a change is deliberate, and the NEW invariant is the
+    // one the audit was about — everything not in the bar must still be
+    // reachable, which is what the old five-key bar failed at for eleven of
+    // sixteen destinations.
+    const { BOTTOM_NAV, MODULES, TIERS } = require('../src/utils/layout');
+    assert.deepStrictEqual(BOTTOM_NAV.map((m) => m.key),
+      ['dashboard', 'journey', 'assessment', 'documents'],
+      'the phone bar changed — four destinations plus the overflow is the decision; adding a fifth displaces the way out');
+
+    for (const m of BOTTOM_NAV) {
+      assert.ok(m.built, `${m.key} is in the phone bar but is not built — the old bar promoted an unbuilt Reports page`);
+      assert.ok(m.tier === 'primary', `${m.key} is in the phone bar but is not a primary destination`);
     }
+
+    // FOUR links plus the overflow summary. Anchored at the token boundary:
+    // `class="bottom-nav-item` also prefixes `bottom-nav-item-icon`.
+    const items = (FULL_HTML.match(/class="bottom-nav-item[ "]/g) || []).length;
+    assert.strictEqual(items, 4, `the phone bar renders ${items} destinations`);
+    assert.ok(/class="esg-nav-more"/.test(FULL_HTML), 'the phone bar has no overflow — this is the defect that hid eleven destinations');
+
+    // THE INVARIANT. Every module is reachable at phone width: either it is in
+    // the bar, or it is in the sheet. A module that is in neither is invisible
+    // below 768px, which is exactly what happened to Green Finance.
+    const sheet = /<nav class="esg-nav-sheet"[\s\S]*?<\/nav>/.exec(FULL_HTML);
+    assert.ok(sheet, 'no overflow sheet rendered');
+    const unreachable = MODULES.filter((m) => !m.bottom && !sheet[0].includes(`href="${m.path}"`));
+    assert.deepStrictEqual(unreachable.map((m) => m.key), [],
+      `unreachable at phone width: ${unreachable.map((m) => m.key).join(', ')}`);
+
+    // Unbuilt destinations are present but marked, never silently promoted.
+    for (const m of MODULES.filter((x) => !x.built)) {
+      assert.ok(sheet[0].includes(`href="${m.path}"`), `${m.key} is not listed at all`);
+    }
+    assert.ok(/esg-nav-sheet__link--unbuilt/.test(sheet[0]),
+      'unbuilt destinations render identically to working ones in the sheet');
+
+    // Every tier the sidebar renders must be a tier some module actually has,
+    // so a renamed tier cannot leave a heading with nothing under it.
+    for (const m of MODULES) {
+      assert.ok(TIERS.some((t) => t.key === m.tier), `${m.key} has tier "${m.tier}", which TIERS does not define`);
+    }
+
     // Height comes from the master, so read it rather than assume it.
     const h = /\.app-bottom-nav\s*\{[^}]*height:\s*(\d+)px/.exec(CSS);
     assert.ok(h, '.app-bottom-nav declares no height');
     assert.ok(Number(h[1]) >= 44, `the bottom nav is ${h[1]}px tall; a touch target is 44px`);
-    // Five items across the narrowest phone still clears 44px of width.
-    assert.ok(320 / 5 >= 44, 'five bottom-nav items no longer fit a 320px viewport at 44px each');
+    // Four destinations plus the overflow across the narrowest phone.
+    assert.ok(320 / 5 >= 44, 'five bottom-bar slots no longer fit a 320px viewport at 44px each');
   });
 
   test('every button clears 44px AT MOBILE SIZES, and stays compact on desktop', () => {
@@ -1300,6 +1357,186 @@ let RENDERED = null;
         assert.fail(`routes/${f} uses the fill --${m[1]} as text; use --${m[1]}-text`);
       }
     }
+  });
+
+  /* ═══ GOVERNANCE AND COMPANY, AFTER THE P8 MIGRATION ═══════════════════
+     Both were the last pages built entirely from master components. These
+     assert the four things the migration was for, in the RENDERED page rather
+     than in the source — the same reason PART 1 reads the rendering. */
+
+  await atest('THE PHONE OVERFLOW SHEET NEVER SHIPS OPEN — on any page, including its own', async () => {
+    // It used to carry `open` whenever the current page lived inside it. On a
+    // 390px phone that covered roughly 60% of the viewport on arrival, so the
+    // first act on /company and /governance was dismissing a menu the user had
+    // not opened. The signal is kept; the overlay is not.
+    const stub = populatedDb();
+    const { pages } = await renderEveryPage(stub.exports, REQ);
+    const opened = pages.filter(({ html }) => /<details class="esg-nav-more[^"]*"[^>]*\bopen\b/.test(html));
+    assert.deepStrictEqual(opened.map((p) => p.path), [],
+      `the overflow sheet ships open on: ${opened.map((p) => p.path).join(', ')} — a disclosure that `
+      + 'opens itself covers the page the user just navigated to');
+
+    // …and the "you are here" signal it was carrying is still carried, the way
+    // the other four items in the bar carry it. /company is in the overflow.
+    const company = await renderRoute('routes/pages', '/company', populatedDb().exports);
+    assert.ok(/class="esg-nav-more esg-nav-more--current"/.test(company),
+      'the overflow item does not mark itself current on a page that lives inside it');
+    assert.ok(/<summary aria-current="true"/.test(company),
+      'the overflow item is current but says so to nothing but a stylesheet');
+    // §6: never colour alone. The visible label cannot change, so the
+    // ACCESSIBLE NAME is what carries it in words.
+    assert.ok(/aria-label="More sections — you are in [^"]+"/.test(company),
+      'the current section is signalled by colour alone — the accessible name does not name it');
+
+    // A page in the BAR, not the sheet, must not be marked.
+    const dash = await renderRoute('routes/pages', '/dashboard', populatedDb().exports);
+    assert.ok(!/esg-nav-more--current/.test(dash),
+      'the overflow item marks itself current on a page that is in the bar, not the sheet');
+    assert.ok(/aria-label="More sections"/.test(dash),
+      'the overflow item claims a current section on a page that has none');
+
+    // The modifier has to actually paint, or the whole thing is a no-op.
+    assert.ok(/\.esg-nav-more--current\s*>\s*summary\s*\{[^}]*color:/.test(ESG_CSS),
+      '.esg-nav-more--current is rendered but nothing styles it — CSS never warns');
+  });
+
+  await atest('GOVERNANCE USES THE ESG LAYER, NOT THE FAIL-OPEN MASTER CARD', async () => {
+    const html = await renderRoute('routes/pages', '/governance', populatedDb().exports);
+    const main = html.slice(html.indexOf('<main'), html.indexOf('</main>'));
+
+    // .card fails OPEN — it carries no padding and expects .card-body to
+    // supply it. Governance had six bare ones, every one measuring padding: 0.
+    assert.ok(!/class="card"/.test(main),
+      'governance still renders a bare master .card — that is the padding-collapsed shape D5 names');
+    assert.ok(!/class="[^"]*\bsection-title\b/.test(main),
+      'governance still uses .section-title instead of .esg-section__title');
+    assert.ok(!/class="[^"]*\bstat-card\b/.test(main),
+      'governance still uses .stat-card instead of §20\'s .esg-fact');
+    assert.ok(!/class="[^"]*\bai-insight\b/.test(main),
+      'governance still uses .ai-insight instead of §7\'s .esg-ai');
+
+    // A composed .esg-card is the one that carries padding on its PARTS.
+    assert.ok(/class="esg-card"/.test(main), 'governance renders no .esg-card at all');
+    assert.ok(/esg-card__body/.test(main), 'governance has an .esg-card with no __body');
+  });
+
+  await atest('THE STAGE TABLE CANNOT CLIP — the column it loses is the only one it exists for', async () => {
+    const html = await renderRoute('routes/pages', '/governance', populatedDb().exports);
+    const main = html.slice(html.indexOf('<main'), html.indexOf('</main>'));
+
+    // Measured before the migration: 419px of table inside a 390px viewport,
+    // inside `.table-wrap { overflow: hidden }`. The column past the edge was
+    // "Status here" — the platform/not-platform answer.
+    assert.ok(!/class="table-wrap"/.test(main),
+      'governance still wraps a table in the master .table-wrap, which clips with no scroll (D1)');
+    assert.ok(/class="esg-table-scroll"[^>]*tabindex="0"/.test(main),
+      'the stage table is not in a keyboard-reachable scroll container');
+    assert.ok(/esg-table--stack/.test(main),
+      'the stage table does not stack on a phone, so it will scroll sideways instead');
+
+    // Every row states its status in WORDS, and the two states render
+    // differently — §6, and the whole point of the table.
+    const rows = main.match(/<tr>[\s\S]*?<\/tr>/g) || [];
+    const body = rows.filter((r) => /esg-astate/.test(r));
+    assert.strictEqual(body.length, 5, `expected 5 stage rows, found ${body.length}`);
+    assert.strictEqual(body.filter((r) => /esg-astate--verified/.test(r) && />This platform</.test(r)).length, 2,
+      'the two stages this platform DOES cover are not both marked as such');
+    assert.strictEqual(body.filter((r) => /esg-astate--na/.test(r) && />Not part of this platform</.test(r)).length, 3,
+      'the three stages this platform does NOT cover are not all marked as such');
+    // Every cell carries the label the stacked layout reads out.
+    assert.ok(body.every((r) => /data-label="Status here"/.test(r)),
+      'a stage row has no data-label, so its value loses its column name on a phone');
+  });
+
+  await atest('GOVERNANCE STATES WHAT IS NOT MIRRORED — and still publishes no count for it', async () => {
+    const html = await renderRoute('routes/pages', '/governance', populatedDb().exports);
+    const main = html.slice(html.indexOf('<main'), html.indexOf('</main>'));
+    // mirrorStatus() returns methodologies_state: 'uninstrumented' and the page
+    // was discarding it, so a reader saw two tiles and no sign a third thing
+    // existed. It renders as an ABSENT fact — which is not a number, which is
+    // what the route's own comment requires.
+    const block = /esg-fact esg-fact--absent[\s\S]*?Methodologies mirrored[\s\S]*?<\/div>/.exec(main)
+      || /Methodologies mirrored[\s\S]{0,400}?<\/div>/.exec(main);
+    assert.ok(block, 'the methodologies fact is gone from the page');
+    assert.ok(/esg-fact--absent/.test(main), 'nothing on the page renders as an absent fact');
+    assert.ok(!/Methodologies mirrored<\/span>\s*<span class="esg-fact__value[^"]*">\s*0/.test(main),
+      'the methodologies fact prints 0 — a zero would read as "none exist", which is the '
+      + 'claim the route comment exists to prevent');
+  });
+
+  await atest('THE COMPANY FORM IS UNCHANGED BY THE MIGRATION — every field, name and control', async () => {
+    const html = await renderRoute('routes/pages', '/company', populatedDb().exports);
+    const main = html.slice(html.indexOf('<main'), html.indexOf('</main>'));
+
+    // The migration must not have moved, renamed or dropped an input. These
+    // are the six the POST handler writes.
+    for (const name of ['name', 'ssm_number', 'msic_code', 'employee_count', 'annual_revenue_myr', 'grid_region']) {
+      assert.ok(new RegExp(`name="${name}"`).test(main), `the ${name} field is gone from the form`);
+      assert.ok(new RegExp(`<label for="${name}"`).test(main), `the ${name} field lost its label`);
+    }
+    assert.ok(/action="\/company"[^>]*|method="post"/.test(main), 'the form no longer posts to /company');
+    assert.ok(/id="name"[^>]*required/.test(main), 'company name stopped being required');
+    assert.ok(/id="grid_region"[^>]*required/.test(main), 'electricity grid stopped being required');
+    assert.ok(/<button class="btn btn-primary" type="submit">Save<\/button>/.test(main),
+      'the Save button changed shape');
+  });
+
+  await atest('THE THREE GRIDS ARE WRITTEN ONCE, AND THE AMPERSAND IS ESCAPED ONCE', async () => {
+    const html = await renderRoute('routes/pages', '/company', populatedDb().exports);
+    const main = html.slice(html.indexOf('<main'), html.indexOf('</main>'));
+
+    // The live defect this found: the Sabah label carried a hand-written
+    // `&amp;` and opt() escapes what it is given, so the dropdown rendered the
+    // literal text "Sabah &amp; Labuan (SESB)".
+    assert.ok(!/&amp;amp;/.test(main),
+      'a double-escaped ampersand is back — a label is being escaped twice');
+    assert.ok(/<option value="sabah"[^>]*>Sabah &amp; Labuan \(SESB\)<\/option>/.test(main),
+      'the Sabah option no longer reads "Sabah & Labuan (SESB)"');
+
+    // One source: the option label and the summary value must be the same string.
+    const src = fs.readFileSync(path.join(SRC, 'routes', 'pages.js'), 'utf8');
+    assert.strictEqual((src.match(/Sabah & Labuan \(SESB\)/g) || []).length, 1,
+      'the Sabah label is written more than once — two copies of a label drift');
+    assert.ok(/GRID_LABEL\[c\.grid_region\]/.test(src),
+      'the profile summary no longer reads its grid label from GRID_OPTIONS');
+  });
+
+  await atest('A COLUMN NOTHING WRITES SAYS SO, rather than rendering as an empty field', async () => {
+    const html = await renderRoute('routes/pages', '/company', populatedDb().exports);
+    const main = html.slice(html.indexOf('<main'), html.indexOf('</main>'));
+
+    // industry_label, state and esg_maturity are READ by opportunityService —
+    // they reach the AI prompt — and written by nothing. The page must not
+    // offer them as blank inputs (that would imply they can be filled in) and
+    // must not hide them (that hides why every scan says "unknown").
+    for (const name of ['industry_label', 'state', 'esg_maturity']) {
+      assert.ok(!new RegExp(`name="${name}"`).test(main),
+        `${name} is now a form field — the P8 migration must not add one; nothing writes that column`);
+    }
+    for (const label of ['Industry', 'State', 'ESG maturity']) {
+      assert.ok(new RegExp(`esg-fact__label">${label}<`).test(main),
+        `${label} is not stated on the page, so the reader cannot tell why the AI scan says "unknown"`);
+    }
+    assert.ok(/Nothing records this/.test(main),
+      'the write-less columns do not say that nothing records them');
+
+    // And the claim in that sentence must still be TRUE. If a writer appears,
+    // this fails and the sentence has to be deleted.
+    const oppSrc = fs.readFileSync(path.join(SRC, 'services', 'opportunityService.js'), 'utf8');
+    assert.ok(/industry_label/.test(oppSrc) && /esg_maturity/.test(oppSrc),
+      'opportunityService no longer reads those columns — re-check the wording on /company');
+    const writers = [];
+    for (const dir of ['routes', 'services']) {
+      for (const f of fs.readdirSync(path.join(SRC, dir)).filter((x) => x.endsWith('.js'))) {
+        const s = fs.readFileSync(path.join(SRC, dir, f), 'utf8');
+        for (const m of s.matchAll(/UPDATE esg_companies[\s\S]{0,400}?(?=`)/g)) {
+          if (/industry_label\s*=|(^|[\s,])state\s*=|esg_maturity\s*=/.test(m[0])) writers.push(`${dir}/${f}`);
+        }
+      }
+    }
+    assert.deepStrictEqual(writers, [],
+      `something now WRITES industry_label / state / esg_maturity (${writers.join(', ')}) — `
+      + 'the "nothing records this" copy on /company is no longer true and must be replaced');
   });
 
   console.log(`\ndashboard-test: ${passed} passed, ${failures.length} failed`);

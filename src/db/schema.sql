@@ -1054,6 +1054,43 @@ CREATE INDEX IF NOT EXISTS idx_esg_green_projects_status
 -- classification that never happened. The moment a human sets a default on a
 -- project type, the path starts working with no further change.
 
+
+-- ── P6.6 · FINANCING REQUIREMENT AND EXPECTED BENEFIT ─────────────────────
+-- Columns on the EXISTING project table rather than a new one. A project's
+-- financing need and its expected benefit are properties of that project, and
+-- a second table would need its own tenant scoping, its own uniqueness rule and
+-- its own join for no gain.
+--
+-- EXPECTED IS NOT ACTUAL. expected_benefit_* is what the company thinks the
+-- project will save, before it exists. esg_green_project_baselines holds what
+-- was actually measured. Keeping them in different places is what stops a
+-- forecast being read later as a result — and expected_benefit_basis records
+-- WHERE the forecast came from, on the same provenance principle as the ESG
+-- evidence chain: a supplier's quotation and a guess are not the same claim.
+--
+-- Added in a DO block per CLAUDE.md #4: schema.sql replays as one transaction on
+-- every boot, so a bare ALTER TABLE would fail the whole file on the second run.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                  WHERE table_name = 'esg_green_projects' AND column_name = 'financing_required_myr') THEN
+    ALTER TABLE esg_green_projects
+      ADD COLUMN financing_required_myr numeric(18,2),
+      ADD COLUMN own_contribution_myr   numeric(18,2),
+      ADD COLUMN financing_purpose      text
+        CHECK (financing_purpose IN ('capex','working_capital','refinancing','mixed')),
+      -- The SAME metric vocabulary as esg_green_project_baselines, so a forecast
+      -- and a measurement can be compared without a translation layer that would
+      -- be the first place they could drift apart.
+      ADD COLUMN expected_benefit_metric text
+        CHECK (expected_benefit_metric IN ('electricity_kwh','fuel_litres','water_m3','waste_kg','kg_co2e')),
+      ADD COLUMN expected_benefit_value  numeric(20,4),
+      ADD COLUMN expected_benefit_basis  text
+        CHECK (expected_benefit_basis IN ('user_estimate','supplier_quotation','engineering_study'));
+  END IF;
+END $$;
+
+
 CREATE TABLE IF NOT EXISTS esg_green_project_baselines (
   id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id         uuid NOT NULL REFERENCES esg_green_projects(id) ON DELETE CASCADE,
@@ -1078,6 +1115,49 @@ CREATE TABLE IF NOT EXISTS esg_green_project_baselines (
 );
 CREATE INDEX IF NOT EXISTS idx_esg_green_project_baselines_project
   ON esg_green_project_baselines (project_id, computed_at DESC);
+
+
+-- ── P7 · MEASUREMENTS: BASELINE AND ACTUAL ────────────────────────────────
+-- A baseline and an actual are THE SAME SHAPE — a metric, a value, a unit and
+-- a period, derived the same way from the same carbon entries. The only
+-- difference is when the period is and what it is being compared against, so
+-- this extends the existing table rather than adding a second one that would
+-- duplicate every column and every derivation rule.
+--
+-- WHAT IS NOT IN HERE, AND MUST NEVER BE: the EXPECTED benefit. That lives on
+-- esg_green_projects because it is a forecast, not a measurement. A forecast
+-- written into this table would be indistinguishable from a reading a week
+-- later, which is the single defect this separation exists to prevent.
+--
+-- MEASURED IS NOT VERIFIED. A row exists as soon as the platform derives it;
+-- verified_by/verified_at are set only when a person confirms it, and the CHECK
+-- makes an unattributed verification impossible.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                  WHERE table_name = 'esg_green_project_baselines' AND column_name = 'kind') THEN
+    ALTER TABLE esg_green_project_baselines
+      -- DEFAULT 'baseline' so every existing row keeps its meaning and every
+      -- existing writer, which sets no kind, keeps writing baselines.
+      ADD COLUMN kind text NOT NULL DEFAULT 'baseline'
+        CHECK (kind IN ('baseline','actual')),
+      ADD COLUMN verified_by uuid REFERENCES esg_users(id) ON DELETE SET NULL,
+      ADD COLUMN verified_at timestamptz,
+      ADD COLUMN verification_note text;
+
+    ALTER TABLE esg_green_project_baselines
+      ADD CONSTRAINT esg_gpb_verified_attribution
+        CHECK ((verified_by IS NULL) = (verified_at IS NULL));
+  END IF;
+END $$;
+
+-- One measurement per project, kind, metric and period. A recomputation
+-- replaces the row for that period rather than accumulating duplicates that
+-- would silently double a total.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_esg_gpb_measurement
+  ON esg_green_project_baselines (project_id, kind, metric, period_start, period_end);
+CREATE INDEX IF NOT EXISTS idx_esg_gpb_kind
+  ON esg_green_project_baselines (project_id, kind);
 
 -- Evidence REUSES esg_documents. There is deliberately no second upload path:
 -- a second one would need its own size limit, its own mime check and its own
@@ -1247,6 +1327,82 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_esg_xp_levels_min_xp
 -- declared below it the loop has already been and gone: sections 10 to 13 get
 -- their trigger one replay late. Re-running the identical loop here closes that
 -- lag for this section and, incidentally, for the three above it. It is the
+
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 14. GREEN FINANCE READINESS INPUTS                             (Run 62/P6.5)
+--
+-- THE ONE THING THE READINESS MODEL NEEDS THAT NOTHING ELSE IN THIS SCHEMA
+-- HOLDS. Everything else the model reads already exists and is reused rather
+-- than copied: esg_companies (revenue, headcount), esg_green_projects (project,
+-- type, cost, taxonomy classification), esg_green_project_baselines,
+-- esg_carbon_entries (with is_provisional), esg_scores, esg_responses
+-- (evidence_tier, document_id) and esg_documents.
+--
+-- WHY ONE GENERIC TABLE RATHER THAN A COLUMN PER FIGURE. The readiness model is
+-- configuration (services/readinessModel.js) and its input list will change.
+-- A column per input would make every model revision a migration, and a company
+-- that has not supplied a figure would occupy a NULL column that reads like a
+-- recorded zero. A row that does not exist cannot be mistaken for a value.
+--
+-- MISSING IS THE ABSENCE OF A ROW. There is deliberately no 'missing' state in
+-- the CHECK below: recording that something is missing would be storing an
+-- assertion nobody made. `declined` is different — the company was asked and
+-- chose not to say, which IS a fact worth keeping.
+--
+-- PROVENANCE IS NOT OPTIONAL. Every row states where it came from and, when it
+-- came from a document, which one. A financial figure with no provenance is
+-- exactly what this platform refuses to do with an ESG answer.
+-- ═══════════════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS esg_finance_inputs (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id    uuid NOT NULL REFERENCES esg_companies(id) ON DELETE CASCADE,
+  -- Validated against readinessModel.USER_SUPPLIED_CODES in the service, not by
+  -- an FK: the model is versioned configuration in code, and a foreign key to a
+  -- table of codes would make every model revision a data migration.
+  input_code    text NOT NULL,
+
+  -- Typed like esg_responses: one column per shape, never a JSON blob, so a
+  -- number stays a number and a date stays comparable.
+  value_numeric numeric(20,4),
+  value_text    text,
+  value_bool    boolean,
+  value_date    date,
+
+  -- 'declined' means asked and refused. It is NOT missing and NOT zero.
+  state         text NOT NULL DEFAULT 'provided'
+                CHECK (state IN ('provided','verified','not_applicable','declined')),
+  source        text NOT NULL
+                CHECK (source IN ('user_input','document','esg_data','derived')),
+  -- Set only when source='document'. The same chain the ESG side uses:
+  -- document -> extraction -> a person accepts -> the value is recorded here.
+  document_id   uuid REFERENCES esg_documents(id) ON DELETE SET NULL,
+  note          text,
+
+  provided_by   uuid REFERENCES esg_users(id) ON DELETE SET NULL,
+  verified_by   uuid REFERENCES esg_users(id) ON DELETE SET NULL,
+  verified_at   timestamptz,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now(),
+
+  -- A document-sourced value must name its document. Without this a row could
+  -- claim document provenance while pointing at nothing, which is worse than
+  -- claiming none.
+  CONSTRAINT esg_finance_inputs_document_provenance
+    CHECK (source <> 'document' OR document_id IS NOT NULL),
+  -- 'verified' means a PERSON verified it, so it must say who and when.
+  CONSTRAINT esg_finance_inputs_verified_attribution
+    CHECK (state <> 'verified' OR (verified_by IS NOT NULL AND verified_at IS NOT NULL))
+);
+
+-- One live value per input per company. Covers: every row, because a company
+-- holds at most one answer to "what is your repayment history".
+CREATE UNIQUE INDEX IF NOT EXISTS uq_esg_finance_inputs
+  ON esg_finance_inputs (company_id, input_code);
+CREATE INDEX IF NOT EXISTS idx_esg_finance_inputs_company
+  ON esg_finance_inputs (company_id);
+
+
 -- same DO block, it is idempotent, and it creates nothing that the next boot
 -- would not have created anyway.
 DO $$

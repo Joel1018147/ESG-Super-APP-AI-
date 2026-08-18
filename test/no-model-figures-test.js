@@ -425,6 +425,14 @@ atest('no rendered page shows an internal or registry brand in visible text', as
     const ELSEWHERE = {
       '/documents': '../src/routes/documents',
       '/green-finance': '../src/routes/greenFinance',
+      // Run 62/P3 gave these two a home in the nav. They were reachable only by
+      // typing the URL, while journey stages 9 and 10 required them — so two
+      // required stages had no route from the interface. They have always been
+      // served by greenFinance.js; only the nav is new.
+      '/green-finance/projects': '../src/routes/greenFinance',
+      '/green-finance/opportunities': '../src/routes/greenFinance',
+      '/green-finance/readiness': '../src/routes/greenFinance',
+      '/impact': '../src/routes/greenFinance',
       '/journey': '../src/routes/journey',
     };
     for (const m of MODULES) {
@@ -446,13 +454,16 @@ atest('no rendered page shows an internal or registry brand in visible text', as
   }
 
   // A loop that covered nothing passes every assertion inside it. Assert the
-  // DENOMINATOR: 16 nav paths + 16 signed-in shells + 1 signed-out shell.
-  // 14 until Run 47 added Green Finance; 15 until Run 52 added ESG Journey.
+  // DENOMINATOR: 20 nav paths + 20 signed-in shells + 1 signed-out shell.
+  // 14 until Run 47 added Green Finance; 15 until Run 52 added ESG Journey;
+  // 16 until Run 62/P3 gave Green projects and AI suggestions a home in the
+  // nav — both routes already existed and were reachable only by typing them;
+  // 18 until P6.5 added Finance readiness; 19 until P7 added ESG Impact.
   // The number is hardcoded ON PURPOSE — adding a nav entry has to be an
   // acknowledged act rather than a silent widening of a loop.
-  assert.strictEqual(MODULES.length, 16, `expected 16 nav entries, found ${MODULES.length}`);
-  assert.strictEqual(checked.length, 33,
-    `expected 33 rendered surfaces checked, got ${checked.length}: ${checked.join(', ')}`);
+  assert.strictEqual(MODULES.length, 20, `expected 20 nav entries, found ${MODULES.length}`);
+  assert.strictEqual(checked.length, 41,
+    `expected 41 rendered surfaces checked, got ${checked.length}: ${checked.join(', ')}`);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

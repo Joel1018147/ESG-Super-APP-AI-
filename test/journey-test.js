@@ -46,6 +46,10 @@ const SEED = fs.readFileSync(path.join(SRC, 'db', 'seed.sql'), 'utf8');
 const ENGINE_SRC = fs.readFileSync(path.join(SRC, 'services', 'journeyEngine.js'), 'utf8');
 const PAGE_SRC = fs.readFileSync(path.join(SRC, 'routes', 'journey.js'), 'utf8');
 const CSS = fs.readFileSync(path.join(ROOT, 'public', 'css', 'modus-design-system.css'), 'utf8');
+// The ESG layer (Run 62/P2). The shell links BOTH sheets, so "every class the
+// page renders is defined" is a question about both. The master's md5 pin in
+// dashboard-test.js is what guards against this becoming a fork.
+const ESG_CSS = fs.readFileSync(path.join(ROOT, 'public', 'css', 'esg-system.css'), 'utf8');
 
 let passed = 0;
 const failures = [];
@@ -68,7 +72,14 @@ const engine = require('../src/services/journeyEngine');
 const RUN52 = (() => {
   const i = SCHEMA.indexOf('13. THE JOURNEY, MISSIONS AND XP');
   assert.ok(i > 0, 'the Run 52 schema section is gone — the anchor moved');
-  return SCHEMA.slice(i);
+  // BOUNDED TO ITS OWN SECTION. This used to slice to the end of the file, so
+  // every table any LATER section added counted as one this run created — P6.5
+  // added section 14 and the "exactly these three tables" assertion failed on a
+  // table it has no opinion about. The guard is unchanged in what it checks;
+  // it now checks it on the right bytes.
+  const rest = SCHEMA.slice(i);
+  const next = rest.search(/^-- \d+\. [A-Z]/m);
+  return next > 0 ? rest.slice(0, next) : rest;
 })();
 
 function tableBlock(name) {
@@ -536,11 +547,15 @@ const USER_B = { id: 'u-b', name: 'B', email: 'b@x.test', role: 'company_admin',
  *  53 moved to. A helper that knows only one goes silently vacuous the moment
  *  the other is in place — which is the failure it exists to catch. */
 function contentOf(html) {
-  for (const marker of ['<main class="app-main"', '<main class="content"']) {
-    const i = html.indexOf(marker);
-    if (i < 0) continue;
+  // Matched on the CLASS LIST, not on an exact attribute string: adding a
+  // second class to <main> previously made this report "the shell changed" and
+  // took eight assertions down with it, which is the failure mode the comment
+  // above warns about.
+  const m = /<main\b[^>]*\bclass="([^"]*)"[^>]*>/i.exec(html);
+  if (m && /\b(app-main|content)\b/.test(m[1])) {
     const j = html.lastIndexOf('</main>');
-    if (j > i) return html.slice(html.indexOf('>', i) + 1, j);
+    const start = m.index + m[0].length;
+    if (j > start) return html.slice(start, j);
   }
   assert.fail('the rendered page has no content region — the shell changed');
   return '';
@@ -551,9 +566,16 @@ function contentOf(html) {
  *  a page-wide substring check for `is-locked` says nothing about a node. This
  *  suite made that mistake on its first run. */
 function railOf(html) {
-  const i = html.indexOf('<div class="journey-rail">');
-  const j = html.indexOf('Missions</h3>', i);
-  assert.ok(i > -1 && j > i, 'the journey rail is not in the rendered page — the anchor moved');
+  // P5 removed the duplicate "Missions" list this used to stop at — the page
+  // rendered the same thirteen stages three times, and the heading was the
+  // third copy. The rail is now found by its own class list (it also carries
+  // .esg-map) and ends where the section after it begins, so the slice is
+  // bounded by the rail rather than by a neighbour that may not exist.
+  const m = /<div class="journey-rail[^"]*">/.exec(html);
+  assert.ok(m, 'the journey rail is not in the rendered page — the anchor moved');
+  const i = m.index;
+  const j = html.indexOf('<section', i);
+  assert.ok(j > i, 'nothing follows the journey rail — the slice would run to the end of the shell');
   return html.slice(i, j);
 }
 
@@ -566,6 +588,68 @@ function countNodes(html) {
 
 (async () => {
   const app = serve(USER_A, makeState());
+
+  await atest('THE JOURNEY IS RENDERED ONCE — P5 removed two duplicate copies', async () => {
+    // The page used to render the same thirteen stages THREE times: a rail, a
+    // row of milestone chips, and a set of expanded mission cards. A reader met
+    // every stage three times and none of them led. This asserts the shape that
+    // replaced it — one rail, and no second list of the same labels.
+    const c = contentOf(await (await app.get('/journey')).text());
+    const rails = (c.match(/class="journey-rail/g) || []).length;
+    assert.strictEqual(rails, 1, `the page renders ${rails} rails — the duplication is back`);
+    assert.ok(!/class="mission-card/.test(c),
+      'the expanded mission-card list is back — it repeated every stage a third time');
+    assert.ok(!/class="milestone-badge"[^>]*>\s*\u2713/.test(c),
+      'the milestone chip row is back — it repeated every stage a second time');
+
+    // Each stage label appears ONCE in the map. The current mission above it
+    // may legitimately repeat one label, so this counts inside the rail only.
+    const railHtml = railOf(c);
+    const labels = [...railHtml.matchAll(/class="journey-node-label">([^<]*)</g)]
+      .map((m) => m[1].replace(/\s+/g, ' ').trim());
+    assert.strictEqual(labels.length, new Set(labels).size,
+      `a stage label is rendered twice inside the map: ${labels.join(' | ')}`);
+  });
+
+  await atest('EVERY ARC IS NAMED ONCE, and a fully blocked arc is reserved rather than 0%', async () => {
+    // The first P5 build walked the stages in order and opened a new arc
+    // whenever group_code changed — and the seeded order interleaves them, so
+    // "Understand and assess" rendered TWICE with different counts. Two
+    // identical headings on one page read as a bug whatever the data says.
+    const c = contentOf(await (await app.get('/journey')).text());
+    const names = [...c.matchAll(/class="esg-arc__name">([^<]*)</g)].map((m) => m[1].trim());
+    assert.ok(names.length >= 3, `the map renders ${names.length} arcs`);
+    assert.strictEqual(names.length, new Set(names).size,
+      `an arc heading is rendered twice: ${names.join(' | ')}`);
+
+    // Every stage is inside exactly one arc: the arcs must account for all of
+    // them, or the map is quietly hiding one.
+    const counts = [...c.matchAll(/class="esg-arc__count">([^<]*)</g)].map((m) => m[1].trim());
+    assert.strictEqual(counts.length, names.length, 'an arc has a name but no count');
+    let accounted = 0;
+    for (const t of counts) {
+      const reserved = /^(\d+) reserved$/.exec(t);
+      if (reserved) { accounted += Number(reserved[1]); continue; }
+      const open = /of (\d+) done/.exec(t);
+      assert.ok(open, `an arc count is neither a ratio nor a reserved count: "${t}"`);
+      accounted += Number(open[1]);
+      const blocked = / (\d+) blocked/.exec(t);
+      if (blocked) accounted += Number(blocked[1]);
+    }
+    assert.strictEqual(accounted, countNodes(c),
+      `the arcs account for ${accounted} stages but the map renders ${countNodes(c)}`);
+
+    // AN ARC WITH NOTHING OPEN IS NOT "0% DONE". Certification and expert
+    // support are blocked on something outside this platform; rendering them
+    // as an empty progress bar would read as a company that has fallen behind.
+    assert.ok(/esg-arc--reserved/.test(c),
+      'no arc is marked reserved, yet blocked stages exist — a blocked arc is showing as unstarted');
+    for (const m of c.matchAll(/<div class="esg-arc esg-arc--reserved">([\s\S]*?)<\/div>/g)) {
+      assert.ok(!/esg-progress/.test(m[1]),
+        'a reserved arc draws a progress bar — that is a claim about work not yet possible');
+      assert.ok(/reserved</.test(m[1]), 'a reserved arc does not say it is reserved');
+    }
+  });
 
   await atest('the page renders one node per seeded stage, and the count is DATA', async () => {
     const html = await (await app.get('/journey')).text();
@@ -755,7 +839,7 @@ function countNodes(html) {
     // `.sc-value` and `badge-warning`, none of which exist — see the report.
     const html = await (await app.get('/journey')).text();
     const inline = [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((m) => m[1]).join('\n');
-    const available = `${CSS}\n${inline}`;
+    const available = `${CSS}\n${ESG_CSS}\n${inline}`;
     assert.ok(available.length > 50000, 'the stylesheet did not load — this check would pass vacuously');
 
     const tokens = new Set();

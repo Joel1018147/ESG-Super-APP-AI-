@@ -10,7 +10,12 @@
     "test:guards": "node test/no-model-figures-test.js",
     "test:schema": "node test/schema-idempotency-test.js",
     "test:carbon-import": "node test/carbon-import-test.js",
-    "test:counted-tables": "node test/counted-tables-have-writers-test.js"
+    "test:counted-tables": "node test/counted-tables-have-writers-test.js",
+    "test:design-system": "node test/esg-design-system-test.js",
+    "test:verification": "node test/assessment-verification-test.js",
+    "test:readiness": "node test/readiness-test.js",
+    "test:green-project": "node test/green-project-test.js",
+    "test:impact": "node test/impact-test.js"
   },
   "engines": {
     "node": ">=18.0.0"

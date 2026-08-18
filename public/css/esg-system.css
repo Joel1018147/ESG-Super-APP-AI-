@@ -1,0 +1,2311 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   ESG DESIGN SYSTEM — the local layer                              (Run 62/P2)
+   ───────────────────────────────────────────────────────────────────────────
+   WHAT THIS FILE IS, AND WHAT IT IS NOT
+
+   It is NOT a fork of modus-design-system.css and it never edits it.
+   MODUS_UI_CONTRACT §1 makes a per-repo edit to that file a defect and §1b
+   makes any addition a thirteen-path fan-out; test/dashboard-test.js pins its
+   md5 and fails the moment either happens. Nothing here changes that.
+
+   It is an ADDITIVE layer that fills the gaps the master genuinely does not
+   cover, in the pattern this repo already uses for --content-max in
+   layout.js: read the master's token where one exists, carry a local
+   fallback where one does not, so THE DAY the master ships the token the
+   master wins with no edit here.
+
+   What the master already provides and this file therefore does NOT redefine:
+     colour (incl. every -text variant, both themes), --r*, --shadow*,
+     --font / --font-display / --font-mono, --motion-fast|base|slow,
+     --ease-out / --ease-spring, the mds-* keyframes, the app shell, .btn,
+     .alert, .badge, .form-group, .field-error, .input-error, .skip-link.
+
+   What the master does NOT provide, and this file establishes:
+     a spacing scale, a type scale, a reading measure, a card composition that
+     cannot collapse, a table that cannot clip, a mobile nav that cannot drop
+     destinations, and the ESG-specific components (score, stage, AI state,
+     readiness, ladder).
+
+   EVERY NEW CLASS IS PREFIXED `esg-`. Nothing here overrides a master class,
+   so a page can mix both and the master always wins its own components. The
+   one deliberate exception is documented at §9.
+
+   ── DESIGN-SYSTEM DEPENDENCIES (for the eventual fan-out, NOT authorised) ──
+   D1  .table-wrap { overflow: hidden } clips columns with no scroll. Fixed
+       here BY BUILDING A DIFFERENT COMPONENT (§5), not by overriding it. The
+       master's rule is still defective for the other twelve platforms.
+   D2  No spacing scale.       §2 proposes --space-*.
+   D3  No type scale.          §3 proposes --text-*.
+   D4  No reading measure.     §3 proposes --measure.
+   D5  .card fails OPEN — a bare .card has zero padding, which is what
+       produced 30 padding-collapsed cards here. §4's card fails CLOSED.
+   D6  FORM CONTROLS ARE STYLED ONLY INSIDE .form-group. A control anywhere
+       else renders as the browser default — white on white text in the dark
+       theme, 19px tall. P8 MEASURED 112 of them on the assessment page, 16 on
+       finance readiness and 2 on impact. §17 styles the ELEMENT, at a
+       specificity BELOW .form-group's, so the master keeps every control it
+       already owns and nothing here can override it.
+   D7  .app-layout's grid items carry no `min-width: 0`, so the `1fr` column at
+       ≤768px is sized by the widest item's MIN-CONTENT — which is the top bar.
+       Measured at 390px: the column resolved to 490px, .app-main inherited it,
+       and .app-layout's own `overflow: hidden` clipped 100px off the right of
+       EVERY page with no scrollbar and no gesture to recover it. §13.2b keeps
+       our own top-bar content wrappable so its min-content stays under a phone
+       width; the master rule is still defective for the other twelve.
+   D8  .score-ring CANNOT ANIMATE ITS VALUE. --score is an unregistered custom
+       property, so it does not interpolate, and the master transitions
+       `background`, which is not an animatable property for a conic-gradient.
+       A sweep needs `@property --score` plus a transition ON .score-ring, and
+       both belong in the master — writing either here would be a fork of a
+       master component. §19.4 therefore reveals the ring's ARRIVAL and the
+       steps that produced it, and leaves the arc itself alone.
+   test/esg-design-system-test.js asserts each of these is still outstanding,
+   so the day the master fixes one, that test fails and names the rule here
+   to delete.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+
+/* ═══ 1 · TOKEN ROOT ══════════════════════════════════════════════════════ */
+/* Theme-independent by construction: every value below is geometry, duration
+   or a reference to a master colour token that is ALREADY authored for both
+   themes. That is why this file has no [data-theme] block and no colour
+   literal — and why it cannot produce the classic one-theme-only bug. */
+
+:root {
+  /* ── 2 · SPACING (D2) ──────────────────────────────────────────────────
+     A 4px base. Named by step, not by use, so a component cannot claim a
+     spacing value belongs to it. Reads a master --space-* the day one ships. */
+  --esg-space-0: var(--space-0, 0);
+  --esg-space-1: var(--space-1, 4px);
+  --esg-space-2: var(--space-2, 8px);
+  --esg-space-3: var(--space-3, 12px);
+  --esg-space-4: var(--space-4, 16px);
+  --esg-space-5: var(--space-5, 20px);
+  --esg-space-6: var(--space-6, 24px);
+  --esg-space-7: var(--space-7, 32px);
+  --esg-space-8: var(--space-8, 40px);
+  --esg-space-9: var(--space-9, 56px);
+
+  /* ── 3 · TYPE SCALE (D3) ───────────────────────────────────────────────
+     The audit found the inverted case: an 11px .card-title sitting above 14px
+     body text, so the label was smaller than the thing it labelled, and 48
+     elements below 12px on one screen. The floor here is 12px and every
+     heading step is at or above body size. Line-height travels WITH the size
+     because the two are one decision, not two. */
+  --esg-text-2xs: 11px;   /* legal/meta ONLY. Never a label, never a title. */
+  --esg-text-xs:  12px;
+  --esg-text-sm:  13px;
+  --esg-text-md:  14px;   /* body */
+  --esg-text-lg:  16px;
+  --esg-text-xl:  20px;
+  --esg-text-2xl: 26px;
+  --esg-text-3xl: 34px;
+  --esg-text-4xl: 46px;   /* the score, and nothing else */
+
+  --esg-lh-tight: 1.15;
+  --esg-lh-snug:  1.3;
+  --esg-lh-body:  1.6;
+
+  --esg-track-label: 0.08em;   /* uppercase labels only */
+  --esg-track-tight: -0.02em;  /* display sizes only */
+
+  /* ── 4 · MEASURE (D4) ──────────────────────────────────────────────────
+     The audit measured explanatory text at 138 and 145 characters per line.
+     Prose caps at --esg-measure; a wide block that is scanned rather than
+     read (a table, a grid) uses --esg-measure-wide. */
+  --esg-measure: 68ch;
+  --esg-measure-wide: 92ch;
+
+  /* ── 5 · MOTION ────────────────────────────────────────────────────────
+     Durations and easings come from the MASTER. This file adds no new easing
+     curve and no new keyframe: §11 reuses mds-* by name. */
+  --esg-dur-fast: var(--motion-fast, 120ms);
+  --esg-dur-base: var(--motion-base, 220ms);
+  --esg-dur-slow: var(--motion-slow, 420ms);
+  --esg-ease: var(--ease-out, cubic-bezier(0.22, 1, 0.36, 1));
+
+  /* ── 6 · STATUS SEMANTICS ──────────────────────────────────────────────
+     The audit found amber carrying FIVE unrelated meanings: draft, provisional,
+     Advanced tier, Unclear availability, and out-of-scope. A colour a user
+     cannot learn is not carrying information.
+
+     These slots give each MEANING its own name. They resolve to master colour
+     tokens, so the palette stays the master's and only the mapping is ours.
+     A component must reference the slot, never the raw colour. */
+  --esg-done:        var(--green-text);
+  --esg-done-bg:     var(--green-bg);
+  --esg-current:     var(--accent-text);
+  --esg-current-bg:  var(--accent-bg);
+  --esg-blocked:     var(--muted);
+  --esg-blocked-bg:  var(--surface-2);
+  --esg-caution:     var(--amber-text);   /* the data is provisional/unverified */
+  --esg-caution-bg:  var(--amber-bg);
+  --esg-problem:     var(--red-text);     /* the user must act; something failed */
+  --esg-problem-bg:  var(--red-bg);
+  --esg-info:        var(--blue-text);    /* reference, scope, legal */
+  --esg-info-bg:     var(--blue-bg);
+}
+
+
+/* ═══ 2 · LAYOUT PRIMITIVES ═══════════════════════════════════════════════ */
+
+/* The one way to space siblings. gap does not collapse and does not double,
+   which is the whole reason the audit found 0px between five of six cards. */
+/* The two variants carry `display` themselves rather than depending on
+   .esg-stack also being present. A modifier that silently does nothing when
+   used alone is the same fail-open shape as the master's card. */
+.esg-stack,
+.esg-stack-tight,
+.esg-stack-loose { display: flex; flex-direction: column; }
+.esg-stack { gap: var(--esg-space-4); }
+.esg-stack-tight { gap: var(--esg-space-2); }
+.esg-stack-loose { gap: var(--esg-space-6); }
+
+.esg-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--esg-space-3);
+}
+.esg-row-between { justify-content: space-between; }
+/* Aligns controls by their BOX, not their baseline, so a control with no label
+   above it stops sitting 8px lower than its neighbours (Evidence, Carbon). */
+.esg-row-controls { align-items: flex-end; }
+
+.esg-grid { display: grid; gap: var(--esg-space-4); }
+.esg-grid-2 { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.esg-grid-3 { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+
+/* Equal-height cells. The audit found three panels in one row finishing at
+   three different heights; stretch is the default that prevents it. */
+.esg-grid > * { min-width: 0; }
+
+.esg-prose { max-width: var(--esg-measure); }
+.esg-prose-wide { max-width: var(--esg-measure-wide); }
+.esg-prose p { margin: 0 0 var(--esg-space-3); line-height: var(--esg-lh-body); }
+.esg-prose p:last-child { margin-bottom: 0; }
+.esg-prose > * + * { margin-top: var(--esg-space-3); }
+
+
+/* ═══ 3 · TYPOGRAPHY ══════════════════════════════════════════════════════ */
+
+.esg-display,
+.esg-h1, .esg-h2, .esg-h3 { font-family: var(--font-display); color: var(--text); margin: 0; }
+
+.esg-display {
+  font-size: var(--esg-text-3xl);
+  line-height: var(--esg-lh-tight);
+  letter-spacing: var(--esg-track-tight);
+  font-weight: 700;
+  text-wrap: balance;
+}
+.esg-h1 { font-size: var(--esg-text-2xl); line-height: var(--esg-lh-tight); letter-spacing: var(--esg-track-tight); font-weight: 700; text-wrap: balance; }
+.esg-h2 { font-size: var(--esg-text-xl); line-height: var(--esg-lh-snug); font-weight: 700; text-wrap: balance; }
+.esg-h3 { font-size: var(--esg-text-lg); line-height: var(--esg-lh-snug); font-weight: 600; }
+
+.esg-body  { font-size: var(--esg-text-md); line-height: var(--esg-lh-body); color: var(--text); }
+.esg-body-2 { font-size: var(--esg-text-md); line-height: var(--esg-lh-body); color: var(--text-2); }
+.esg-small { font-size: var(--esg-text-sm); line-height: var(--esg-lh-body); color: var(--text-2); }
+
+/* Uppercase section label. 12px is the floor — the master's own eyebrow sits
+   at 10px, which is where 48-below-12px came from. */
+.esg-label {
+  font-size: var(--esg-text-xs);
+  line-height: var(--esg-lh-snug);
+  letter-spacing: var(--esg-track-label);
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* Legal, provenance, "last read" — the ONLY sanctioned use of 11px. */
+.esg-meta { font-size: var(--esg-text-2xs); line-height: var(--esg-lh-snug); color: var(--muted); }
+
+/* Every figure the product computes. tabular-nums so digits align in a column
+   and a changing value does not reflow its neighbours. */
+.esg-num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+.esg-num-lg { font-family: var(--font-display); font-size: var(--esg-text-2xl); font-weight: 700; line-height: 1; letter-spacing: var(--esg-track-tight); }
+.esg-unit { font-size: 0.5em; font-weight: 600; color: var(--muted); margin-left: 0.15em; }
+
+
+/* ═══ 4 · CARD — FAILS CLOSED (D5) ════════════════════════════════════════
+   The master's .card carries no padding by design: it expects .card-header and
+   .card-body to supply it. That contract FAILS OPEN — omit the wrappers and
+   you get a card whose text sits 1px from its border, which is exactly what 30
+   of 37 cards in this app do.
+
+   .esg-card inverts it. A bare card is padded. Composing it with __header /
+   __body / __footer hands padding to the parts instead. You cannot produce the
+   collapsed state by forgetting something. */
+
+.esg-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-sm);
+  padding: var(--esg-space-5);
+}
+
+/* Composed: the card yields padding to its parts. */
+.esg-card:has(> .esg-card__header, > .esg-card__body, > .esg-card__footer) { padding: 0; }
+
+/* Without :has() a composed card would double-pad. Zeroing the outer padding
+   whenever the parts are present is the safer degradation, and the parts still
+   carry their own. */
+@supports not selector(:has(*)) {
+  .esg-card { padding: 0; }
+  .esg-card > :not(.esg-card__header):not(.esg-card__body):not(.esg-card__footer) {
+    padding-left: var(--esg-space-5);
+    padding-right: var(--esg-space-5);
+  }
+  .esg-card > :not(.esg-card__header):not(.esg-card__body):not(.esg-card__footer):first-child { padding-top: var(--esg-space-5); }
+  .esg-card > :not(.esg-card__header):not(.esg-card__body):not(.esg-card__footer):last-child { padding-bottom: var(--esg-space-5); }
+}
+
+/* SAFETY NET. Even outside .esg-stack, two cards cannot touch. This is the
+   direct answer to the measured "gaps between the six cards: 0, 23, 0, 0, 0". */
+.esg-card + .esg-card { margin-top: var(--esg-space-4); }
+.esg-stack > .esg-card + .esg-card { margin-top: 0; }
+
+.esg-card__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--esg-space-3);
+  flex-wrap: wrap;
+  padding: var(--esg-space-4) var(--esg-space-5);
+  border-bottom: 1px solid var(--border);
+}
+.esg-card__body { padding: var(--esg-space-5); }
+.esg-card__footer {
+  padding: var(--esg-space-4) var(--esg-space-5);
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+  border-radius: 0 0 var(--r) var(--r);
+}
+
+/* The title is never smaller than the body it heads — the inverted-hierarchy
+   defect the audit found on every "What this section will cover" card. */
+.esg-card__title {
+  font-family: var(--font-display);
+  font-size: var(--esg-text-lg);
+  line-height: var(--esg-lh-snug);
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+.esg-card__meta { font-size: var(--esg-text-sm); color: var(--muted); }
+
+/* A card whose whole job is one figure. */
+.esg-card--quiet { box-shadow: none; background: var(--surface-2); }
+.esg-card--flush { padding: 0; }
+
+
+/* ═══ 5 · TABLE — CANNOT CLIP (D1) ════════════════════════════════════════
+   The master's .table-wrap sets `overflow: hidden`. At 390px the carbon table
+   measured 464px inside a 354px box, so the kg CO2e column — the value the
+   page exists to show — sat 122px beyond the edge with NO GESTURE that could
+   reveal it. That is data loss, not layout damage.
+
+   This is a DIFFERENT COMPONENT rather than an override of theirs, so the fix
+   is local and the master keeps its own behaviour for the other platforms
+   until D1 is authorised as its own run.
+
+   Three things make it work, and all three are required:
+     1. overflow-x: auto            — the columns are reachable at all
+     2. tabindex="0" + role/label   — reachable by KEYBOARD too, which a bare
+                                      scroll container is not
+     3. the edge fade               — a scrollable region that looks finished
+                                      is one nobody scrolls */
+
+.esg-table-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-sm);
+  /* Edge shading, painted only while there is something to scroll to.
+     background-attachment: local on the cover, scroll on the shade, is the
+     classic pure-CSS scroll shadow — no JS, no scroll listener.
+
+     The shade is --border-2, NOT a black rgba(). A hardcoded black fade is
+     invisible on a dark surface, so the affordance would vanish in exactly one
+     theme and nothing would report it. Every stop here is a token or the
+     `transparent` keyword. */
+  background-image:
+    linear-gradient(to right, var(--surface) 30%, transparent),
+    linear-gradient(to right, transparent, var(--surface) 70%),
+    linear-gradient(to right, var(--border-2), transparent),
+    linear-gradient(to left,  var(--border-2), transparent);
+  background-position: 0 0, 100% 0, 0 0, 100% 0;
+  background-repeat: no-repeat;
+  background-size: 40px 100%, 40px 100%, 14px 100%, 14px 100%;
+  background-attachment: local, local, scroll, scroll;
+}
+.esg-table-scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.esg-table { width: 100%; border-collapse: collapse; min-width: 34rem; }
+.esg-table th,
+.esg-table td {
+  text-align: left;
+  padding: var(--esg-space-3) var(--esg-space-4);
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  font-size: var(--esg-text-md);
+  line-height: var(--esg-lh-snug);
+}
+.esg-table thead th {
+  font-size: var(--esg-text-xs);
+  letter-spacing: var(--esg-track-label);
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--surface-2);
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.esg-table tbody tr:last-child td { border-bottom: none; }
+/* Figures right-align and share a column rhythm. */
+.esg-table .esg-td-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* A cell that must never wrap mid-value (a period, a code, a status). */
+.esg-table .esg-td-nowrap { white-space: nowrap; }
+
+/* Row-level state, replacing the ad-hoc `.provisional` left border. */
+.esg-table tr.esg-row-caution td:first-child { box-shadow: inset 3px 0 0 var(--esg-caution); }
+.esg-table tr.esg-row-problem td:first-child { box-shadow: inset 3px 0 0 var(--esg-problem); }
+
+/* Below this width a wide table stops being a table. Each row becomes a block
+   with its column name beside each value, so NOTHING is off-screen and there
+   is nothing to scroll past. Opt-in per table via .esg-table--stack, because
+   a two-column table is better left as a table. */
+@media (max-width: 640px) {
+  .esg-table--stack { min-width: 0; }
+  .esg-table--stack thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .esg-table--stack tr {
+    display: block;
+    border-bottom: 1px solid var(--border);
+    padding: var(--esg-space-3) 0;
+  }
+  .esg-table--stack tr:last-child { border-bottom: none; }
+  /* NEITHER GRID NOR FLEX — a floated label over normal text flow.
+     Both of the obvious choices break a cell whose value is text PLUS an
+     element (a figure and its "provisional" chip, which is the common case
+     here). Grid gives every child its own cell, so the chip dropped onto a
+     second row under the LABEL. Flex keeps them together but a wrapped chip
+     returns to the container's left edge, not the value's.
+     Floating the label and indenting the cell puts every line of the value —
+     wrapped or not — in one column, which is what a definition list is. */
+  .esg-table--stack td {
+    display: block;
+    border-bottom: none;
+    padding: var(--esg-space-1) var(--esg-space-4);
+    padding-left: calc(9rem + var(--esg-space-4));
+  }
+  .esg-table--stack td::before {
+    content: attr(data-label);
+    float: left;
+    width: 9rem;
+    margin-left: -9rem;
+    font-size: var(--esg-text-xs);
+    line-height: var(--esg-lh-body);
+    letter-spacing: var(--esg-track-label);
+    text-transform: uppercase;
+    font-weight: 600;
+    color: var(--muted);
+  }
+  /* The float must not escape its own cell into the next one. */
+  .esg-table--stack td::after { content: ''; display: block; clear: both; }
+  .esg-table--stack .esg-td-num { text-align: left; }
+  .esg-table-scroll:has(.esg-table--stack) { background-image: none; }
+}
+
+
+/* ═══ 6 · NAVIGATION — CANNOT DROP DESTINATIONS ═══════════════════════════
+   At <=768px the master hides the sidebar and shows a bottom bar. This app
+   put five items in it and the other eleven — ESG Journey, Carbon, Green
+   Finance, Frameworks and the rest — became unreachable on a phone.
+
+   The pattern below keeps the bar to its five primary destinations and gives
+   the remainder a disclosure built on <details>, so EVERY destination is
+   reachable with no client-side JavaScript. P3 wires the shell to it. */
+
+.esg-nav-more { position: relative; }
+.esg-nav-more > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: var(--esg-space-2);
+  min-height: 44px;               /* §6 touch target */
+  color: var(--muted);
+  font-size: var(--esg-text-xs);
+}
+.esg-nav-more > summary::-webkit-details-marker { display: none; }
+.esg-nav-more[open] > summary { color: var(--accent-text); }
+/* The page you are on lives in this sheet. Same treatment the master gives
+   .bottom-nav-item.active, because it is the same statement — and the reason
+   the sheet no longer opens itself to say it. The subject is the <summary>
+   element, so this defines no master class. */
+.esg-nav-more--current > summary { color: var(--accent-text); }
+.esg-nav-more > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* The sheet. Anchored to the bar, capped so it can never cover the whole
+   screen, and scrollable when the list outgrows it. */
+.esg-nav-sheet {
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  left: auto;
+  width: min(20rem, calc(100vw - var(--esg-space-4) * 2));
+  max-height: min(60vh, 26rem);
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-lg);
+  padding: var(--esg-space-2);
+  margin-bottom: var(--esg-space-2);
+  animation: mds-fade-up var(--esg-dur-fast) var(--esg-ease) both;
+}
+.esg-nav-sheet__group {
+  font-size: var(--esg-text-xs);
+  letter-spacing: var(--esg-track-label);
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--muted);
+  padding: var(--esg-space-3) var(--esg-space-3) var(--esg-space-1);
+}
+.esg-nav-sheet__link {
+  display: flex;
+  align-items: center;
+  gap: var(--esg-space-3);
+  min-height: 44px;
+  padding: var(--esg-space-2) var(--esg-space-3);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  text-decoration: none;
+  font-size: var(--esg-text-md);
+}
+.esg-nav-sheet__link:hover { background: var(--surface-2); }
+.esg-nav-sheet__link[aria-current="page"] { background: var(--accent-bg); color: var(--accent-text); font-weight: 600; }
+.esg-nav-sheet__link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* A destination that exists but is not built. It must never look like a
+   working one — the audit found seven placeholders sitting at the same level
+   as real features, one of them promoted into the five-item mobile bar. */
+.esg-nav-sheet__link--unbuilt { color: var(--muted); }
+.esg-nav-sheet__link--unbuilt::after {
+  content: 'Not built yet';
+  margin-left: auto;
+  font-size: var(--esg-text-2xs);
+  color: var(--muted);
+  border: 1px solid var(--border-2);
+  border-radius: 999px;
+  padding: 1px var(--esg-space-2);
+}
+
+
+/* ═══ 7 · AI STATE ════════════════════════════════════════════════════════
+   The product's honest-empty-state discipline is its best quality: it
+   distinguishes uninstrumented, instrumented-but-empty and genuinely-zero,
+   and says which applies. An AI surface has two MORE states that must not
+   collapse into those — running, and failed — because "the analysis did not
+   run" and "the analysis found nothing" are different facts.
+
+   One component, five modifiers, so the five can never render identically. */
+
+.esg-ai {
+  display: flex;
+  gap: var(--esg-space-3);
+  align-items: flex-start;
+  padding: var(--esg-space-4);
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+.esg-ai__body { min-width: 0; }
+.esg-ai__title { font-size: var(--esg-text-md); font-weight: 600; color: var(--text); margin: 0 0 var(--esg-space-1); }
+.esg-ai__detail { font-size: var(--esg-text-sm); line-height: var(--esg-lh-body); color: var(--text-2); margin: 0; max-width: var(--esg-measure); }
+
+.esg-ai--idle    { border-left-color: var(--border-2); }
+.esg-ai--running { border-left-color: var(--esg-current); background: var(--esg-current-bg); }
+.esg-ai--done    { border-left-color: var(--esg-done); background: var(--esg-done-bg); }
+.esg-ai--empty   { border-left-color: var(--border-2); }
+.esg-ai--failed  { border-left-color: var(--esg-problem); background: var(--esg-problem-bg); }
+
+/* The running indicator. Reuses the master's mds-spin — this file defines no
+   keyframe of its own. */
+.esg-ai__spinner {
+  width: 16px; height: 16px;
+  flex: none;
+  margin-top: 2px;
+  border: 2px solid var(--border-2);
+  border-top-color: var(--esg-current);
+  border-radius: 50%;
+  animation: mds-spin 900ms linear infinite;
+}
+.esg-ai__dot {
+  width: 10px; height: 10px;
+  flex: none;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* Placeholder for content genuinely being fetched. Reuses mds-shimmer. */
+.esg-skeleton {
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--bg-soft) 37%, var(--surface-2) 63%);
+  background-size: 400% 100%;
+  animation: mds-shimmer 1.4s ease-in-out infinite;
+  border-radius: var(--r-sm);
+  min-height: 1em;
+}
+
+
+/* ═══ 8 · PROGRESS, STAGES AND MISSIONS ═══════════════════════════════════ */
+
+.esg-progress {
+  display: block;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.esg-progress__fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--esg-done);
+  transition: width var(--esg-dur-slow) var(--esg-ease);
+}
+.esg-progress--current .esg-progress__fill { background: var(--esg-current); }
+
+/* A stage in the journey. The state is carried by the NODE and the label, not
+   by colour alone — the audit found done / not-started / blocked rendering as
+   near-identical rows. */
+.esg-stage {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--esg-space-3) var(--esg-space-4);
+  padding: var(--esg-space-4) 0;
+  border-bottom: 1px solid var(--border);
+}
+.esg-stage:last-child { border-bottom: none; }
+.esg-stage__node {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--border-2);
+  display: grid;
+  place-items: center;
+  font-size: var(--esg-text-2xs);
+  color: var(--surface);
+  margin-top: 2px;
+}
+.esg-stage--done    .esg-stage__node { background: var(--esg-done); border-color: var(--esg-done); }
+.esg-stage--current .esg-stage__node { border-color: var(--esg-current); box-shadow: 0 0 0 4px var(--esg-current-bg); }
+.esg-stage--next    .esg-stage__node { border-style: dashed; }
+.esg-stage--blocked .esg-stage__node { border-style: dotted; background: var(--esg-blocked-bg); }
+
+.esg-stage__title { font-size: var(--esg-text-md); font-weight: 600; color: var(--text); margin: 0; }
+.esg-stage--blocked .esg-stage__title { color: var(--muted); }
+/* The reason a blocked stage is blocked is the POINT of it being blocked. */
+.esg-stage__why {
+  font-size: var(--esg-text-sm);
+  line-height: var(--esg-lh-body);
+  color: var(--text-2);
+  margin: var(--esg-space-1) 0 0;
+  max-width: var(--esg-measure);
+}
+/* The current stage is the only one that carries its full explanation by
+   default; the rest disclose on demand. Progressive disclosure is what stops
+   13 stages from being 13 paragraphs. */
+/* Same as .esg-evidence's summary: a disclosure is a control, and it measured
+   20px on the dashboard's rating ladder. */
+.esg-stage__more > summary {
+  /* min-height, never display: flex — a flex <summary> loses its ::marker. */
+  min-height: 32px;
+  padding: var(--esg-space-2) 0;
+  cursor: pointer;
+  font-size: var(--esg-text-sm);
+  color: var(--accent-text);
+  margin-top: var(--esg-space-2);
+  width: fit-content;
+}
+.esg-stage__more > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+/* Same rule as .esg-astate, for the same measured reason: --green-text on
+   --green-bg is 4.46:1 in dark theme, and a 12px chip has no large-text
+   allowance to fall back on. The WORD is --text; the state is the border and
+   the dot. Applied here too so the two chip families do not diverge. */
+.esg-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--esg-space-2);
+  font-size: var(--esg-text-xs);
+  font-weight: 600;
+  padding: 2px var(--esg-space-2);
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+  color: var(--text);
+}
+.esg-chip::before {
+  content: '';
+  width: 6px; height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--esg-chip-dot, var(--border-2));
+}
+.esg-chip--done    { --esg-chip-dot: var(--esg-done); border-color: var(--esg-done); background: var(--esg-done-bg); }
+.esg-chip--current { --esg-chip-dot: var(--esg-current); border-color: var(--esg-current); background: var(--esg-current-bg); }
+.esg-chip--blocked { --esg-chip-dot: var(--esg-blocked); border-color: var(--esg-blocked); background: var(--esg-blocked-bg); }
+.esg-chip--caution { --esg-chip-dot: var(--esg-caution); border-color: var(--esg-caution); background: var(--esg-caution-bg); }
+.esg-chip--problem { --esg-chip-dot: var(--esg-problem); border-color: var(--esg-problem); background: var(--esg-problem-bg); }
+.esg-chip--info    { --esg-chip-dot: var(--esg-info); border-color: var(--esg-info); background: var(--esg-info-bg); }
+
+
+/* ═══ 9 · ESG SCORE ═══════════════════════════════════════════════════════
+   THE RING ITSELF IS THE MASTER'S. .score-ring ships with hero and inline
+   sizes, a --ring-thickness token and its own geometry guards, and P2 built a
+   local .esg-score__dial before checking — the one thing this layer must never
+   be. The dial has been removed; what remains is the LAYOUT around the ring
+   (the band block, the pillar set), which the master has no opinion about. */
+
+.esg-score { display: flex; align-items: center; gap: var(--esg-space-6); flex-wrap: wrap; }
+.esg-score__band { display: flex; flex-direction: column; align-items: flex-start; gap: var(--esg-space-2); min-width: 0; }
+.esg-score__bandname { font-family: var(--font-display); font-size: var(--esg-text-xl); font-weight: 700; color: var(--text); }
+.esg-score__basis { font-size: var(--esg-text-sm); color: var(--muted); max-width: var(--esg-measure); }
+
+/* The three pillars, as a set rather than three separate dials. */
+.esg-pillars { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--esg-space-4); }
+.esg-pillar { display: flex; flex-direction: column; gap: var(--esg-space-2); }
+/* flex-start, NOT space-between. With the ring and the name pushed to opposite
+   ends of a 370px column they read as two unrelated objects — measured on the
+   rendered page, not guessed at. */
+.esg-pillar__head { display: flex; align-items: center; gap: var(--esg-space-3); }
+.esg-pillar__name { font-size: var(--esg-text-sm); font-weight: 600; color: var(--text); }
+.esg-pillar__value { font-family: var(--font-display); font-size: var(--esg-text-lg); font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.esg-pillar__basis { font-size: var(--esg-text-xs); color: var(--muted); }
+
+
+/* ═══ 10 · GREEN FINANCE AND CERTIFICATION ════════════════════════════════
+   Structure only. The wording, thresholds and what a verdict may claim are
+   product decisions that belong to P6/P7 and the master directive — this
+   layer decides only how a verdict, a product row and a ladder are BUILT. */
+
+.esg-readiness {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--esg-space-3) var(--esg-space-4);
+  align-items: start;
+  padding: var(--esg-space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface);
+}
+.esg-readiness__verdict { font-family: var(--font-display); font-size: var(--esg-text-xl); font-weight: 700; color: var(--text); margin: 0; }
+.esg-readiness__why { font-size: var(--esg-text-md); line-height: var(--esg-lh-body); color: var(--text-2); margin: var(--esg-space-2) 0 0; max-width: var(--esg-measure); }
+.esg-readiness__gaps { list-style: none; margin: var(--esg-space-3) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--esg-space-2); }
+.esg-readiness__gap { display: flex; gap: var(--esg-space-2); align-items: baseline; font-size: var(--esg-text-sm); color: var(--text-2); }
+
+/* A financing programme. Institution and programme are one identity, so they
+   are one cell — the register currently splits them across a wrapping column. */
+.esg-product { display: grid; gap: var(--esg-space-1); }
+.esg-product__name { font-size: var(--esg-text-md); font-weight: 600; color: var(--text); }
+.esg-product__org { font-size: var(--esg-text-sm); color: var(--muted); }
+/* Provenance. A DATE, not "3 days ago" — the register's stated intent. */
+.esg-product__source { font-size: var(--esg-text-2xs); color: var(--muted); }
+
+/* The scope ladder: which stages this platform performs and which it does not.
+   The clearest statement of scope in the product, currently buried fourth of
+   eight cards on Governance. */
+.esg-ladder { display: flex; flex-direction: column; gap: 0; }
+.esg-ladder__step {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--esg-space-3) var(--esg-space-4);
+  align-items: center;
+  padding: var(--esg-space-4) 0;
+  border-bottom: 1px solid var(--border);
+}
+.esg-ladder__step:last-child { border-bottom: none; }
+.esg-ladder__n { font-variant-numeric: tabular-nums; font-size: var(--esg-text-sm); color: var(--muted); }
+.esg-ladder__what { font-size: var(--esg-text-md); color: var(--text); }
+.esg-ladder__who { font-size: var(--esg-text-sm); color: var(--muted); }
+.esg-ladder__step--ours .esg-ladder__what { font-weight: 600; }
+.esg-ladder__step--not-ours { opacity: 0.75; }
+
+
+/* ═══ 11 · MOTION ═════════════════════════════════════════════════════════
+   NO NEW KEYFRAMES. Every animation here names one the master already ships
+   (mds-fade-up, mds-scale-in, mds-spin, mds-shimmer). This section only
+   decides WHEN motion is allowed to mean something:
+     - a value arriving that the user asked for   (score reveal)
+     - work being done                            (spinner, shimmer)
+     - a surface appearing                        (nav sheet, banner)
+   Nothing decorative, nothing on scroll, nothing ambient. */
+
+.esg-enter { animation: mds-fade-up var(--esg-dur-base) var(--esg-ease) both; }
+.esg-enter-scale { animation: mds-scale-in var(--esg-dur-base) var(--esg-ease) both; }
+
+/* The score reveal. The dial sweeps to its value once, on arrival. The VALUE
+   is already in the DOM — this animates the ring only, so a reduced-motion
+   user and a screen reader get the identical number with no delay. */
+
+@media (prefers-reduced-motion: reduce) {
+  .esg-enter,
+  .esg-enter-scale,
+  .esg-nav-sheet,
+  .esg-progress__fill { transition: none; }
+  .esg-ai__spinner { animation-duration: 3s; }   /* still turns: it means "working" */
+  .esg-skeleton { animation: none; }
+}
+
+
+/* ═══ 12 · RESPONSIVE RULES ═══════════════════════════════════════════════
+   Breakpoints match the master's shell so the two never disagree about what
+   "a phone" is: 768px is where the sidebar becomes the bottom bar. */
+
+@media (max-width: 768px) {
+  :root {
+    /* One step down at the top of the scale only. Body text does NOT shrink —
+       shrinking body text is how a phone layout becomes unreadable. */
+    --esg-text-4xl: 38px;
+    --esg-text-3xl: 28px;
+    --esg-text-2xl: 22px;
+  }
+  .esg-card { padding: var(--esg-space-4); }
+  .esg-card__header,
+  .esg-card__footer { padding: var(--esg-space-3) var(--esg-space-4); }
+  .esg-card__body { padding: var(--esg-space-4); }
+  .esg-score { gap: var(--esg-space-4); }
+  .esg-stack-loose { gap: var(--esg-space-5); }
+}
+
+@media (max-width: 480px) {
+  .esg-score { flex-direction: column; align-items: flex-start; }
+  .esg-readiness { grid-template-columns: 1fr; }
+  .esg-ladder__step { grid-template-columns: auto 1fr; }
+}
+
+
+/* ═══ 13 · THE APPLICATION SHELL ══════════════════════════════════════════
+   Additions to the master's shell, never replacements. .app-layout,
+   .app-sidebar, .app-topbar, .app-main, .app-bottom-nav and the .sidebar-*
+   component set all remain the master's and are untouched — MODUS_UI_CONTRACT
+   §4.3 specifies them and Run 53 already removed one hand-rolled shell from
+   this file. What follows is what the master has no opinion about: company
+   context, review state, the priority tiers and the phone overflow.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* ── 13.1 · Brand ─────────────────────────────────────────────────────────
+   The full product name wrapped to three lines in the 240px rail and pushed
+   the first nav item toward the fold. */
+.esg-brand-name { display: block; }
+
+/* ── 13.2 · Top bar: identity and state ───────────────────────────────────
+   The master's .app-topbar is a flex row with the title first; this makes the
+   title and the company one unit and lets it take the free space, so the
+   state chips sit against the right edge at every width. */
+.esg-topbar__identity {
+  display: flex;
+  align-items: baseline;
+  gap: var(--esg-space-3);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.esg-topbar__company {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--esg-space-2);
+  min-width: 0;
+  padding-left: var(--esg-space-3);
+  border-left: 1px solid var(--border);
+}
+.esg-topbar__company-name {
+  font-size: var(--esg-text-sm);
+  font-weight: 600;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 22ch;
+}
+.esg-topbar__company-year {
+  font-size: var(--esg-text-xs);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* State chips. Each one is a LINK to the work it counts, never a bell that
+   opens a list nothing writes to. */
+.esg-topbar__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--esg-space-2);
+  height: 32px;
+  padding: 0 var(--esg-space-3);
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: var(--esg-text-sm);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+a.esg-topbar__chip:hover { border-color: var(--border-2); color: var(--text); }
+a.esg-topbar__chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.esg-topbar__chip svg { flex: none; }
+
+/* Work waiting on a person. --esg-problem is the slot for "you must act", and
+   this is the only place in the chrome that uses it. */
+.esg-topbar__chip--attention { color: var(--esg-problem); border-color: currentColor; background: var(--esg-problem-bg); }
+/* Nothing waiting is a RESULT, not an absence — it renders, quietly. */
+.esg-topbar__chip--quiet { color: var(--muted); background: transparent; font-weight: 500; }
+.esg-topbar__chip--ai { color: var(--esg-current); border-color: currentColor; background: var(--esg-current-bg); }
+.esg-topbar__chip-count { font-variant-numeric: tabular-nums; }
+
+/* ── 13.2b · THE TOP BAR MUST NOT SIZE THE APPLICATION (D7) ───────────────
+   MEASURED, at 390px, on every page: .app-layout's `1fr` column resolved to
+   490px, .app-main inherited it, and .app-layout's own `overflow: hidden`
+   clipped the surplus 100px. There was no scrollbar and no gesture — the
+   right-hand quarter of the hero, of every section note and of the second
+   button in every action row was simply absent, and nothing on the page said
+   so. That is data loss, in the same class as §5's clipped table column, and
+   it is worse for being invisible.
+
+   THE MECHANISM, because the fix looks unrelated to the symptom: a grid item's
+   automatic minimum size is its MIN-CONTENT, and a `1fr` track is at least
+   that. The top bar is a flex row whose every item sets `white-space: nowrap`,
+   and a nowrap run's min-content is its FULL width — so the bar could not
+   report a min-content smaller than the sum of its untruncated text, and that
+   sum became the width of the whole application column.
+
+   `min-width: 0` on .app-topbar is the one-line fix and it is not ours to
+   write: the subject would be a master class, which is the fork this layer
+   exists to avoid, and test/esg-design-system-test.js fails on it. What IS
+   ours is every piece of content inside the bar. Letting each one wrap makes
+   its min-content contribution its LONGEST WORD instead of its whole string,
+   which took the bar from 490px to 363px — under a phone — and the column
+   with it.
+
+   `contain: inline-size` IS THE FIX, and it took a measurement to find. Four
+   candidates were tried against a real page at 390px with a 46-character page
+   title, and the resulting grid track measured:
+
+     nowrap + ellipsis + min-width: 0 + overflow: hidden      729px
+     max-width in ch on every item, with ellipsis             534px
+     hide the page title below 768px, everything else nowrap  401px
+     contain: inline-size on .esg-topbar__identity            390px  ← exact
+
+   `min-width: 0` is a FLOOR, not a ceiling: it lets a flex item shrink, but the
+   item's min-content CONTRIBUTION to its container is still its own content, so
+   the track kept growing. Letting the text wrap did shrink the track, and broke
+   the bar — the bar has a fixed height, so a wrapped title and a three-line
+   "need review" pill overlapped each other at 390px. That was measured too, and
+   is why this rule is not the obvious one.
+
+   `contain: inline-size` says the element's inline size does not depend on its
+   contents at all, so its contribution is zero and the track collapses to the
+   viewport — while the text inside stays on ONE line and truncates with an
+   ellipsis, which is what a top bar should do with a long page title. It is
+   applied to OUR wrapper, never to .app-topbar, so no master component is
+   redefined. The 100vw cap in §14.1 is the net underneath it. */
+@media (max-width: 768px) {
+  .esg-topbar__identity {
+    contain: inline-size;
+    min-width: 0;
+  }
+  .esg-topbar__title,
+  .esg-topbar__company-name {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .esg-topbar__company { flex-shrink: 1; min-width: 0; }
+  .esg-topbar__company-name { max-width: 11ch; }
+  .esg-topbar__chip {
+    /* A ceiling as well as a floor. The identity block can no longer inflate
+       the track; these still could, and a three-digit review count is the
+       obvious way it would happen. */
+    min-width: 0;
+    max-width: 14ch;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    /* §6: 44px is a finger. The master applies this to .btn at ≤768px and the
+       chips are the same kind of target — they measured 32px until now. */
+    height: auto;
+    min-height: 44px;
+    padding-block: var(--esg-space-2);
+  }
+}
+
+/* ── 13.3 · Sidebar: the not-built group ──────────────────────────────────
+   THE ONE PLACE THIS FILE USES A COLOUR LITERAL, and it is the master's own
+   convention rather than an exception to it. .app-sidebar paints --brand,
+   which is DARK IN BOTH THEMES deliberately (it is the command surface), so
+   white-alpha is theme-safe there and is what .sidebar-item and
+   .sidebar-section-label already use. The alpha floor is the master's measured
+   one: its comment records that 0.46 is the lowest value clearing 4.5:1
+   against --brand in both themes, and nothing here goes below it.
+   test/esg-design-system-test.js permits white-alpha ONLY on this surface and
+   asserts the floor.
+   Seven destinations that do nothing, in one disclosure, closed by default.
+   Present because the product states absent capabilities rather than hiding
+   them; collapsed because it will not promote them next to working ones. */
+.esg-sidebar-future { margin-top: var(--esg-space-4); }
+.esg-sidebar-future > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: var(--esg-space-2);
+  padding: var(--esg-space-2) var(--esg-space-4);
+  font-size: var(--esg-text-xs);
+  letter-spacing: var(--esg-track-label);
+  text-transform: uppercase;
+  font-weight: 600;
+  color: rgb(255 255 255 / 0.46);
+}
+.esg-sidebar-future > summary::-webkit-details-marker { display: none; }
+.esg-sidebar-future > summary:hover { color: rgb(255 255 255 / 0.78); }
+.esg-sidebar-future > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.esg-sidebar-future__label { flex: none; }
+.esg-sidebar-future__list { display: flex; flex-direction: column; padding-bottom: var(--esg-space-2); }
+.esg-sidebar-future__count {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0 var(--esg-space-2);
+}
+.esg-sidebar-future__link {
+  display: block;
+  padding: var(--esg-space-2) var(--esg-space-4) var(--esg-space-2) var(--esg-space-8);
+  font-size: var(--esg-text-sm);
+  color: rgb(255 255 255 / 0.46);
+  text-decoration: none;
+}
+.esg-sidebar-future__link:hover { color: rgb(255 255 255 / 0.78); }
+.esg-sidebar-future__link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* ── 13.3b · The rail scrolls its NAV, not itself (D6) ────────────────────
+   At 1280x800 the whole rail scrolled and the user block with Sign out sat at
+   948-1073px — below the fold, reachable only by scrolling a region most people
+   do not realise scrolls. The master gives .sidebar-nav `flex: 1` but leaves
+   `overflow-y: visible`, so the nav cannot take the overflow and the rail does.
+
+   `min-height: 0` is the load-bearing declaration: a flex item's default
+   `min-height: auto` refuses to shrink below its content, which is why `flex: 1`
+   alone never produced a scroll region. With the nav absorbing the overflow the
+   rail's own content fits, so its `overflow-y: auto` stops engaging and the
+   footer stays pinned — without this file ever taking .app-sidebar as a
+   subject. */
+.esg-sidebar-nav {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.esg-sidebar-footer { flex: 0 0 auto; }
+
+/* ── 13.4 · Phone overflow, inside the master's bar ───────────────────────
+   §6 built the sheet; this is what makes it a bar item. */
+.app-bottom-nav .esg-nav-more { flex: 1; display: flex; }
+.app-bottom-nav .esg-nav-more > summary { flex: 1; justify-content: center; }
+.app-bottom-nav .esg-nav-more .esg-nav-sheet { right: var(--esg-space-2); }
+
+/* ── 13.5 · Page rhythm ───────────────────────────────────────────────────
+   The master has no container: .app-main is padding-only and uncapped, so a
+   panel on a 2560px monitor stretched to whatever the monitor was. layout.js
+   has carried a --content-max fallback since Run 56; this moves the page-level
+   rhythm beside it rather than leaving it in an inline <style>. */
+.esg-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--esg-space-6);
+}
+.esg-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--esg-space-4);
+  flex-wrap: wrap;
+}
+.esg-page-header__text { min-width: 0; }
+.esg-page-header__intro {
+  margin: var(--esg-space-2) 0 0;
+  font-size: var(--esg-text-md);
+  line-height: var(--esg-lh-body);
+  color: var(--text-2);
+  max-width: var(--esg-measure);
+}
+/* The page's one primary action, always in the same place. */
+.esg-page-header__action { flex: none; display: flex; gap: var(--esg-space-2); flex-wrap: wrap; }
+
+@media (max-width: 768px) {
+  .esg-topbar__company { border-left: none; padding-left: 0; }
+  .esg-topbar__company-name { max-width: 14ch; }
+  /* The label goes; the count is the information. */
+  .esg-topbar__chip--attention { padding: 0 var(--esg-space-2); }
+  .esg-topbar__chip--quiet { display: none; }
+  .esg-page { gap: var(--esg-space-5); }
+}
+
+@media (max-width: 480px) {
+  .esg-topbar__identity { gap: var(--esg-space-2); }
+  /* The COMPANY stays and the year goes. An earlier draft hid the company
+     outright to buy width, which on a product where every figure belongs to one
+     tenant is the wrong thing to drop — the page title is already echoed by the
+     highlighted item in the bottom bar, so it is the redundant half here. */
+  .esg-topbar__company-name { max-width: 11ch; }
+  .esg-topbar__company-year { display: none; }
+  /* THE PAGE TITLE LEAVES THE BAR HERE, AND IT IS A DECISION.
+     Measured with the longest title in the product against §13.2b's containment:
+     768px gives it 278px, 600px gives it 110px, 480px gives it 61px and 390px
+     gives it nothing at all. Sixty-one pixels of a filename is not a title, it
+     is a stub that looks like a rendering fault, and letting it silently reach
+     zero is the same thing with less warning.
+
+     What is lost is recoverable and what is kept is not: every page states its
+     own name in its <h1> immediately below, and the bottom bar highlights the
+     section — but "whose data is this" appears nowhere else on the screen, and
+     this is a multi-tenant product where that is the load-bearing fact. */
+  .esg-topbar__title { display: none; }
+}
+
+
+/* ═══ 14 · THE DASHBOARD NARRATIVE ════════════════════════════════════════
+   P4. The audit found a dashboard of five equal-weight metric tiles above two
+   columns of panels that contradicted each other twice, ending in a 500px
+   essay about absent features. Nothing on it answered "what do I do next"
+   louder than anything else.
+
+   These components exist to carry ONE story: where you are, what the AI did,
+   what needs you, what to do next, and where the journey can go. They are not
+   cards. A card is used below only where grouping genuinely helps.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* ── 14.1 · Canvas ────────────────────────────────────────────────────────
+   "High-tech nature-inspired command centre" without stock photography,
+   gradients for their own sake, or glassmorphism: two fixed, near-invisible
+   layers — contour lines from the topographic vocabulary, and one soft
+   atmospheric pool behind the hero. Both are painted from THEME TOKENS, so
+   they invert correctly, and both sit far enough under the content that no
+   text ever competes with them. */
+.esg-canvas {
+  /* P8 · FOUR LAYERS, PAINTED ONCE, NEVER ANIMATED.
+     Two contour intervals at ONE angle rather than one at one angle: a
+     topographic sheet is read by the relationship between its fine interval
+     and its index line, and a single ruled pitch is what made this read as
+     lined paper in the P8 before-shot. The index line is four fine intervals
+     apart (74 · 4 = 296) so the two are commensurate and never beat against
+     each other.
+
+     Then two atmospheric pools rather than one. A single pool at the top
+     right left the lower half of every long page flat; the second, larger and
+     cooler one at the bottom left gives the column depth all the way down.
+     Both are token colours, so both invert with the theme. */
+  background-image:
+    repeating-linear-gradient(114deg, var(--border) 0 1px, transparent 1px 74px),
+    repeating-linear-gradient(114deg, var(--border-2) 0 1px, transparent 1px 296px),
+    radial-gradient(120% 60% at 88% -10%, var(--accent-bg) 0%, transparent 60%),
+    radial-gradient(90% 55% at 4% 104%, var(--surface-2) 0%, transparent 62%);
+
+  /* `scroll`, NOT `fixed`. Both leave the atmosphere stationary while the
+     content moves, because .app-main is the scroll container and `scroll`
+     positions the background against ITS border box. `fixed` positions it
+     against the VIEWPORT, which forces every browser to take the whole
+     scroller off the compositor and repaint the full area on every frame —
+     the one CPU-heavy thing on a page that was otherwise motion-free. */
+  background-attachment: scroll;
+  background-repeat: repeat, repeat, no-repeat, no-repeat;
+
+  /* D7's fail-closed net. .app-layout's `1fr` column is sized by the top bar's
+     min-content, and .app-layout clips what overflows — so if the bar ever
+     grows past a phone width again, the page narrows to the viewport instead
+     of silently losing its right-hand hundred pixels. §13.2b removes the
+     cause; this makes the SYMPTOM impossible. On a desktop .app-main is
+     already narrower than 100vw by the width of the rail, so it is inert. */
+  max-width: 100vw;
+}
+/* The contour layers must READ as texture, never as ruled paper. */
+@supports (background-blend-mode: overlay) {
+  .esg-canvas { background-blend-mode: soft-light, soft-light, normal, normal; }
+}
+
+/* ── 14.2 · Hero ──────────────────────────────────────────────────────────
+   Not a card. A controlled surface carrying the one thing the page is about:
+   position, score, and the single next action. */
+.esg-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: var(--esg-space-7);
+  align-items: center;
+  padding: var(--esg-space-7);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+.esg-hero__eyebrow {
+  display: flex;
+  align-items: center;
+  gap: var(--esg-space-2);
+  font-size: var(--esg-text-xs);
+  letter-spacing: var(--esg-track-label);
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: var(--esg-space-3);
+}
+.esg-hero__headline {
+  font-family: var(--font-display);
+  font-size: var(--esg-text-2xl);
+  line-height: var(--esg-lh-tight);
+  letter-spacing: var(--esg-track-tight);
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 var(--esg-space-3);
+  text-wrap: balance;
+  max-width: 26ch;
+}
+.esg-hero__sub {
+  font-size: var(--esg-text-md);
+  line-height: var(--esg-lh-body);
+  color: var(--text-2);
+  margin: 0;
+  max-width: var(--esg-measure);
+}
+.esg-hero__score { display: flex; align-items: center; gap: var(--esg-space-5); flex-wrap: wrap; }
+
+/* The next action. ONE per page, and it looks like the only one. */
+.esg-next {
+  display: flex;
+  flex-direction: column;
+  gap: var(--esg-space-3);
+  padding: var(--esg-space-5);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--esg-current);
+  border-radius: var(--r);
+  background: var(--surface-2);
+}
+.esg-next__label {
+  font-size: var(--esg-text-xs);
+  letter-spacing: var(--esg-track-label);
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--esg-current);
+}
+.esg-next__title {
+  font-family: var(--font-display);
+  font-size: var(--esg-text-xl);
+  line-height: var(--esg-lh-snug);
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+  text-wrap: balance;
+}
+.esg-next__why {
+  font-size: var(--esg-text-sm);
+  line-height: var(--esg-lh-body);
+  color: var(--text-2);
+  margin: 0;
+  max-width: var(--esg-measure);
+}
+.esg-next__actions { display: flex; gap: var(--esg-space-2); flex-wrap: wrap; margin-top: var(--esg-space-1); }
+
+/* ── 14.3 · Section rhythm ────────────────────────────────────────────────
+   A dashboard that is one story needs section headings, which the old grid of
+   equal panels had no room for. */
+.esg-section { display: flex; flex-direction: column; gap: var(--esg-space-4); }
+.esg-section__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--esg-space-4);
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: var(--esg-space-2);
+}
+.esg-section__title {
+  font-family: var(--font-display);
+  font-size: var(--esg-text-lg);
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+}
+.esg-section__note { font-size: var(--esg-text-sm); color: var(--muted); }
+
+/* ── 14.4 · Pathway ───────────────────────────────────────────────────────
+   ESG to improvement to opportunity to readiness, as ONE object rather than
+   four unrelated panels. Each step carries its own real state; a step with no
+   data says so instead of showing a zero. */
+.esg-pathway {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+.esg-pathway__step {
+  background: var(--surface);
+  padding: var(--esg-space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--esg-space-2);
+  min-width: 0;
+}
+.esg-pathway__step--reserved { background: var(--surface-2); }
+.esg-pathway__n {
+  /* P8: was --esg-text-2xs. A step number is a label, not provenance (§3). */
+  font-size: var(--esg-text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  letter-spacing: var(--esg-track-label);
+}
+.esg-pathway__name {
+  font-size: var(--esg-text-md);
+  font-weight: 600;
+  color: var(--text);
+}
+.esg-pathway__value {
+  font-family: var(--font-display);
+  font-size: var(--esg-text-xl);
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.esg-pathway__step--reserved .esg-pathway__value { color: var(--esg-blocked); font-size: var(--esg-text-md); }
+.esg-pathway__note { font-size: var(--esg-text-sm); color: var(--text-2); line-height: var(--esg-lh-snug); }
+
+/* ── 14.5 · Reserved capability ───────────────────────────────────────────
+   SustNET Impact and SustNET ESG Certification are STRATEGICALLY RESERVED,
+   not broken. The distinction has to be visible: a reserved block is composed,
+   labelled with the precondition that would activate it, and carries no
+   number, no bar and no percentage — because inventing one would be the single
+   worst thing this product could do.
+
+   It reads as deliberate through composition rather than decoration: a
+   full-width surface, a status word in the blocked slot, and a dashed rule
+   that says "defined, not yet drawn". */
+.esg-reserved {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--esg-space-3) var(--esg-space-5);
+  align-items: start;
+  padding: var(--esg-space-5);
+  border: 1px dashed var(--border-2);
+  border-radius: var(--r);
+  background: var(--surface-2);
+}
+.esg-reserved__mark {
+  width: 34px; height: 34px;
+  border-radius: 50%;
+  border: 1px dashed var(--border-2);
+  display: grid;
+  place-items: center;
+  color: var(--esg-blocked);
+  flex: none;
+}
+.esg-reserved__title {
+  font-family: var(--font-display);
+  font-size: var(--esg-text-lg);
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 var(--esg-space-1);
+}
+.esg-reserved__body {
+  font-size: var(--esg-text-sm);
+  line-height: var(--esg-lh-body);
+  color: var(--text-2);
+  margin: 0;
+  max-width: var(--esg-measure);
+}
+/* The status word IS the point of the block. */
+.esg-reserved__status {
+  align-self: center;
+  /* P8: was --esg-text-2xs. "Certification framework required" is the STATUS of
+     a reserved capability — the single most load-bearing word on the block —
+     and it was the smallest text on the page. §3 reserves 11px for legal. */
+  font-size: var(--esg-text-xs);
+  letter-spacing: var(--esg-track-label);
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--esg-blocked);
+  border: 1px solid var(--border-2);
+  border-radius: 999px;
+  padding: var(--esg-space-1) var(--esg-space-3);
+  white-space: nowrap;
+}
+/* The four pillars, NAMED but never scored. Naming the mission is honest;
+   claiming a contribution to it is not. */
+.esg-pillars-named {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--esg-space-2);
+  margin-top: var(--esg-space-1);
+}
+.esg-pillar-name {
+  font-size: var(--esg-text-xs);
+  color: var(--text-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: var(--esg-space-1) var(--esg-space-3);
+  background: var(--surface);
+}
+
+/* ── 14.6 · Recommendation as a mission ───────────────────────────────────
+   The audit found three near-identical 50-word paragraphs stacked in a panel.
+   The pillar, the cost in points and the priority are the scannable facts; the
+   sentence is the detail behind them. */
+.esg-rec {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--esg-space-2) var(--esg-space-4);
+  align-items: baseline;
+  padding: var(--esg-space-4) 0;
+  border-bottom: 1px solid var(--border);
+}
+.esg-rec:last-child { border-bottom: none; }
+.esg-rec__points {
+  font-family: var(--font-display);
+  font-size: var(--esg-text-lg);
+  font-weight: 700;
+  color: var(--esg-current);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.esg-rec__head { font-size: var(--esg-text-md); font-weight: 600; color: var(--text); }
+.esg-rec__text {
+  font-size: var(--esg-text-sm);
+  line-height: var(--esg-lh-body);
+  color: var(--text-2);
+  margin: var(--esg-space-1) 0 0;
+  max-width: var(--esg-measure);
+  grid-column: 2;
+}
+
+/* ── 14.7 · Responsive ────────────────────────────────────────────────────
+   The hero collapses to one column BEFORE the score gets small enough to stop
+   reading as the primary object. */
+@media (max-width: 1100px) {
+  .esg-hero { grid-template-columns: 1fr; gap: var(--esg-space-6); }
+}
+@media (max-width: 768px) {
+  .esg-hero { padding: var(--esg-space-5); }
+  .esg-hero__score { gap: var(--esg-space-4); }
+  .esg-reserved { grid-template-columns: auto minmax(0, 1fr); }
+  .esg-reserved__status { grid-column: 2; justify-self: start; align-self: start; }
+  .esg-pillars-named { grid-column: 1 / -1; }
+  .esg-rec { grid-template-columns: minmax(0, 1fr) auto; }
+  .esg-rec__text { grid-column: 1 / -1; }
+  /* The contour layer costs more than it gives on a phone. */
+  .esg-canvas { background-image: radial-gradient(140% 40% at 90% -10%, var(--accent-bg) 0%, transparent 60%); }
+}
+
+
+/* ═══ 15 · THE MISSION MAP ════════════════════════════════════════════════
+   P5. The journey page presented the same thirteen stages THREE TIMES — as a
+   rail with a paragraph each, as a row of chips, and again as expanded mission
+   cards — behind four stat tiles, two of which showed the same number. Nothing
+   on it was dominant, and it read as a document rather than a position.
+
+   ONE REPRESENTATION, ARRANGED IN ARCS. The rail stays exactly as the design
+   system draws it — .journey / .journey-rail / .journey-node are the master's
+   and journeyView.js still renders every node — and this section adds the one
+   thing the master has no opinion about: where one arc of the journey ends and
+   the next begins, and how far through each arc this company is.
+
+   WHY ARCS RATHER THAN A HORIZONTAL BOARD. A six-column board at 1440px gives
+   each stage ~180px, which is narrower than its own label, and it collapses to
+   an unreadable stack on a phone. Arcs down a single spine read as progression
+   at every width, and the spine is already drawn.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* ── 15.1 · The arc marker, sitting on the rail ───────────────────────────
+   Inside .journey-rail, between nodes. It is a heading with a measure of how
+   far through this arc the company is, so a user can see "evidence: done,
+   assessment: done, finance: not started" without reading thirteen rows. */
+.esg-arc {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--esg-space-1) var(--esg-space-4);
+  align-items: baseline;
+  margin: var(--esg-space-6) 0 var(--esg-space-3);
+  padding-bottom: var(--esg-space-2);
+  border-bottom: 1px solid var(--border);
+}
+.esg-map > .esg-arc:first-child { margin-top: 0; }
+.esg-arc__name {
+  font-family: var(--font-display);
+  font-size: var(--esg-text-md);
+  font-weight: 700;
+  letter-spacing: var(--esg-track-label);
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.esg-arc__count {
+  font-size: var(--esg-text-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.esg-arc__bar { grid-column: 1 / -1; }
+/* An arc whose stages are all blocked is not "0% done" — it is not open. */
+.esg-arc--reserved .esg-arc__name { color: var(--esg-blocked); }
+
+/* ── 15.2 · The current mission ───────────────────────────────────────────
+   The one dominant object on the page. It carries the stage's number, its
+   state, what is already done inside it and what remains, and the single
+   action that advances it. */
+.esg-mission-now {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: var(--esg-space-7);
+  align-items: start;
+  padding: var(--esg-space-7);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+.esg-mission-now__index {
+  font-family: var(--font-display);
+  font-size: var(--esg-text-sm);
+  font-weight: 700;
+  letter-spacing: var(--esg-track-label);
+  text-transform: uppercase;
+  color: var(--esg-current);
+  margin-bottom: var(--esg-space-2);
+  display: block;
+}
+.esg-mission-now__name {
+  font-family: var(--font-display);
+  font-size: var(--esg-text-2xl);
+  line-height: var(--esg-lh-tight);
+  letter-spacing: var(--esg-track-tight);
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 var(--esg-space-3);
+  text-wrap: balance;
+  max-width: 22ch;
+}
+.esg-mission-now__why {
+  font-size: var(--esg-text-md);
+  line-height: var(--esg-lh-body);
+  color: var(--text-2);
+  margin: 0;
+  max-width: var(--esg-measure);
+}
+
+/* What is done inside this mission, and what is not. Two figures, not a bar
+   with a caption — the numbers are the answer. */
+.esg-tally { display: flex; flex-wrap: wrap; gap: var(--esg-space-6); margin-top: var(--esg-space-5); }
+.esg-tally__item { display: flex; flex-direction: column; gap: 2px; }
+.esg-tally__value {
+  font-family: var(--font-display);
+  font-size: var(--esg-text-xl);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.esg-tally__label { font-size: var(--esg-text-xs); color: var(--muted); }
+.esg-tally__item--attention .esg-tally__value { color: var(--esg-problem); }
+
+/* ── 15.3 · The progress strip ────────────────────────────────────────────
+   Replaces four equal stat tiles, two of which showed the same 390. One row of
+   quiet figures, subordinate to the mission above it. */
+.esg-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--esg-space-6);
+  padding: var(--esg-space-4) var(--esg-space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface-2);
+}
+.esg-strip__item { display: flex; align-items: baseline; gap: var(--esg-space-2); min-width: 0; }
+.esg-strip__value {
+  font-family: var(--font-display);
+  font-size: var(--esg-text-lg);
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.esg-strip__label { font-size: var(--esg-text-sm); color: var(--muted); }
+
+/* ── 15.4 · Responsive ────────────────────────────────────────────────────
+   The mission collapses before its name has to wrap awkwardly. The arcs need
+   no breakpoint at all — a spine is already a vertical progression. */
+@media (max-width: 1100px) {
+  .esg-mission-now { grid-template-columns: 1fr; gap: var(--esg-space-6); }
+}
+@media (max-width: 768px) {
+  .esg-mission-now { padding: var(--esg-space-5); }
+  .esg-tally { gap: var(--esg-space-5); }
+  .esg-strip { gap: var(--esg-space-4); padding: var(--esg-space-4); }
+  .esg-arc { margin-top: var(--esg-space-5); }
+}
+
+
+/* ═══ 16 · ASSESSMENT, EVIDENCE AND VERIFICATION ══════════════════════════
+   P6. The assessment was forty questions on one flat page with an amber
+   "draft" chip repeated on every row, the answer control and its evidence tier
+   500px apart, and no sign anywhere that the platform had read a document and
+   proposed something. The AI work happened on a different page entirely.
+
+   THE STATES BELOW ARE DERIVED, NEVER STORED. Each one is a real shape in the
+   database — a missing response row, is_na, a pending extraction, an accepted
+   one with its document_id — so a state cannot drift from the fact it claims.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* ── 16.1 · Pillar header ─────────────────────────────────────────────────
+   A section of the assessment states its own position: how many answers are
+   verified against a document, how many the platform has proposed and nobody
+   has looked at, how many are still missing. One number could not carry that. */
+.esg-pillar-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--esg-space-3) var(--esg-space-5);
+  align-items: center;
+  padding: var(--esg-space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--r) var(--r) 0 0;
+  border-bottom: none;
+  background: var(--surface-2);
+}
+.esg-pillar-head__name {
+  font-family: var(--font-display);
+  font-size: var(--esg-text-xl);
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+}
+.esg-pillar-head__states { display: flex; flex-wrap: wrap; gap: var(--esg-space-2) var(--esg-space-4); }
+.esg-pillar-head__bar { grid-column: 1 / -1; }
+.esg-count { display: inline-flex; align-items: baseline; gap: var(--esg-space-2); }
+/* --esg-text-xl, not -lg. At 16px/700 the green count measured 4.46:1 against
+   --surface-2 in dark theme — just under the 4.5 body threshold. At 20px/700 it
+   crosses WCAG's large-text boundary (18.66px bold), where the requirement is
+   3:1, and it clears that comfortably. The figure is also the thing a reader
+   scans this header for, so the larger size is the right hierarchy anyway. */
+.esg-count__n {
+  font-family: var(--font-display);
+  font-size: var(--esg-text-xl);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.esg-count__label { font-size: var(--esg-text-xs); color: var(--muted); }
+.esg-count--verified .esg-count__n { color: var(--esg-done); }
+.esg-count--review   .esg-count__n { color: var(--esg-problem); }
+.esg-count--missing  .esg-count__n { color: var(--esg-caution); }
+.esg-count--na       .esg-count__n { color: var(--esg-blocked); }
+
+/* ── 16.2 · One question ──────────────────────────────────────────────────
+   The answer control and the evidence tier are ONE row on ONE grid, so the
+   tier column cannot wander left and right down the page as it did when a
+   not-applicable checkbox appeared on some rows and not others. */
+.esg-q {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--esg-space-3);
+  padding: var(--esg-space-5);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.esg-q:last-of-type { border-radius: 0 0 var(--r) var(--r); }
+.esg-q--review { background: var(--esg-problem-bg); }
+.esg-q__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--esg-space-2) var(--esg-space-3); }
+/* Quiet by design. The mapping marker says whether the QUESTION's wording is
+   the publisher's or ours — real per-row provenance, but it was rendering as
+   forty amber chips that outranked the answer state sitting next to them. It
+   keeps its words and loses the alarm colour. */
+.esg-q__map {
+  /* P8: was --esg-text-2xs. §3 reserves 11px for legal and provenance and says
+     so in its own comment — "Never a label, never a title" — and this is the
+     label that names which pillar and how many points a question carries. The
+     layer was breaking its own rule on the two densest screens in the product,
+     which is where a 1px difference is felt most. */
+  font-size: var(--esg-text-xs);
+  letter-spacing: var(--esg-track-label);
+  text-transform: uppercase;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 0 var(--esg-space-2);
+  white-space: nowrap;
+}
+.esg-q__code {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--esg-text-xs);
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.esg-q__text { font-size: var(--esg-text-md); font-weight: 600; color: var(--text); flex: 1 1 22ch; min-width: 0; }
+.esg-q__guide {
+  font-size: var(--esg-text-sm);
+  line-height: var(--esg-lh-body);
+  color: var(--text-2);
+  margin: 0;
+  max-width: var(--esg-measure);
+}
+/* The controls, on one grid. */
+/* The answer, its evidence tier and its N/A switch are ONE decision, so they
+   sit together at the left rather than being spread across the content width.
+   The audit measured the first two ~500px apart with 500px of nothing between
+   them, and a fractional grid across a 1140px row reproduced exactly that. */
+.esg-q__controls {
+  display: grid;
+  grid-template-columns: minmax(0, 20rem) minmax(0, 15rem) auto;
+  justify-content: start;
+  gap: var(--esg-space-3) var(--esg-space-4);
+  align-items: end;
+}
+.esg-q__control { min-width: 0; }
+.esg-q__control label,
+.esg-q__na { font-size: var(--esg-text-xs); color: var(--muted); }
+.esg-q__na { display: flex; align-items: center; gap: var(--esg-space-2); white-space: nowrap; padding-bottom: 10px; }
+
+/* ── 16.3 · The answer's state ────────────────────────────────────────────
+   Seven states, each with a WORD. The audit found a single amber "draft" chip
+   repeated on all forty rows, carrying no per-row information at all while
+   dominating every row visually. */
+/* THE LABEL IS --text; THE STATE IS THE BORDER AND THE DOT.
+   Measured on the rendered page: --green-text on --green-bg is 4.46:1 in dark
+   theme — under 4.5, and a 12px chip cannot use WCAG's large-text allowance the
+   way the P6.5 count figures could. Colouring the WORD was therefore the thing
+   that had to go. The state is still carried three ways (the word itself, the
+   border, and the dot), which is what §6's "never colour alone" asks for, and
+   the label is now readable in both themes. */
+.esg-astate {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--esg-space-2);
+  font-size: var(--esg-text-xs);
+  font-weight: 600;
+  padding: 2px var(--esg-space-2);
+  border-radius: var(--r-sm);
+  border: 1px solid currentColor;
+  white-space: nowrap;
+  color: var(--text);
+}
+/* The dot carries the semantic colour, which each modifier sets below. */
+.esg-astate::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--esg-astate-dot, var(--border-2));
+}
+.esg-astate--verified    { --esg-astate-dot: var(--esg-done);    border-color: var(--esg-done);    background: var(--esg-done-bg); }
+.esg-astate--documented  { --esg-astate-dot: var(--esg-done);    border-color: var(--esg-done);    background: var(--esg-done-bg); }
+.esg-astate--declared    { --esg-astate-dot: var(--border-2);    border-color: var(--border-2);    background: var(--surface-2); }
+.esg-astate--review      { --esg-astate-dot: var(--esg-problem); border-color: var(--esg-problem); background: var(--esg-problem-bg); }
+.esg-astate--missing     { --esg-astate-dot: var(--esg-caution); border-color: var(--esg-caution); background: var(--esg-caution-bg); }
+.esg-astate--na          { --esg-astate-dot: var(--esg-blocked); border-color: var(--esg-blocked); background: var(--esg-blocked-bg); }
+.esg-astate--dismissed   { --esg-astate-dot: var(--esg-blocked); border-color: var(--border-2); background: transparent; }
+
+/* ── 16.4 · The proposal ──────────────────────────────────────────────────
+   What the platform read, where it read it, and the two things a person can do
+   about it. It sits INSIDE the question it answers — the audit found the review
+   queue on a different page, so verifying an answer meant leaving the form. */
+.esg-proposal {
+  border: 1px solid var(--esg-problem);
+  border-left-width: 3px;
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  padding: var(--esg-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--esg-space-3);
+}
+.esg-proposal__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--esg-space-2) var(--esg-space-3); }
+.esg-proposal__label {
+  font-size: var(--esg-text-xs);
+  letter-spacing: var(--esg-track-label);
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--esg-problem);
+}
+.esg-proposal__answer {
+  font-family: var(--font-display);
+  font-size: var(--esg-text-lg);
+  font-weight: 700;
+  color: var(--text);
+}
+.esg-proposal__actions { display: flex; flex-wrap: wrap; gap: var(--esg-space-2); }
+
+/* The quote. A blockquote because that is what it is — the document's own
+   words, located in the document's own extracted text. */
+.esg-quote {
+  margin: 0;
+  padding: var(--esg-space-3) var(--esg-space-4);
+  border-left: 2px solid var(--border-2);
+  background: var(--surface-2);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  font-size: var(--esg-text-sm);
+  line-height: var(--esg-lh-body);
+  color: var(--text);
+  max-width: var(--esg-measure);
+}
+.esg-quote__cite {
+  display: block;
+  margin-top: var(--esg-space-2);
+  font-size: var(--esg-text-2xs);
+  font-style: normal;
+  color: var(--muted);
+}
+
+/* ── 16.5 · The evidence drawer ───────────────────────────────────────────
+   "Show me why it said this", on <details> so it needs no JavaScript and is
+   keyboard-operable by default. */
+.esg-evidence > summary {
+  cursor: pointer;
+  font-size: var(--esg-text-sm);
+  font-weight: 600;
+  color: var(--accent-text);
+  width: fit-content;
+  /* P8: was --esg-space-1 (4px), which made a 28px target on a pointer and a
+     line of text with nothing to aim at. A <summary> is a control.
+
+     PADDING AND min-height, NOT display: flex. The first attempt used a flex
+     box to centre the label, and a flex <summary> LOSES ITS ::marker in
+     Chromium — the disclosure triangle disappeared and "What was read for
+     this" became indistinguishable from a link that navigates. The affordance
+     is the point of the element. */
+  padding: var(--esg-space-2) 0;
+  min-height: 32px;
+}
+.esg-evidence > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+.esg-evidence__body {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--esg-space-2) var(--esg-space-4);
+  margin-top: var(--esg-space-3);
+  padding-top: var(--esg-space-3);
+  border-top: 1px solid var(--border);
+  font-size: var(--esg-text-sm);
+}
+.esg-evidence__k { color: var(--muted); font-size: var(--esg-text-xs); white-space: nowrap; }
+.esg-evidence__v { color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+
+/* ── 16.6 · Responsive ────────────────────────────────────────────────────
+   The three-column control row is the first thing to go; a cramped select is
+   worse than a stacked one. */
+@media (max-width: 900px) {
+  .esg-q__controls { grid-template-columns: 1fr; align-items: stretch; }
+  .esg-q__na { padding-bottom: 0; }
+}
+@media (max-width: 768px) {
+  .esg-pillar-head { grid-template-columns: 1fr; }
+  .esg-q { padding: var(--esg-space-4); }
+  .esg-evidence__body { grid-template-columns: 1fr; gap: var(--esg-space-1); }
+  .esg-evidence__k { margin-top: var(--esg-space-2); }
+}
+
+
+/* ═══ 17 · FORM CONTROLS — THE ONES THE MASTER DOES NOT OWN (D6) ══════════
+   THE DEFECT, MEASURED. The master styles input / select / textarea ONLY as
+   `.form-group input`. Every control this product puts anywhere else — 112 on
+   the assessment page, 16 on finance readiness, 2 on impact — was therefore
+   rendering as the raw browser default: a WHITE box with BLACK text, 19px
+   tall, on a dark enterprise surface. It is the single loudest "unfinished"
+   signal in the product and it sits on the screen a user spends longest on.
+
+   WHY THIS IS AN ELEMENT RULE AND NOT A CLASS.
+   A class would have to be applied at 61 call sites and would FAIL OPEN: the
+   sixty-second control, written next year, renders as a white box again and
+   nobody notices until a screenshot. Styling the element inside the app shell
+   FAILS CLOSED — there is no way to add a control to this product that is not
+   already styled. It is the same argument §4's card is built on.
+
+   WHY IT CANNOT OVERRIDE THE MASTER, WHICH IS THE PART THAT MATTERS.
+   Everything inside :where() contributes ZERO specificity, so the whole
+   selector weighs exactly one class — .app-main — against the master's
+   `.form-group input`, which weighs a class AND an element. The master wins
+   every control it already owns, in both themes, with no exception list to
+   keep in sync. This sheet loads second and still loses, by construction.
+
+   The VALUES are the master's own, read from the same tokens, so a control in
+   a .form-group and a control outside one are indistinguishable. That is the
+   point: the user must not be able to tell which of the two styled it.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.app-main :where(input, select, textarea):where(:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]):not([type="color"]):not([type="submit"]):not([type="button"]):not([type="reset"]):not([type="image"])) {
+  padding: 9px 12px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--esg-text-sm);
+  line-height: var(--esg-lh-snug);
+  /* 38px is the master's own control height at 9px padding on a 13px line.
+     Stated as a floor rather than left to the content so a control with no
+     placeholder does not come out shorter than the one beside it — which is
+     what produced the 19px / 21px / 13px row of three on finance readiness. */
+  min-height: 38px;
+  max-width: 100%;
+  outline: none;
+  transition: border-color var(--esg-dur-fast) var(--esg-ease),
+              box-shadow var(--esg-dur-fast) var(--esg-ease);
+}
+.app-main :where(input, select, textarea):where(:focus) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+.app-main :where(input, select, textarea):where(:disabled) {
+  background: var(--surface-2);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+/* NO ERROR RULE HERE. The first draft carried
+   `.app-main :where(input,select,textarea):where(.input-error)`, and §1's fork
+   guard rejected it correctly: .input-error is a MASTER class, so styling it
+   from this layer is defining a master component. It is also unnecessary — the
+   master's own `.input-error { border-color: var(--red) !important }` has no
+   element or ancestor in it and therefore already reaches every control on
+   every page, including the ones §17 styles. */
+
+/* The caret is drawn, not fetched. The master's select uses a data-URI SVG
+   with a hardcoded slate stroke, which reads correctly on ITS surfaces; this
+   layer may ship no colour literal at all, so the same mark is two gradients
+   painted in currentColor and it is right in both themes by construction. */
+.app-main :where(select) {
+  appearance: none;
+  padding-right: 34px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-size: 5px 5px, 5px 5px;
+  background-position: right 17px center, right 12px center;
+  background-repeat: no-repeat;
+}
+/* The POPUP is the user agent's, not ours. Chrome honours these on Windows and
+   Linux; on macOS the list follows `color-scheme`, which the shell now sets on
+   <html> beside data-theme for exactly this reason. */
+.app-main :where(option) { background: var(--surface); color: var(--text); }
+
+.app-main :where(textarea) { min-height: 76px; resize: vertical; }
+
+/* Boxes the browser draws itself. Sizing them is ours; colouring them is
+   `accent-color`, which is the one property the UA honours. */
+.app-main :where(input[type="checkbox"], input[type="radio"]) {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  flex: none;
+}
+
+/* A file control is a button plus a filename and cannot be restyled as one
+   box. What it CAN have is the same border, so it stops looking pasted on. */
+.app-main :where(input[type="file"]) {
+  padding: 8px 12px;
+  border: 1.5px dashed var(--border-2);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: var(--esg-text-sm);
+  max-width: 100%;
+}
+
+@media (max-width: 768px) {
+  /* §6: 44px is a finger, not a design. The master applies the same floor to
+     .btn at this breakpoint; a control it does not own never got it. */
+  .app-main :where(input, select, textarea):where(:not([type="checkbox"]):not([type="radio"])) {
+    min-height: 44px;
+    font-size: var(--esg-text-md);   /* 16px would be ideal; 14 is the scale's body step */
+  }
+}
+
+
+/* ═══ 18 · MOTION — THE STATE-CHANGE LAYER ════════════════════════════════
+   §11 decided WHEN motion is allowed to exist. This decides what it is
+   allowed to SAY, which is the only reason to add any of it:
+
+       WHAT CHANGED · WHAT IS HAPPENING · WHAT I COMPLETED · WHAT IS NEXT
+
+   Four rules this section is built around, and the first two are inherited
+   from the master's §50 rather than invented here:
+
+   1. NO NEW KEYFRAMES. Every animation below names mds-fade-up, mds-scale-in,
+      mds-fade-in, mds-spin, mds-shimmer or mds-pulse — all defined in the
+      master. test/esg-design-system-test.js asserts this layer defines ZERO
+      keyframes of its own and that every mds-* it names really exists, so a
+      typo cannot fail silently the way a missing animation-name does.
+
+   2. NOTHING LOOPS EXCEPT LIVE WORK. The master's §50 states the rule and
+      names its own exception — "the one rule that may loop indefinitely is a
+      live progress indicator". The two loops here are the analysis spinner and
+      the current step of a track that is genuinely running, and the second is
+      gated on data-live="true", which the SERVER sets from the real job status.
+      A finished track cannot pulse, because the attribute is not there.
+
+   3. MOTION IS AN ARRIVAL, NEVER A SCROLL EFFECT. Nothing below is triggered
+      by scrolling except the master's own .reveal, which rests VISIBLE and is
+      hidden only after JS has confirmed it can un-hide it.
+
+   4. EVERY ANIMATION HERE IS transform + opacity ONLY. No width, no height, no
+      top/left, no filter, no box-shadow — so every one of them composites and
+      none of them costs a layout pass.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* ── 18.1 · Sequenced arrival ─────────────────────────────────────────────
+   §11's .esg-enter with an index. A row of four things that arrive together
+   is a flash; the same four 60ms apart read as an order, which is the only
+   information a staggered entrance carries. The cap is deliberate: at index 8
+   the delay stops growing, so a forty-row list does not spend two seconds
+   assembling itself. */
+.esg-enter { animation-delay: calc(min(var(--esg-i, 0), 8) * 60ms); }
+
+/* ── 18.2 · State replacement ─────────────────────────────────────────────
+   PROPOSED → VERIFIED. The old state does not fade out and the new one does
+   not fly in: the row is the same row, and what changed is one word inside it.
+   A scale-in on the badge alone says "this, here, just became true" and says
+   nothing else. Deliberately NOT a celebration — the master's §50 ships no
+   confetti and this product will not be the platform that adds one. */
+.esg-settled { animation: mds-scale-in var(--esg-dur-fast) var(--esg-ease) both; }
+
+/* ── 18.3 · Discovery ─────────────────────────────────────────────────────
+   An AI proposal is not a chat reply. The quote it is standing on arrives
+   FIRST and the proposed answer follows it, because that is the order in which
+   the claim becomes believable — evidence, then conclusion. Two classes rather
+   than one so a page can put them in that order without JavaScript. */
+.esg-found   { animation: mds-fade-up var(--esg-dur-base) var(--esg-ease) both; }
+.esg-follows { animation: mds-fade-up var(--esg-dur-base) var(--esg-ease) both; animation-delay: 140ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  /* Collapse to the FINAL state, never to a fast version of the animation.
+     An entrance whose resting state is opacity:0 does not become quick under
+     this query — the master's §41 block sets animation-duration to 0.01ms, and
+     `both` lands it on the end frame, so these are already safe. The DELAYS
+     are removed here as well, so nothing waits to appear at all. */
+  .esg-enter,
+  .esg-settled,
+  .esg-found,
+  .esg-follows { animation-delay: 0ms; }
+}
+
+
+/* ═══ 19 · THE TRACK — ONE COMPONENT FOR EVERY REAL PROCESS ═══════════════
+   P8 asked for five progressions: document analysis, the score reveal, green
+   project definition, finance readiness and expected-measured-verified impact.
+   They are ONE THING — a named sequence of states, exactly one of which the
+   subject is currently in — so they are one component used five times rather
+   than five components that drift apart. The alternative was five, and the
+   fifth would have disagreed with the first inside a month.
+
+   WHAT IT MAY NEVER DO. It carries no percentage and no bar. The backend
+   publishes `queued`, `processing`, `completed` and `failed`, and a bar drawn
+   over four discrete states is a fabricated figure in exactly the sense
+   no-model-figures-test.js exists to prevent. The track animates the states
+   the system really has.
+
+   §6: THE STATE IS NEVER THE COLOUR. Every step carries its state as a WORD in
+   .esg-track__state, and the marks differ in SHAPE as well as fill — filled,
+   ringed, dashed, dotted — so the states are distinguishable in greyscale, in
+   forced-colours mode, and to a reader who never sees the colour at all.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.esg-track {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: var(--esg-space-2);
+}
+.esg-track__step {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--esg-space-1);
+  padding-top: var(--esg-space-5);
+  min-width: 0;
+  animation: mds-fade-up var(--esg-dur-base) var(--esg-ease) both;
+  animation-delay: calc(min(var(--esg-i, 0), 8) * 70ms);
+}
+/* The rail. One pseudo-element on the step rather than a second positioned
+   element, which is how the master's own .journey draws its spine. */
+.esg-track__step::before {
+  content: '';
+  position: absolute;
+  top: 7px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--border);
+}
+.esg-track__step:first-child::before { left: 8px; }
+.esg-track__step:last-child::before  { right: calc(100% - 8px); }
+.esg-track__step--done::before { background: var(--esg-done); }
+
+/* The mark. Shape first, colour second. */
+.esg-track__step::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--border-2);
+  background: var(--surface);
+  box-sizing: border-box;
+}
+.esg-track__step--done::after    { border-color: var(--esg-done); background: var(--esg-done); }
+.esg-track__step--current::after { border-color: var(--esg-current); box-shadow: 0 0 0 4px var(--esg-current-bg); }
+.esg-track__step--future::after  { border-style: dashed; }
+.esg-track__step--failed::after  { border-color: var(--esg-problem); background: var(--esg-problem-bg); }
+/* Reserved: defined, deliberately not operational. Dotted, and it says so. */
+.esg-track__step--reserved::after { border-style: dotted; background: var(--esg-blocked-bg); }
+
+.esg-track__name {
+  font-size: var(--esg-text-sm);
+  font-weight: 600;
+  color: var(--text);
+  line-height: var(--esg-lh-snug);
+}
+.esg-track__step--future .esg-track__name,
+.esg-track__step--reserved .esg-track__name { color: var(--text-2); font-weight: 500; }
+.esg-track__state { font-size: var(--esg-text-xs); color: var(--muted); line-height: var(--esg-lh-snug); }
+.esg-track__step--failed .esg-track__state { color: var(--esg-problem); }
+
+/* THE ONLY LOOP IN THIS FILE BESIDES THE SPINNER, and it is gated on the
+   SERVER's own view of whether work is running. data-live is written from the
+   job row's status; a completed track has no attribute and therefore cannot
+   pulse, which is the failure this guard exists to prevent — an interface that
+   goes on saying "working" long after the work stopped. */
+.esg-track[data-live="true"] .esg-track__step--current::after {
+  animation: mds-pulse 1.8s var(--esg-ease) infinite;
+}
+
+@media (max-width: 768px) {
+  /* A five-step track at 390px is 70px a column and every name wraps to four
+     lines. Vertical instead, with the rail turned through ninety degrees. */
+  .esg-track { grid-auto-flow: row; gap: var(--esg-space-4); }
+  .esg-track__step { padding-top: 0; padding-left: var(--esg-space-6); min-height: 20px; }
+  .esg-track__step::before {
+    top: 8px;
+    bottom: calc(-1 * var(--esg-space-4));
+    left: 7px;
+    right: auto;
+    width: 2px;
+    height: auto;
+  }
+  .esg-track__step:first-child::before { left: 7px; top: 8px; }
+  .esg-track__step:last-child::before { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .esg-track__step { animation-delay: 0ms; }
+  /* The pulse is the one thing that must survive: it is the difference between
+     "still running" and "stopped", and removing it removes information. It is
+     slowed to a rate that cannot read as flashing rather than removed. */
+  .esg-track[data-live="true"] .esg-track__step--current::after { animation-duration: 4s; }
+}
+
+
+/* ═══ 20 · TWO FACTS, SIDE BY SIDE ════════════════════════════════════════
+   EXPECTED ≠ MEASURED ≠ VERIFIED, and the interface must not animate one into
+   another as though the first became the second. They are separate facts about
+   separate rows, and the reason the product refuses to draw that transition is
+   the reason it refuses to draw a confidence percentage.
+
+   So they sit as a ROW OF FACTS, each with its own provenance line, and what
+   is missing says so rather than showing a zero — CLAUDE.md §8's three empty
+   states, at the scale of a single figure. */
+.esg-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--esg-space-4);
+}
+.esg-fact {
+  display: flex;
+  flex-direction: column;
+  gap: var(--esg-space-1);
+  padding: var(--esg-space-4);
+  border: 1px solid var(--border);
+  border-top: 2px solid var(--border-2);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  min-width: 0;
+}
+.esg-fact--measured { border-top-color: var(--esg-current); }
+.esg-fact--verified { border-top-color: var(--esg-done); }
+.esg-fact--absent   { background: transparent; border-style: dashed; }
+.esg-fact__label {
+  font-size: var(--esg-text-xs);
+  letter-spacing: var(--esg-track-label);
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--muted);
+}
+.esg-fact__value {
+  font-family: var(--font-display);
+  font-size: var(--esg-text-xl);
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.esg-fact--absent .esg-fact__value { color: var(--muted); font-size: var(--esg-text-lg); }
+
+/* A FACT WHOSE VALUE IS A NAME, NOT A FIGURE.
+   .esg-fact__value is display type at 20px with tabular figures, which is
+   right for "34.1" and wrong for "Seri Timur Manufacturing Sdn Bhd (DEMO)":
+   in a 160px column that measured four wrapped lines, and `overflow-wrap:
+   anywhere` split "DEMO-0000001" across two of them. The modifier keeps the
+   cell and drops the value to body type, where a name belongs. */
+.esg-fact--text .esg-fact__value {
+  font-family: var(--font);
+  font-size: var(--esg-text-md);
+  font-weight: 600;
+  line-height: var(--esg-lh-snug);
+  overflow-wrap: break-word;
+}
+.esg-fact__from { font-size: var(--esg-text-xs); color: var(--text-2); line-height: var(--esg-lh-snug); }
+
+
+/* ═══ 21 · SPACING SAFETY NETS ════════════════════════════════════════════
+   §2 says gap is the one way to space siblings, and where a page uses
+   .esg-stack that holds. P8 MEASURED what happens where a page does not: on
+   finance readiness the criterion bar sat 2.4px under the last line of the
+   paragraph above it and read, unambiguously, as a strike through the text.
+   Both elements carry `margin: 0` and neither owns the space between them.
+
+   These are the same shape as §4's `.esg-card + .esg-card` rule: the structure
+   is fixed at the call site, and this makes the collapsed state unreachable
+   even if a future page forgets. */
+:where(p, .esg-q__guide, .esg-body, .esg-body-2, .esg-small) + .esg-progress { margin-top: var(--esg-space-3); }
+.esg-progress + .esg-meta { display: block; margin-top: var(--esg-space-2); }
+:where(p, .esg-q__guide) + .esg-track { margin-top: var(--esg-space-4); }
+
+
+/* ═══ 22 · TOUCH TARGETS THE MASTER'S ≤768px BLOCK DOES NOT REACH ═════════
+   §6 asks for 44px on a phone. The master applies it to .btn, .btn-sm and its
+   own controls; §17 applies it to every form control. P8 MEASURED three of our
+   own components still under the floor at 390px, and each is a real target a
+   finger has to hit:
+
+     .esg-topbar__chip            32px   (fixed in §13.2b)
+     .esg-evidence > summary      28px   — "What was read for this"
+     .esg-q__na                   13px   — the not-applicable switch
+
+   A <summary> and a <label> are both targets, and neither is a .btn, so
+   neither was covered by anything. */
+@media (max-width: 768px) {
+  .esg-evidence > summary,
+  .esg-stage__more > summary {
+    min-height: 44px;
+    padding-block: var(--esg-space-3);
+  }
+  /* The BOX stays 18px because a giant checkbox looks like an error; the LABEL
+     around it is the target, and it is the label a finger lands on. */
+  .esg-q__na {
+    min-height: 44px;
+    align-items: center;
+    padding-bottom: 0;
+  }
+}
+
+/* A link that IS the row. Measured at 16px tall in the green projects table —
+   the smallest target in the product, and the one that opens the page. Making
+   it fill its cell gives it the cell's height without changing the layout. */
+.esg-cell-link {
+  display: block;
+  padding: var(--esg-space-2) 0;
+  color: var(--accent-text);
+  font-weight: 600;
+  text-decoration: none;
+}
+.esg-cell-link:hover { text-decoration: underline; }
+.esg-cell-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+/* A cell link in a STACKED table is a row, not a cell: the stacked layout
+   collapses the row height to its text, so the 44px floor has to be stated. */
+@media (max-width: 768px) {
+  .esg-cell-link { min-height: 44px; display: flex; align-items: center; }
+}
+
+
+/* ═══ 23 · LISTS INSIDE PROSE ═════════════════════════════════════════════
+   NOT A NEW COMPONENT — §2's .esg-prose learning about an element it already
+   contains. Governance is five bulleted lists and it was the last page still
+   rendering them from the browser default, which the master narrows to
+   `margin: 0; padding: 0` while leaving `list-style: disc` in place. A disc
+   marker with zero padding-inline-start is drawn OUTSIDE the content box, so
+   every bullet on that page sat in the card's padding or was clipped away by
+   it — measured at 1440px and at 390px.
+
+   The marker is `disc` rather than a drawn mark: this is running prose, the
+   master's own bulleted lists elsewhere are discs, and a custom glyph here
+   would be one more thing that has to be kept in step with nothing. */
+.esg-prose ul,
+.esg-prose ol {
+  margin: 0;
+  padding-inline-start: var(--esg-space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--esg-space-2);
+}
+.esg-prose li {
+  font-size: var(--esg-text-md);
+  line-height: var(--esg-lh-body);
+  color: var(--text);
+  /* The measure applies to the LINE, and a list item is a line of prose like
+     any other — without this the items run to the container width while the
+     paragraphs above them stop at 68ch, which reads as two different columns. */
+  max-width: var(--esg-measure);
+}
+.esg-prose li::marker { color: var(--muted); }
+
+/* ═══ 24 · A STACKED CELL MUST NOT BE SIZED BY A NOWRAP CHIP ══════════════
+   §5's stacked table exists so that at phone width NOTHING is off-screen and
+   there is nothing to scroll past. Governance is the first page to put a long
+   .esg-astate inside one, and .esg-astate is `white-space: nowrap` — correct
+   in a row of chips, wrong in a cell whose whole job is to fit.
+
+   MEASURED at 390px before this rule: 322px of container, 346px of table, so
+   the stacked layout still scrolled sideways by 24px. The chip
+   "Not part of this platform" is 185px and could not shrink, while the label
+   gutter took 160px of the 322.
+
+   Two changes, both scoped to the stacked table so no chip anywhere else is
+   affected: the chip may wrap, and the label gutter narrows on a small phone
+   where 9rem is half the screen. */
+@media (max-width: 640px) {
+  .esg-table--stack .esg-astate { white-space: normal; }
+}
+@media (max-width: 480px) {
+  .esg-table--stack td {
+    padding-left: calc(6.5rem + var(--esg-space-3));
+    padding-right: var(--esg-space-3);
+  }
+  .esg-table--stack td::before { width: 6.5rem; margin-left: -6.5rem; }
+}

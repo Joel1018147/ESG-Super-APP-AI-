@@ -37,7 +37,16 @@ const METRIC_FOR_UNIT = {
  *  rewritten in one transaction-shaped sequence, so a project never carries two
  *  baselines for overlapping periods that a reader would have to choose
  *  between. "Written once" means one live answer, not append-only history. */
-async function computeBaseline(projectId, companyId, periodStart, periodEnd) {
+/** Derive a measurement for a period from the company's carbon entries.
+ *
+ *  A BASELINE and an ACTUAL are the same computation over different periods —
+ *  same entries, same units, same provisional rule — so they share this
+ *  function rather than a copy that could drift. `kind` decides only which rows
+ *  are replaced and what the new rows are called.
+ *
+ *  NOTHING IS EVER COPIED FROM THE PROJECT'S FORECAST. The forecast lives on
+ *  esg_green_projects and is not read here at all. */
+async function computeMeasurement(projectId, companyId, periodStart, periodEnd, kind = 'baseline') {
   const { rows: proj } = await query(
     `SELECT id FROM esg_green_projects WHERE id = $1 AND company_id = $2`, [projectId, companyId]);
   if (!proj[0]) return null;
@@ -48,7 +57,23 @@ async function computeBaseline(projectId, companyId, periodStart, periodEnd) {
       WHERE company_id = $1 AND period_start >= $2 AND period_end <= $3`,
     [companyId, periodStart, periodEnd]);
 
-  await query(`DELETE FROM esg_green_project_baselines WHERE project_id = $1`, [projectId]);
+  // SCOPED BY KIND (P7). This used to delete every row for the project, and
+  // once actuals began living in the same table a baseline recomputation would
+  // have silently destroyed the company's measured impact.
+  //
+  // A baseline replaces the whole baseline; an ACTUAL replaces only the reading
+  // for the SAME PERIOD, because a company measures many periods and last
+  // year's reading is not superseded by this year's.
+  if (kind === 'baseline') {
+    await query(
+      `DELETE FROM esg_green_project_baselines WHERE project_id = $1 AND kind = 'baseline'`,
+      [projectId]);
+  } else {
+    await query(
+      `DELETE FROM esg_green_project_baselines
+        WHERE project_id = $1 AND kind = $2 AND period_start = $3 AND period_end = $4`,
+      [projectId, kind, periodStart, periodEnd]);
+  }
 
   if (!entries.length) {
     return { metrics: [], entryCount: 0, provisional: false, empty: true };
@@ -76,20 +101,20 @@ async function computeBaseline(projectId, companyId, periodStart, periodEnd) {
     const { rows } = await query(
       `INSERT INTO esg_green_project_baselines
          (project_id, period_start, period_end, metric, value, unit,
-          derived_from, source_entry_count, is_provisional)
-       VALUES ($1,$2,$3,$4,$5,$6,'carbon_entries',$7,$8)
+          derived_from, source_entry_count, is_provisional, kind)
+       VALUES ($1,$2,$3,$4,$5,$6,'carbon_entries',$7,$8,$9)
        RETURNING id, metric, value, unit, source_entry_count, is_provisional`,
-      [projectId, periodStart, periodEnd, m.metric, m.value.toFixed(4), m.unit, m.count, m.provisional]);
+      [projectId, periodStart, periodEnd, m.metric, m.value.toFixed(4), m.unit, m.count, m.provisional, kind]);
     written.push(rows[0]);
   }
 
   const { rows: co2 } = await query(
     `INSERT INTO esg_green_project_baselines
        (project_id, period_start, period_end, metric, value, unit,
-        derived_from, source_entry_count, is_provisional)
-     VALUES ($1,$2,$3,'kg_co2e',$4,'kgCO2e','carbon_entries',$5,$6)
+        derived_from, source_entry_count, is_provisional, kind)
+     VALUES ($1,$2,$3,'kg_co2e',$4,'kgCO2e','carbon_entries',$5,$6,$7)
      RETURNING id, metric, value, unit, source_entry_count, is_provisional`,
-    [projectId, periodStart, periodEnd, co2eTotal.toFixed(4), entries.length, co2eProvisional]);
+    [projectId, periodStart, periodEnd, co2eTotal.toFixed(4), entries.length, co2eProvisional, kind]);
   written.push(co2[0]);
 
   return {
@@ -118,8 +143,11 @@ async function listBaselines(projectId) {
     `SELECT id, period_start, period_end, metric, value, unit, derived_from,
             source_entry_count, is_provisional, computed_at
        FROM esg_green_project_baselines
-      WHERE project_id = $1 ORDER BY metric`, [projectId]);
+      WHERE project_id = $1 AND kind = 'baseline' ORDER BY metric`, [projectId]);
   return rows;
 }
 
-module.exports = { computeBaseline, provisionalReasons, listBaselines, METRIC_FOR_UNIT };
+/** Kept for callers that mean a baseline specifically. */
+const computeBaseline = (projectId, companyId, s, e) => computeMeasurement(projectId, companyId, s, e, 'baseline');
+
+module.exports = { computeBaseline, computeMeasurement, provisionalReasons, listBaselines, METRIC_FOR_UNIT };
