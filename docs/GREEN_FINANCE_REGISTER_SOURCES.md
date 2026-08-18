@@ -1,6 +1,6 @@
 # GREEN FINANCE REGISTER — SOURCE OF TRUTH FOR THE SEED
 
-**Compiled by Cowork, 2026-08-15.** Every row was read from the URL given.
+**Compiled 2026-08-15.** Every row was read from the URL given.
 `last_verified` for every row is **2026-08-15**.
 
 **The rules that govern this file, and the seed built from it:**

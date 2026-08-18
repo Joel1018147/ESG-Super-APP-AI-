@@ -1,10 +1,10 @@
 # SEDG v2 — the source, and what importing it actually costs
 
 Phase 1 research output, 2026-08-07. **Findings with sources. Nothing built.**
-Produced by Cowork under `Modus-Agent-OS/BUILD_PROTOCOL.md`. Every claim about
+Produced under `Modus-Agent-OS/BUILD_PROTOCOL.md`. Every claim about
 this repo was read out of the repo; every claim about SEDG was read out of the
 publisher's own PDF. Claims about the Windows runtime or Railway are absent
-because Cowork cannot see them.
+because they are not visible from a document alone.
 
 ---
 

@@ -71,7 +71,7 @@ because this CLAUDE.md was written from scratch rather than from
 re-derived three defect classes the SOP already documented.
 
 0. LOAD THE AGENT OS BEFORE BUILDING. `Modus-Agent-OS/BUILD_PROTOCOL.md` is the
-   control layer: how Cowork, Claude Code and sub-agents divide work by what each
+   control layer: how Claude Code and its sub-agents divide work by what each
    can SEE, and why a claim about the other side is a hypothesis, never a fact.
    Read it, plus `Modus-Agent-OS/skills/recurring-bugs-checklist.md`, before any
    code. DO NOT RE-DERIVE what is on that checklist.

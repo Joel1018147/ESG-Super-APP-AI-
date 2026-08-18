@@ -1,6 +1,6 @@
 # THE REFERENCE DASHBOARD — ANNOTATED
 
-**The image:** `docs/design/reference-dashboard.png` (save it there; Cowork could
+**The image:** `docs/design/reference-dashboard.png` (save it there; the session could
 not write it — it arrived in a chat, not on disk).
 
 **Read this file before implementing any part of that image.** The mock is the
