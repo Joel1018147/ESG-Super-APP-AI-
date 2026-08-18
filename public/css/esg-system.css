@@ -2309,3 +2309,30 @@ a.esg-topbar__chip:focus-visible { outline: 2px solid var(--accent); outline-off
   }
   .esg-table--stack td::before { width: 6.5rem; margin-left: -6.5rem; }
 }
+
+
+/* ═══ 25 · A FORM GRID WHOSE TRACK IS NOT SIZED BY ITS WIDEST CONTROL ═════
+   D10. The master's .form-grid is repeat(auto-fit, minmax(240px, 1fr)) and
+   collapses to `grid-template-columns: 1fr` at ≤1189px. `1fr` is shorthand for
+   minmax(AUTO, 1fr), and a track whose minimum is `auto` is sized by its item's
+   MIN-CONTENT — so below that breakpoint the column grows to fit the widest
+   control instead of the other way round.
+
+   MEASURED at 390px on /assessment: the framework <select> is as wide as its
+   longest option ("Simplified ESG Disclosure Guide v2 · 38 questions"), the
+   track grew to 414px in a 390px viewport, and .app-layout's overflow: hidden
+   ate the difference. §17's `max-width: 100%` on the control could not help —
+   a percentage resolves against a containing block that was itself being sized
+   by the content it was meant to cap.
+
+   `min(100%, 16rem)` as the track MINIMUM fixes it at the root: an explicit
+   minimum stops the automatic min-content minimum applying at all, and the
+   min() clamp means the track can never ask for more than the container has.
+   The company profile uses this too — it measured clean only because its
+   values are short, which is a latent version of the same defect. */
+.esg-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  gap: var(--esg-space-4);
+  align-items: end;
+}

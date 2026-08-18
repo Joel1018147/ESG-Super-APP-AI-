@@ -838,7 +838,7 @@ async function renderCompanyForm(req, res, next, opts = {}) {
           </div>
           <form class="esg-card" method="post" action="/company">
             <div class="esg-card__body">
-              <div class="form-grid">
+              <div class="esg-form-grid">
                 <div class="form-group"><label for="name">Company name</label>
                   <input id="name" name="name" value="${esc(c.name || '')}" required></div>
                 <div class="form-group"><label for="ssm_number">SSM registration number</label>
@@ -956,32 +956,87 @@ router.get('/assessment', async (req, res, next) => {
               (SELECT score_0_100 FROM esg_scores s WHERE s.assessment_id = a.id AND s.scope='OVERALL') AS overall
          FROM esg_assessments a WHERE a.company_id = $1 AND a.status <> 'archived'
         ORDER BY a.reporting_year DESC`, [cid]);
-    const list = rows.length ? `<table><thead><tr>
-        <th>Year</th><th>Framework</th><th>Status</th><th>Score</th><th></th></tr></thead><tbody>
-        ${rows.map((r) => `<tr><td>${esc(r.reporting_year)}</td>
-          <td>${esc(frameworkLabel(r.framework_code, r.framework_version))}</td>
-          <td><span class="badge">${esc(r.status)}</span></td>
-          <td>${r.overall === null || r.overall === undefined ? '—' : esc(r.overall)}</td>
-          <td><a class="btn btn-outline" href="/assessment/${esc(r.id)}">Open</a></td></tr>`).join('')}
-        </tbody></table>` : emptyState('instrumented_but_empty', { title: 'No assessments yet' });
+    /* MEASURED ON PRODUCTION AT 390px, and this page was not in P8's audit list
+       — which is how it stayed broken while the migrated twelve were verified.
+       Two separate causes, both clipping inside .app-layout's overflow: hidden:
+
+       1. THE FORM. A flex row whose .form-group children size to their content,
+          and the framework <select> is as wide as its longest option — "Simplified
+          ESG Disclosure Guide v2 · 38 questions". A flex item cannot shrink below
+          its intrinsic width without help, so label and select reached 414px in a
+          390px viewport. .form-grid's tracks are minmax(240px, 1fr): the track is
+          sized by the GRID, not by the select, so §17's max-width: 100% on the
+          control finally has a containing block to resolve against. Same fix the
+          company profile already uses, and that page measures clean at 390.
+       2. THE TABLE. .table-wrap again (D1) — it reached 442px with no scroll and
+          no gesture, so the Open button was simply unreachable on a phone. */
+    const list = rows.length ? `
+      <div class="esg-table-scroll" tabindex="0" role="region" aria-label="Your assessments">
+        <table class="esg-table esg-table--stack">
+          <thead><tr><th>Year</th><th>Framework</th><th>Status</th><th>Score</th><th></th></tr></thead>
+          <tbody>${rows.map((r) => `<tr>
+            <td data-label="Year" class="esg-td-nowrap esg-num">${esc(r.reporting_year)}</td>
+            <td data-label="Framework">${esc(frameworkLabel(r.framework_code, r.framework_version))}</td>
+            <td data-label="Status"><span class="esg-astate esg-astate--${
+  r.status === 'scored' ? 'verified' : 'declared'}">${esc(r.status)}</span></td>
+            <td data-label="Score" class="esg-td-num">${r.overall === null || r.overall === undefined
+    ? '<span class="esg-meta">Not scored</span>' : esc(r.overall)}</td>
+            <td data-label=""><a class="btn btn-outline" href="/assessment/${esc(r.id)}">Open</a></td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>`
+      : emptyState('instrumented_but_empty', {
+        title: 'No assessments yet',
+        body: 'Scoring is switched on and working — there is nothing to score until an assessment '
+            + 'exists. Choose a framework above to start one.' });
 
     res.send(layout('ESG Assessment', `
-      <div class="card"><h3>Start an assessment</h3>
-        <form method="post" action="/assessment" style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
-          <div class="form-group" style="margin:0"><label for="framework_id">Framework</label>
-            <select id="framework_id" name="framework_id" required>
-              <option value="">— choose a framework —</option>
-              ${frameworkChoices.map((fw) => `<option value="${esc(fw.id)}">${esc(frameworkLabel(fw.code, fw.version))} · ${esc(fw.n)} questions</option>`).join('')}
-            </select></div>
-          <div class="form-group" style="margin:0"><label for="year">Reporting year</label>
-            <input id="year" name="reporting_year" type="number" min="2015" max="2100"
-                   value="${new Date().getFullYear() - 1}" required></div>
-          <button class="btn btn-primary" type="submit">Create</button>
-        </form>
-        <small class="text-muted">The framework is stamped on the assessment when it is created and
-        does not change afterwards — that is what stops a later switch from rescoring answers you
-        have already given.</small></div>
-      <div class="table-wrap" style="margin-top:16px">${list}</div>`, req.user, '/assessment'));
+      <div class="esg-page">
+        <header class="esg-page-header esg-enter">
+          <div class="esg-page-header__text">
+            <h2 class="esg-h1">ESG Assessment</h2>
+            <p class="esg-page-header__intro">One assessment per reporting year, scored against the
+              framework you choose when you create it.</p>
+          </div>
+        </header>
+
+        <section class="esg-card esg-enter" style="--esg-i:1">
+          <div class="esg-card__header">
+            <h3 class="esg-card__title">Start an assessment</h3>
+            <span class="esg-card__meta">The framework is stamped at creation</span>
+          </div>
+          <div class="esg-card__body esg-stack">
+            <div class="esg-form-grid">
+              <div class="form-group"><label for="framework_id">Framework</label>
+                <select id="framework_id" name="framework_id" form="new-assessment" required>
+                  <option value="">— choose a framework —</option>
+                  ${frameworkChoices.map((fw) => `<option value="${esc(fw.id)}">${
+  esc(frameworkLabel(fw.code, fw.version))} · ${esc(fw.n)} questions</option>`).join('')}
+                </select></div>
+              <div class="form-group"><label for="year">Reporting year</label>
+                <input id="year" name="reporting_year" type="number" min="2015" max="2100"
+                       value="${new Date().getFullYear() - 1}" form="new-assessment" required></div>
+            </div>
+            <p class="esg-small esg-prose">The framework is stamped on the assessment when it is
+              created and does not change afterwards — that is what stops a later switch from
+              rescoring answers you have already given.</p>
+          </div>
+          <div class="esg-card__footer">
+            <form id="new-assessment" method="post" action="/assessment">
+              <button class="btn btn-primary" type="submit">Create</button>
+            </form>
+          </div>
+        </section>
+
+        <section class="esg-section esg-enter" style="--esg-i:2">
+          <div class="esg-section__head">
+            <h3 class="esg-section__title">Your assessments</h3>
+            <span class="esg-section__note">${rows.length
+    ? `${esc(rows.length)} on file, most recent year first` : 'None yet'}</span>
+          </div>
+          ${list}
+        </section>
+      </div>`, req.user, '/assessment'));
   } catch (err) { next(err); }
 });
 
@@ -1962,64 +2017,111 @@ const comingSoon = (title, body, phase) => `
 router.get('/frameworks', (req, res) => {
   const { PROVENANCE: p, COUNTS: c } = sedg;
 
-  const tierBadge = (tier) => {
-    const tone = { Basic: 'badge-green', Intermediate: 'badge-blue', Advanced: 'badge-amber' }[tier] || '';
-    return `<span class="badge ${tone}">${esc(tier)}</span>`;
-  };
+  /* THE TIER IS A WORD IN ITS OWN COLUMN, not a coloured badge.
+     It was green / blue / amber for Basic / Intermediate / Advanced. The
+     original audit's finding about this product was that amber alone carried
+     FIVE unrelated meanings, and a colour a user cannot learn is not carrying
+     information — a tier ladder in a column headed "Tier", with all three
+     values visible at once, is read from the word. Dropping the badge also
+     removes 38 instances of the master's 11px .badge from a page whose type
+     scale P8 otherwise fixed. */
 
-  const pillars = sedg.grouped().map((g) => `
-    <div class="card">
-      <h3 class="card-title">${esc(g.pillarName)} — ${g.topics.reduce((n, t) => n + t.disclosures.length, 0)} disclosures</h3>
-      ${g.topics.map((t) => `
-        <h4>${esc(t.topic)}</h4>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Code</th><th>Tier</th><th>Disclosure</th><th>Unit</th></tr></thead>
+  const pillars = sedg.grouped().map((g, gi) => `
+    <section class="esg-section esg-enter" style="--esg-i:${gi + 2}">
+      <div class="esg-section__head">
+        <h3 class="esg-section__title">${esc(g.pillarName)}</h3>
+        <span class="esg-section__note">${esc(g.topics.reduce((n, t) => n + t.disclosures.length, 0))} disclosures</span>
+      </div>
+      <div class="esg-card"><div class="esg-card__body esg-stack-loose">
+        ${g.topics.map((t) => `
+          <div class="esg-stack-tight">
+            <h4 class="esg-h3">${esc(t.topic)}</h4>
+            <div class="esg-table-scroll" tabindex="0" role="region" aria-label="${esc(t.topic)} disclosures">
+              <table class="esg-table esg-table--stack">
+                <thead><tr><th>Code</th><th>Tier</th><th>Disclosure</th><th>Unit</th></tr></thead>
+                <tbody>
+                  ${t.disclosures.map((d) => `<tr>
+                    <td data-label="Code" class="esg-td-nowrap">${esc(d.code)}${d.newInV2
+    ? ' <span class="esg-q__map">new in v2</span>' : ''}</td>
+                    <td data-label="Tier">${esc(d.tier)}</td>
+                    <td data-label="Disclosure">${esc(d.text)}</td>
+                    <td data-label="Unit">${esc(d.unit)}</td>
+                  </tr>`).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>`).join('')}
+      </div></div>
+    </section>`).join('');
+
+  const others = `
+    <section class="esg-section esg-enter" style="--esg-i:8">
+      <div class="esg-section__head">
+        <h3 class="esg-section__title">Other frameworks</h3>
+        <span class="esg-section__note">Named so the gap is visible</span>
+      </div>
+      <div class="esg-card"><div class="esg-card__body esg-stack">
+        <p class="esg-small esg-prose">None of these is loaded, mapped or scored.</p>
+        <div class="esg-table-scroll" tabindex="0" role="region" aria-label="Other frameworks">
+          <table class="esg-table esg-table--stack">
+            <thead><tr><th>Framework</th><th>Status</th><th>Note</th></tr></thead>
             <tbody>
-              ${t.disclosures.map((d) => `<tr>
-                <td>${esc(d.code)}${d.newInV2 ? ' <span class="badge badge-blue">new in v2</span>' : ''}</td>
-                <td>${tierBadge(d.tier)}</td>
-                <td>${esc(d.text)}</td>
-                <td>${esc(d.unit)}</td>
+              ${sedg.OTHER_FRAMEWORKS.map((f) => `<tr>
+                <td data-label="Framework">${esc(f.name)}</td>
+                <td data-label="Status"><span class="esg-astate esg-astate--na">Not loaded</span></td>
+                <td data-label="Note">${esc(f.note)}</td>
               </tr>`).join('')}
             </tbody>
           </table>
-        </div>`).join('')}
-    </div>`).join('');
-
-  const others = `
-    <div class="card">
-      <h3 class="card-title">Other frameworks</h3>
-      <p class="text-sm">Named so the gap is visible. None of these is loaded, mapped or scored.</p>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Framework</th><th>Status</th><th>Note</th></tr></thead>
-          <tbody>
-            ${sedg.OTHER_FRAMEWORKS.map((f) => `<tr>
-              <td>${esc(f.name)}</td>
-              <td><span class="badge badge-amber">Not loaded</span></td>
-              <td>${esc(f.note)}</td>
-            </tr>`).join('')}
-          </tbody>
-        </table>
-      </div>
-    </div>`;
+        </div>
+      </div></div>
+    </section>`;
 
   res.send(layout('Frameworks', `
-    <div class="card">
-      <h3 class="card-title">${esc(p.document)}</h3>
-      <p><strong>Publisher.</strong> ${esc(p.publisher)}, ${esc(p.publisherNote)}. Published ${esc(p.published)}.</p>
-      <p><strong>Source.</strong> <a href="${esc(p.pdf)}" rel="noreferrer noopener" target="_blank">${esc(p.pdf)}</a></p>
-      <div class="grid grid-3">
-        <div class="stat-card"><div class="stat-label">Disclosures</div><div class="stat-value">${c.total}</div></div>
-        <div class="stat-card"><div class="stat-label">E / S / G</div><div class="stat-value">${c.pillars.E} / ${c.pillars.S} / ${c.pillars.G}</div></div>
-        <div class="stat-card"><div class="stat-label">Basic / Inter. / Adv.</div><div class="stat-value">${c.tiers.Basic} / ${c.tiers.Intermediate} / ${c.tiers.Advanced}</div></div>
+    <div class="esg-page">
+    <header class="esg-page-header esg-enter">
+      <div class="esg-page-header__text">
+        <h2 class="esg-h1">Frameworks</h2>
+        <p class="esg-page-header__intro">The official published disclosure set this platform is
+          reconciled against, and an honest account of what it does and does not implement.</p>
       </div>
-      <p class="text-sm">${esc(p.countNote)}</p>
-    </div>
+    </header>
+
+    <section class="esg-section esg-enter" style="--esg-i:1">
+      <div class="esg-section__head">
+        <h3 class="esg-section__title">${esc(p.document)}</h3>
+        <span class="esg-section__note">Published ${esc(p.published)}</span>
+      </div>
+      <div class="esg-card"><div class="esg-card__body esg-stack">
+        <div class="esg-prose">
+          <p><strong>Publisher.</strong> ${esc(p.publisher)}, ${esc(p.publisherNote)}.</p>
+          <p><strong>Source.</strong> <a href="${esc(p.pdf)}" rel="noreferrer noopener" target="_blank">${esc(p.pdf)}</a></p>
+        </div>
+        <!-- §20's facts, not .stat-card. Three counts of one published document,
+             each with what it counts stated under it. -->
+        <div class="esg-facts">
+          <div class="esg-fact">
+            <span class="esg-fact__label">Disclosures</span>
+            <span class="esg-fact__value esg-num">${esc(c.total)}</span>
+            <span class="esg-fact__from">In the published set</span>
+          </div>
+          <div class="esg-fact">
+            <span class="esg-fact__label">E / S / G</span>
+            <span class="esg-fact__value esg-num">${esc(c.pillars.E)} / ${esc(c.pillars.S)} / ${esc(c.pillars.G)}</span>
+            <span class="esg-fact__from">Split by pillar</span>
+          </div>
+          <div class="esg-fact">
+            <span class="esg-fact__label">Basic / Inter. / Adv.</span>
+            <span class="esg-fact__value esg-num">${esc(c.tiers.Basic)} / ${esc(c.tiers.Intermediate)} / ${esc(c.tiers.Advanced)}</span>
+            <span class="esg-fact__from">Split by tier</span>
+          </div>
+        </div>
+        <p class="esg-small esg-prose">${esc(p.countNote)}</p>
+      </div></div>
+    </section>
 
     <div class="alert">
-      <span class="badge badge-amber">SEDG-ALIGNED (DRAFT)</span>
+      <span class="esg-astate esg-astate--missing">SEDG-ALIGNED (DRAFT)</span>
       <p><strong>What this platform claims, precisely.</strong> The assessment you take on this
       platform is <em>${esc(frameworkLabel('MODUS_SEDG_ALIGNED', '0.9-draft'))}</em>. The
       ${c.total} disclosures below are the official published set it will be reconciled against.
@@ -2040,7 +2142,8 @@ router.get('/frameworks', (req, res) => {
     </div>
 
     ${pillars}
-    ${others}`, req.user, '/frameworks'));
+    ${others}
+    </div>`, req.user, '/frameworks'));
 });
 
 // ── Analytics — table exists, nothing writes to it ─────────────────────────
