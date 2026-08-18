@@ -135,9 +135,51 @@ async (page) => {
       if (e.tagName !== 'A') return false;
       const parent = e.parentElement;
       if (!parent) return false;
-      const own = e.textContent.trim();
-      const around = parent.textContent.trim();
-      return around.length > own.length + 12;
+
+      /* THE SURROUNDING TEXT MUST BE NON-TARGET TEXT, which is the half the
+         first version of this exception left out — and it made the guard
+         weaker than the paragraph above it claims.
+
+         The test was "is there more text in the parent than in this link",
+         which is true of TWO ADJACENT LINKS IN A TOOLBAR: each one's text is
+         shorter than the pair's combined text, so each exempted the other and
+         both skipped the touch-target check entirely. Measured: a row holding
+         "Explain this requirement" and "What evidence can I provide?" exempted
+         both. Nothing is masked today — every such row in this product uses
+         the master's .btn, which the master's own <=768px rule floors at 44px
+         — but the next non-.btn link pair anywhere in the app would have
+         passed this check at any height.
+
+         WCAG's wording is "constrained by the line-height of NON-TARGET
+         text", so the prose is measured with every interactive descendant
+         removed. A link with only other links beside it is not in a sentence. */
+      /* AND IT MUST BE TEXT A READER CAN SEE.
+
+         The narrowing above was itself too generous on its first run, and the
+         skip link caught it: `a.skip-link` is a direct child of <body>, and
+         <body> also holds the theme-boot <script>. Its 2,347 characters of
+         JavaScript source counted as surrounding prose, so a 36px target that
+         the probe had been correctly reporting at 390px silently stopped being
+         reported. A guard that quietly stops seeing a real defect is worse
+         than the false positive it was fixing.
+
+         Non-rendered nodes contribute nothing: script, style, template and
+         anything the browser is not painting. */
+      const RENDERS = (n) => !['SCRIPT', 'STYLE', 'TEMPLATE', 'NOSCRIPT'].includes(n.tagName)
+        && getComputedStyle(n).display !== 'none';
+      const TARGET = 'a[href], button, input, select, textarea, summary';
+
+      const own = e.textContent.trim().length;
+      let prose = 0;
+      for (const n of parent.childNodes) {
+        if (n.nodeType === 3) { prose += n.textContent.trim().length; continue; }
+        if (n === e || n.nodeType !== 1) continue;
+        if (!RENDERS(n)) continue;
+        // A non-interactive element (em, strong, span) contributes its text;
+        // an interactive one contributes nothing, because it is a target too.
+        if (!n.matches(TARGET) && !n.querySelector(TARGET)) prose += n.textContent.trim().length;
+      }
+      return own > 0 && prose >= 12;
     };
     document.querySelectorAll('a[href], button, input, select, textarea, summary').forEach((e) => {
       const c = getComputedStyle(e);

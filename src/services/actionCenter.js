@@ -639,6 +639,21 @@ async function build(companyId) {
   ]);
   const { stages } = definitions;
 
+  /* ── ONE FIELD, ONE MEANING ────────────────────────────────────────────
+     `detail` used to mean two things: the sentence explaining an
+     uninstrumented deployment, and — in the `ok` return below — the object of
+     counts from gatherDetail. Two meanings on one key produced a real defect:
+     this literal set `detail` twice, so the LAST assignment won and the
+     sentence was silently replaced with null. GET /api/actions therefore
+     answered the uninstrumented state with `detail: null` instead of the
+     explanation CLAUDE.md #8 requires, and the dashboard could only paper over
+     it by hardcoding a second copy of the same words in its template.
+
+     `detail` is now the SENTENCE and nothing else, which is the convention
+     /api/journey, /api/missions and /api/xp already use for this exact state.
+     The counts are returned as `figures`. Both are present in both branches,
+     null where they do not apply, so a caller never has to ask which shape it
+     got. Asserted in test/action-center-test.js. */
   if (!stages.length) {
     return Object.freeze({
       state: 'uninstrumented',
@@ -648,6 +663,8 @@ async function build(companyId) {
       open: Object.freeze([]),
       counts: Object.freeze({}),
       lead: null,
+      figures: null,
+      reviewQueue: null,
       // Returned even here, because a caller that renders the uninstrumented
       // state still has a page to draw and should not have to reissue the two
       // reads this function already made.
@@ -655,7 +672,6 @@ async function build(companyId) {
       facts,
       journey: null,
       readiness: null,
-      detail: null,
     });
   }
 
@@ -769,7 +785,11 @@ async function build(companyId) {
     // answer and callers must render it rather than falling back to the first
     // action of any state — "revisit this completed stage" is not a next move.
     lead: open[0] || null,
-    detail: Object.freeze(detail),
+    // `detail` is the uninstrumented SENTENCE and is null here, because this
+    // deployment is instrumented. The counts live in `figures` — see the note
+    // on the uninstrumented branch above for why the two were separated.
+    detail: null,
+    figures: Object.freeze(detail),
     readiness: ready,
     journey: j,
     facts,

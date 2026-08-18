@@ -319,7 +319,7 @@ async function assess(companyId, assessmentId) {
     counts: Object.freeze(counts),
     /* THE GENERATOR. A stated constant, not a computed state — see the header.
        The day something in this codebase writes a report file, this changes
-       HERE and the page follows, and test/report-readiness-test.js asserts
+       HERE and the page follows, and test/copilot-test.js asserts
        that no such writer exists while it says false. */
     generator: Object.freeze({
       built: false,

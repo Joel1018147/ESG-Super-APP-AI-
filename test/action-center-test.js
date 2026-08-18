@@ -445,6 +445,110 @@ console.log('action-center-test');
     assert.ok(ab.actions.some((a) => a.state === 'not_configured'), 'the not-configured action was dropped');
   });
 
+  /* ═══════════════════════════════════════════════════════════════════════
+     4b · ONE FIELD, ONE MEANING
+
+     Found in review of PR #3. `detail` meant two things — the sentence
+     explaining an uninstrumented deployment, and the object of counts — and
+     the uninstrumented return set it TWICE in one object literal, so the last
+     assignment won and the sentence was silently replaced with null.
+     GET /api/actions answered that state with `detail: null` instead of the
+     explanation CLAUDE.md #8 requires.
+
+     Nothing crashed, and no test caught it: every consumer guarded with
+     `ab.detail &&`. These three assertions are what would have.
+     ═══════════════════════════════════════════════════════════════════════ */
+  await atest('UNINSTRUMENTED CARRIES ITS SENTENCE, and the counts are a separate field', async () => {
+    const unseeded = {
+      query: async (text) => {
+        const sql = String(text).replace(/\s+/g, ' ').trim();
+        // The seed has not run: no stage, no mission, no level.
+        if (/FROM esg_journey_stages|FROM esg_missions|FROM esg_xp_levels/.test(sql)) {
+          return { rows: [], rowCount: 0 };
+        }
+        if (/FROM esg_assessments WHERE company_id/.test(sql)) return { rows: [], rowCount: 0 };
+        if (/\b(count|sum|min|max|avg)\s*\(/i.test(sql) && !/\bGROUP BY\b/i.test(sql)) {
+          return { rows: [{ filled: 0, n: 0 }], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 0 };
+      },
+      pool: { connect: async () => ({ query: async () => ({ rows: [] }), release() {} }) },
+    };
+    const ab = await withStub(unseeded, () => require('../src/services/actionCenter').build('c1'));
+    assert.strictEqual(ab.state, 'uninstrumented');
+    assert.ok(typeof ab.detail === 'string' && ab.detail.length > 40,
+      `the uninstrumented state carries detail=${JSON.stringify(ab.detail)} — a caller cannot tell `
+      + 'a deployment fault from an empty account without the sentence');
+    assert.ok(/seed|configuration gap|not.*empty account/i.test(ab.detail),
+      `the sentence does not explain the state: "${ab.detail}"`);
+    // The counts are a DIFFERENT field, and are null here rather than sharing
+    // the key that carries the sentence.
+    assert.strictEqual(ab.figures, null);
+    assert.strictEqual(ab.reviewQueue, null);
+  });
+
+  await atest('THE OK STATE PUTS THE COUNTS IN `figures` AND LEAVES `detail` null', async () => {
+    const ab = await withStub(db(), () => require('../src/services/actionCenter').build('c1'));
+    assert.strictEqual(ab.state, 'ok');
+    assert.strictEqual(ab.detail, null,
+      'the instrumented state carries an uninstrumented sentence');
+    assert.ok(ab.figures && typeof ab.figures === 'object', 'the counts are missing');
+    assert.ok('docs' in ab.figures && 'proposals' in ab.figures && 'projects' in ab.figures,
+      `figures has the wrong shape: ${Object.keys(ab.figures || {}).join(', ')}`);
+  });
+
+  await atest('NO RETURN SHAPE SETS THE SAME KEY TWICE — the defect, in the source', () => {
+    /* The mistake was invisible at runtime and obvious in the text: two
+       `detail:` lines in one object literal. This reads the source and refuses
+       a duplicate key in either return of build(), which is cheaper than
+       hoping the next author notices. */
+    // SRC and strip() are declared further down this file; this test runs
+    // before them, so it reads the path itself rather than depending on
+    // declaration order.
+    const src = fs.readFileSync(
+      path.join(__dirname, '..', 'src', 'services', 'actionCenter.js'), 'utf8');
+    const noComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+    /* BRACE-MATCHED, NOT INDENT-MATCHED. The first version keyed both the
+       block boundary and the key lines on a fixed indent — and the two returns
+       in this file sit at different depths, so it merged them into one blob
+       and then missed a six-space key entirely. It passed, and a deliberate
+       re-introduction of the exact defect it was written for ALSO passed,
+       which is how the inertness was found. Depth counting has no such
+       assumption: a key at depth 1 is a top-level key at any indentation. */
+    const clean = noComments(src);
+    const blocks = [];
+    for (const m of clean.matchAll(/return Object\.freeze\(\{/g)) {
+      let depth = 0;
+      let i = m.index + m[0].length - 1;      // sits on the opening brace
+      const from = i;
+      for (; i < clean.length; i += 1) {
+        if (clean[i] === '{') depth += 1;
+        else if (clean[i] === '}') { depth -= 1; if (depth === 0) break; }
+      }
+      blocks.push(clean.slice(from + 1, i));
+    }
+    assert.ok(blocks.length >= 2, `only ${blocks.length} frozen returns found in this service`);
+
+    for (const body of blocks) {
+      // Top-level keys only: a nested object's keys are its own namespace.
+      const keys = [];
+      let depth = 0;
+      for (const line of body.split('\n')) {
+        const k = line.match(/^\s*(\w+)\s*:/);
+        if (k && depth === 0) keys.push(k[1]);
+        for (const ch of line) {
+          if (ch === '{' || ch === '[' || ch === '(') depth += 1;
+          else if (ch === '}' || ch === ']' || ch === ')') depth -= 1;
+        }
+      }
+      const dupes = [...new Set(keys.filter((k, i) => keys.indexOf(k) !== i))];
+      assert.deepStrictEqual(dupes, [],
+        `a return object sets ${dupes.join(', ')} twice — the later assignment wins and the `
+        + 'earlier value is silently discarded');
+    }
+  });
+
   await atest('the seven states each mean something DIFFERENT, in words', () => {
     assert.strictEqual(STATES.length, 7);
     const meanings = STATES.map((s) => STATE_MEANING[s]);

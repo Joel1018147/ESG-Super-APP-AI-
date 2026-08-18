@@ -293,9 +293,9 @@ router.get('/dashboard', async (req, res, next) => {
         `SELECT count(*)::int AS products FROM esg_finance_products WHERE is_active`, []),
     ]);
     // Shaped exactly as before so nothing downstream in this route changed.
-    // `ab.detail` is null only in the uninstrumented case, which this page
+    // `ab.figures` is null only in the uninstrumented case, which this page
     // already renders through `journeyReady`.
-    const d = ab.detail || { docs: { total: 0 }, proposals: { live: 0, pending: 0 }, projects: { total: 0 } };
+    const d = ab.figures || { docs: { total: 0 }, proposals: { live: 0, pending: 0 }, projects: { total: 0 } };
     const docs = { n: d.docs.total, bytes: docBytes[0].bytes };
     const props = { proposals_live: d.proposals.live, proposals_pending: d.proposals.pending };
     const carbon = carbonTotals[0];
@@ -465,11 +465,17 @@ router.get('/dashboard', async (req, res, next) => {
           <div class="esg-section__head">
             <h2 class="esg-section__title">What needs you</h2>
           </div>
+          <!-- THE SERVICE'S OWN SENTENCE, NOT A SECOND COPY OF IT.
+               This used to test ab.detail.text and fall back to a hand-written
+               string, which was wrong twice over: detail never had a .text
+               property on either branch, so the ternary always took the
+               fallback — and the fallback was a near-identical duplicate of
+               the words the service already publishes, which is exactly the
+               drift STAGE_DETAIL's own comment warns about. detail is now
+               unambiguously the sentence, and there is one copy of it. -->
           ${emptyState('uninstrumented', {
     title: 'The action list has nothing to derive from',
-    body: ab.detail && ab.detail.text ? ab.detail.text
-      : 'No journey stage is defined on this deployment, so there is nothing to build an action '
-        + 'list from. This is a configuration gap, not an empty account.' })}
+    body: ab.detail })}
         </section>`;
       }
       const openList = ab.open;
