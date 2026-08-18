@@ -1207,6 +1207,50 @@ CREATE INDEX IF NOT EXISTS idx_esg_green_opportunities_company
   ON esg_green_opportunities (company_id, status);
 
 
+-- ── P9 · WHERE A PROJECT CAME FROM ────────────────────────────────────────
+-- acceptOpportunity() has always created an esg_green_projects row from an
+-- esg_green_opportunities row, and the new project recorded NOTHING about the
+-- proposal it came from. So the chain the product tells a company about —
+-- suggestion, then project, then finance readiness — was unrecoverable one
+-- step after it happened: two rows that were causally linked, with no column
+-- joining them.
+--
+-- That is precisely the relationship P9 is allowed to draw, because the system
+-- genuinely establishes it. Everything the UI must NOT claim stays unclaimed:
+-- a project still carries no link to an ESG indicator, because the scan is
+-- never told which gap to answer and is never asked to name one.
+--
+-- NULL IS THE HONEST DEFAULT AND THE COMMON CASE. Every project created before
+-- this column existed, and every project a person defined by hand, has no
+-- source proposal — and "defined by your company" is a different fact from
+-- "accepted from a suggestion", not a missing one. The UI reports both and
+-- infers neither.
+--
+-- ON DELETE SET NULL rather than CASCADE: deleting a proposal must never take
+-- a real project with it.
+--
+-- DO block per CLAUDE.md #4 — schema.sql replays as one transaction on every
+-- boot and a bare ALTER TABLE would fail the whole file on the second run.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                  WHERE table_name = 'esg_green_projects' AND column_name = 'source_opportunity_id') THEN
+    ALTER TABLE esg_green_projects
+      ADD COLUMN source_opportunity_id uuid
+        REFERENCES esg_green_opportunities(id) ON DELETE SET NULL;
+  END IF;
+END $$;
+-- Covers: projects that came from a proposal. Partial, because NULL is the
+-- normal state for a hand-defined project and Postgres admits unlimited NULLs
+-- past one (CLAUDE.md #5) — a plain UNIQUE would be no constraint at all here.
+-- One proposal produces at most one project: acceptOpportunity refuses a
+-- second accept, and this index is what makes that refusal true at the
+-- database rather than only in the service.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_esg_green_projects_source_opportunity
+  ON esg_green_projects (source_opportunity_id)
+  WHERE source_opportunity_id IS NOT NULL;
+
+
 -- ═══════════════════════════════════════════════════════════════════════════
 -- 13. THE JOURNEY, MISSIONS AND XP — THREE REFERENCE TABLES, AND NO COUNTER
 --                                                     (Run 52, 2026-08-17)

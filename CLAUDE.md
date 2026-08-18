@@ -97,12 +97,46 @@ re-derived three defect classes the SOP already documented.
    pass. Gate 0, the pre-deploy env-var diff, runs before all three. See
    Modus-Agent-OS/skills/three-stage-deploy-gate.md.
 
+## Non-negotiables added by P9
+
+11. **The UI may CONNECT. It may not INVENT.** Every relationship the interface
+    draws carries the KIND of connection behind it — `derived` (one service
+    computed it from the other's rows), `recorded` (a column joins them),
+    `sequence` (adjacent in the product, nothing joins them), `none`. A step
+    never claims a stronger kind because it would read better.
+    `roadmapService.js` and `test/action-center-test.js` hold the line, and the
+    gap→opportunity claim is asserted twice: that the rung says `sequence`, AND
+    that `opportunityService` still stamps `derived_from_kind='company_profile'`.
+    The AI scan is never told the gaps and is never asked to name one.
+12. **A priority must be explainable.** Every action `actionCenter.js` produces
+    carries `basis` — the sentence naming the rows that put it in its state —
+    and the constructor throws without one. `urgent` is reserved for something
+    ALREADY RECORDED going out of date, and exactly two rules produce it.
+13. **The copilot is not a chatbot and has no allow-list.** Four intents, a
+    closed set. It reuses `aiAdvisor.stripFigures` with an EMPTY allow-list —
+    it is handed no figures, so none may come out. Do not widen it to let a
+    year through; that is the removal of the guard. It writes to no table but
+    `esg_ai_interactions`.
+14. **`generator.built = false` is a stated constant, not a computed state.**
+    There is no report generator. `test/copilot-test.js` asserts nothing in the
+    codebase writes a report file while it says so. `/reports` shows reporting
+    READINESS; the nav entry being `built: true` means the destination does
+    something, not that the generator exists.
+
+See `docs/design/P9_OPERATING_WORKFLOW.md`.
+
 ## Known divergence from the canonical harness
 
 `Modus-Agent-OS/skills/test-harness-integrity-audit.md` names
 `test/harness.js` + `negative-control*.js` as the pattern. This repo uses
-`test/run-all.js` with nine suites and has **no negative-control plants**. Of 50
-assertions, only five have been mutation-tested.
+`test/run-all.js` and has **no negative-control plants**.
+
+P9 narrowed the gap without closing it: `action-center-test.js` and
+`copilot-test.js` carry **nine mutation tests** between them, each breaking one
+guard in-memory and asserting the suite goes red. That is nine on top of the
+five that had been mutation-tested before, against a suite that has grown well
+past the fifty assertions this note used to count. The plants are in-memory
+rather than on disk, deliberately: a file-on-disk plant is what CRLF eats.
 
 Adoption across the ecosystem is 2 of 10 — Dragon Ginseng and M-EasyMall follow
 it; M-EasyCommerce, the reference implementation, does not. So this is an open

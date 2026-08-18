@@ -15,7 +15,9 @@
     "test:verification": "node test/assessment-verification-test.js",
     "test:readiness": "node test/readiness-test.js",
     "test:green-project": "node test/green-project-test.js",
-    "test:impact": "node test/impact-test.js"
+    "test:impact": "node test/impact-test.js",
+    "test:actions": "node test/action-center-test.js",
+    "test:copilot": "node test/copilot-test.js"
   },
   "engines": {
     "node": ">=18.0.0"

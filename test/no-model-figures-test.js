@@ -145,6 +145,50 @@ atest('thinking is off by default on every Groq call', async () => {
   }
 });
 
+test('THE TWO AGGREGATE STUBS AGREE — the "change it there too" rule, enforced', () => {
+  /* This file and test/dashboard-test.js each carry an AGGREGATE_ZEROES object
+     modelling what Postgres returns to a bare aggregate, and a comment in each
+     saying to change both together. P9 changed one and not the other, and the
+     suite stayed green — because the routes that read the missing keys
+     short-circuit earlier against an unseeded stub. A rule that only exists in
+     a comment is a rule that gets missed; this makes it fail instead.
+
+     Compared by KEY SET rather than by text: the two objects legitimately
+     differ in formatting and in their surrounding comments, and what has to
+     match is which columns they model. */
+  const keysOf = (file) => {
+    const src = readRaw(path.join(__dirname, file));
+    /* ANCHORED ON A DECLARATION AT THE START OF A LINE.
+
+       THIS GUARD SEARCHES A FILE THAT CONTAINS THE GUARD, which is a trap it
+       fell into twice. Searching for 'AGGREGATE_ZEROES = {' matched this
+       test's own search string; adding a `const ` prefix matched it again,
+       because the prefix went into the search string too. Both times it
+       sliced its own source and parsed zero keys.
+
+       A line that BEGINS with the declaration cannot be this file's
+       `const start = src.match(...)` line, so the anchor is now unambiguous —
+       and the size assertion below is what caught both attempts. */
+    const m = src.match(/^[ \t]*const AGGREGATE_ZEROES = \{/m);
+    assert.ok(m, `${file} has no AGGREGATE_ZEROES declaration — this guard is reporting on nothing`);
+    const start = m.index;
+    const body = src.slice(start, src.indexOf('};', start));
+    // Strip comments first: a key name mentioned in prose is not a key.
+    return new Set([...stripJsComments(body).matchAll(/(\w+)\s*:/g)].map((m) => m[1]));
+  };
+  const here = keysOf('no-model-figures-test.js');
+  const there = keysOf('dashboard-test.js');
+  assert.ok(here.size > 20, `only ${here.size} keys parsed — the extractor matched the wrong thing`);
+
+  const missingHere = [...there].filter((k) => !here.has(k));
+  const missingThere = [...here].filter((k) => !there.has(k));
+  assert.deepStrictEqual(missingHere, [],
+    `dashboard-test.js models ${missingHere.join(', ')} and this file does not — the two stubs `
+    + 'disagree about what a zero looks like');
+  assert.deepStrictEqual(missingThere, [],
+    `this file models ${missingThere.join(', ')} and dashboard-test.js does not`);
+});
+
 test('setTimeout is never used to schedule work', () => {
   // The rule is about SCHEDULING, not about the function. Work that must happen
   // later belongs in esg_scheduled_jobs, because a timer dies with the
@@ -390,10 +434,41 @@ atest('no rendered page shows an internal or registry brand in visible text', as
   // directly, and a genuinely broken connection still throws instead of
   // rendering a confident 0. The same change is in test/dashboard-test.js and
   // for the same reason; if you change it here, change it there.
+  //
+  // P9 WIDENED THE PREDICATE BELOW FROM count(*) TO EVERY BARE AGGREGATE, and
+  // the widening makes the stub more truthful rather than more forgiving: a
+  // sum-only statement with no GROUP BY returns exactly one row in Postgres
+  // for the same reason a count does. It was caught by the dashboard's byte
+  // total, which is a sum with no count beside it and which this stub was
+  // answering `rows: []` — a database that cannot exist.
+  //
+  // THE P9 KEYS BELOW WERE MISSED ON THE FIRST PASS, and the sentence above
+  // this block is exactly the instruction that was not followed: the widening
+  // landed here and the new zero-value keys landed only in dashboard-test.js,
+  // so for one commit the two stubs disagreed about what a zero looks like.
+  // Nothing rendered `undefined` — the routes that consume these aggregates
+  // short-circuit earlier against an unseeded stub — which is precisely why it
+  // survived a green run. Found in review, not by the suite.
   const AGGREGATE_ZEROES = {
     n: 0, bytes: 0, entries: 0, provisional: 0, projects: 0, products: 0,
     proposals_live: 0, proposals_pending: 0, period_from: null, period_to: null,
     live: 0, reviewed: 0, pending: 0, accepted: 0, answered: 0, na: 0, filled: 0,
+    // Every alias here is unique across the repo's queries, which is what lets
+    // dashboard-test.js's fixture table name exactly one statement; here they
+    // only have to exist so a zero renders as 0 and not as NaN.
+    documents_total: 0, documents_read: 0, documents_unreadable: 0, documents_unattached: 0,
+    unanswered: 0, self_declared: 0,
+    projects_total: 0, projects_implemented: 0, projects_forecast: 0,
+    projects_unclassified: 0, projects_no_financing: 0,
+    opportunities_pending: 0, unverified_actuals: 0,
+    profile_filled: 0,
+    answers_total: 0, answers_na: 0, answers_documented: 0, answers_verified: 0, answers_declared: 0,
+    carbon_entries: 0, carbon_provisional: 0,
+    report_docs_total: 0, report_docs_read: 0,
+    report_projects_total: 0, report_projects_forecast: 0,
+    report_baselines: 0, report_actuals: 0, report_verified: 0,
+    trigger_gaps: 0, trigger_pillars: 0, trigger_draft: 0,
+    trigger_unevidenced: 0, trigger_unreadable: 0, trigger_unclassified: 0,
   };
   const dbPath = require.resolve('../src/db');
   const realDb = require.cache[dbPath];
@@ -401,7 +476,7 @@ atest('no rendered page shows an internal or registry brand in visible text', as
     id: dbPath, filename: dbPath, loaded: true, exports: {
       query: async (text) => {
         const sql = String(text).replace(/\s+/g, ' ').trim();
-        if (/\bcount\(\*\)/i.test(sql) && !/\bGROUP BY\b/i.test(sql)) {
+        if (/\b(count|sum|min|max|avg)\s*\(/i.test(sql) && !/\bGROUP BY\b/i.test(sql)) {
           return { rows: [{ ...AGGREGATE_ZEROES }], rowCount: 1 };
         }
         return { rows: [], rowCount: 0 };
@@ -434,6 +509,11 @@ atest('no rendered page shows an internal or registry brand in visible text', as
       '/green-finance/readiness': '../src/routes/greenFinance',
       '/impact': '../src/routes/greenFinance',
       '/journey': '../src/routes/journey',
+      // P9 · two more, in their own router for the same reason /journey is:
+      // pages.js is mounted LAST because its `/:id` patterns are broad enough
+      // to swallow a sibling module's path.
+      '/improvement': '../src/routes/improvement',
+      '/consultation': '../src/routes/improvement',
     };
     for (const m of MODULES) {
       if (ELSEWHERE[m.path]) continue;
@@ -454,16 +534,24 @@ atest('no rendered page shows an internal or registry brand in visible text', as
   }
 
   // A loop that covered nothing passes every assertion inside it. Assert the
-  // DENOMINATOR: 20 nav paths + 20 signed-in shells + 1 signed-out shell.
+  // DENOMINATOR: 22 nav paths + 22 signed-in shells + 1 signed-out shell.
   // 14 until Run 47 added Green Finance; 15 until Run 52 added ESG Journey;
   // 16 until Run 62/P3 gave Green projects and AI suggestions a home in the
   // nav — both routes already existed and were reachable only by typing them;
-  // 18 until P6.5 added Finance readiness; 19 until P7 added ESG Impact.
+  // 18 until P6.5 added Finance readiness; 19 until P7 added ESG Impact;
+  // 20 until P9 added Improvement and Expert support.
+  //
+  // P9 ALSO MOVED TWO ENTRIES WITHOUT CHANGING THE COUNT, and that is worth
+  // recording here because the count alone would not have shown it: Reports
+  // went from built:false to built:true and moved tier, because the page now
+  // renders reporting READINESS. The report GENERATOR is still not built and
+  // reportReadiness.js carries `generator.built = false` as a stated constant.
+  //
   // The number is hardcoded ON PURPOSE — adding a nav entry has to be an
   // acknowledged act rather than a silent widening of a loop.
-  assert.strictEqual(MODULES.length, 20, `expected 20 nav entries, found ${MODULES.length}`);
-  assert.strictEqual(checked.length, 41,
-    `expected 41 rendered surfaces checked, got ${checked.length}: ${checked.join(', ')}`);
+  assert.strictEqual(MODULES.length, 22, `expected 22 nav entries, found ${MODULES.length}`);
+  assert.strictEqual(checked.length, 45,
+    `expected 45 rendered surfaces checked, got ${checked.length}: ${checked.join(', ')}`);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

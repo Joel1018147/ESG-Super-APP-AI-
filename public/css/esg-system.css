@@ -1353,7 +1353,19 @@ a.esg-topbar__chip:focus-visible { outline: 2px solid var(--accent); outline-off
   border: 1px solid var(--border-2);
   border-radius: 999px;
   padding: var(--esg-space-1) var(--esg-space-3);
-  white-space: nowrap;
+  /* NOT nowrap any more (P9). "Certification framework required" is 24
+     characters of uppercase 12px with 0.08em tracking, and nowrap made it a
+     185px unbreakable box. MEASURED at 360px on /dashboard and /impact: its
+     right edge landed at 384 in a 360 viewport, so the last word of the most
+     load-bearing status in the product was simply off the screen with no
+     scroll and no gesture to recover it.
+
+     It went unseen because 360 was not in the probe's viewport list until this
+     run added it — the same way P8's "zero horizontal overflow" was true of
+     the twelve pages it walked and false of the two it did not. */
+  white-space: normal;
+  text-align: center;
+  max-width: 100%;
 }
 /* The four pillars, NAMED but never scored. Naming the mission is honest;
    claiming a contribution to it is not. */
@@ -2335,4 +2347,449 @@ a.esg-topbar__chip:focus-visible { outline: 2px solid var(--accent); outline-off
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
   gap: var(--esg-space-4);
   align-items: end;
+}
+
+
+/* ═══ 26 · THE ACTION CARD — WHAT TO DO, WHY, AND WHAT IT NEEDS ═══════════
+   P9's central component. Everything else on the dashboard states a POSITION;
+   this one states a MOVE, and the two are read differently — a position is
+   scanned, a move is read from the left edge, line by line, and then acted on.
+
+   FOUR PARTS, ALWAYS IN THIS ORDER, because it is the order a person asks:
+     __what   the thing to do, with its own count in it
+     __why    what it unblocks or what it corrects
+     __need   what it requires. Optional, and OMITTED rather than em-dashed —
+              "Requirement: —" is a field pretending to be an answer.
+     __cta    a verb. §4.3c: if it does not act, it does not render.
+
+   Plus __basis, which is the rows. It is the smallest text in the component
+   and it is the reason the component is allowed to exist at all: a priority a
+   user cannot check is a priority they have to take on trust.
+
+   §6: THE STATE IS NEVER THE COLOUR. Every card carries the state as a WORD in
+   .esg-action__state, and the seven states differ in BORDER TREATMENT as well
+   as tint — thick solid, solid, dashed, dotted — so they survive greyscale,
+   forced-colours and a reader who never sees the hue.
+
+   BLOCKED AND NOT-CONFIGURED ARE NOT DIMMED. They were, in the first draft,
+   and it was wrong twice over: opacity below 1 on an already quiet pair fails
+   §6's 4.5:1 (the same measurement that kept .milestone-badge.is-locked out of
+   journeyView.js), and a blocked capability is INFORMATION — it is the one
+   card that explains why something a user expected is not there. It is quiet
+   in weight, never in contrast.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.esg-actions {
+  display: grid;
+  gap: var(--esg-space-4);
+}
+
+.esg-action {
+  display: grid;
+  gap: var(--esg-space-2);
+  padding: var(--esg-space-5);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-2);
+  border-radius: var(--r-lg, 12px);
+  min-width: 0;
+  animation: mds-fade-up var(--esg-dur-base) var(--esg-ease) both;
+  animation-delay: calc(min(var(--esg-i, 0), 8) * 60ms);
+}
+
+/* The left edge is the state, in four distinguishable treatments. */
+.esg-action--urgent         { border-left-color: var(--esg-problem); border-left-width: 4px; }
+.esg-action--priority       { border-left-color: var(--esg-current); border-left-width: 4px; }
+.esg-action--recommended    { border-left-color: var(--esg-info); }
+.esg-action--optional       { border-left-color: var(--border-2); border-left-style: dashed; }
+.esg-action--completed      { border-left-color: var(--esg-done); }
+.esg-action--blocked        { border-left-color: var(--esg-blocked); border-left-style: dotted; }
+.esg-action--not_configured { border-left-color: var(--esg-blocked); border-left-style: dotted; }
+
+.esg-action__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--esg-space-2) var(--esg-space-3);
+  min-width: 0;
+}
+.esg-action__state {
+  font-size: var(--esg-text-xs);
+  font-weight: 700;
+  letter-spacing: var(--esg-track-label);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.esg-action--urgent      .esg-action__state { color: var(--esg-problem); }
+.esg-action--priority    .esg-action__state { color: var(--esg-current); }
+.esg-action--recommended .esg-action__state { color: var(--esg-info); }
+.esg-action--completed   .esg-action__state { color: var(--esg-done); }
+.esg-action--optional        .esg-action__state,
+.esg-action--blocked         .esg-action__state,
+.esg-action--not_configured  .esg-action__state { color: var(--text-2); }
+
+.esg-action__what {
+  font-size: var(--esg-text-lg);
+  font-weight: 600;
+  line-height: var(--esg-lh-snug);
+  color: var(--text);
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.esg-action__why,
+.esg-action__need {
+  font-size: var(--esg-text-md);
+  line-height: var(--esg-lh-body);
+  color: var(--text-2);
+  max-width: var(--esg-measure);
+  margin: 0;
+}
+/* The requirement reads as a condition rather than as more prose. A rule on
+   the inline edge, not a box: a second box inside a card is a card. */
+.esg-action__need {
+  border-inline-start: 2px solid var(--border);
+  padding-inline-start: var(--esg-space-3);
+  font-size: var(--esg-text-sm);
+}
+.esg-action__gain {
+  font-size: var(--esg-text-sm);
+  line-height: var(--esg-lh-body);
+  color: var(--esg-done);
+  max-width: var(--esg-measure);
+  margin: 0;
+}
+.esg-action__basis {
+  font-size: var(--esg-text-xs);
+  line-height: var(--esg-lh-snug);
+  color: var(--muted);
+  max-width: var(--esg-measure-wide);
+  margin: 0;
+}
+.esg-action__cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--esg-space-2);
+  margin-top: var(--esg-space-1);
+}
+
+/* The legend. Seven states are more than a reader can infer from an edge
+   treatment, so the page states what each one means once, at the top, in words
+   — and the words are the service's own STATE_MEANING rather than a second set
+   written in a template. */
+.esg-legend {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: var(--esg-space-3);
+  margin: 0;
+  padding: 0;
+}
+.esg-legend__item { display: grid; gap: var(--esg-space-1); min-width: 0; }
+.esg-legend__term {
+  font-size: var(--esg-text-xs);
+  font-weight: 700;
+  letter-spacing: var(--esg-track-label);
+  text-transform: uppercase;
+  color: var(--text);
+  margin: 0;
+}
+.esg-legend__def {
+  font-size: var(--esg-text-xs);
+  line-height: var(--esg-lh-snug);
+  color: var(--text-2);
+  margin: 0;
+}
+
+
+/* ═══ 27 · THE GAP — FIVE ANSWERS, NOT A BULLET ══════════════════════════
+   A gap is not a line item. It is five questions with five answers — what is
+   missing, why it matters, what would resolve it, what to do, and who acts —
+   and the layout has to make all five findable without any of them being
+   skipped, which a bulleted list does not.
+
+   A DEFINITION LIST IS THE HONEST MARKUP. Each answer has a term naming the
+   question it answers, so a screen reader announces "What would resolve this:
+   …" rather than reading five unlabelled paragraphs. The terms are visible
+   because a sighted reader needs the same signposting.
+
+   THE POINTS FIGURE IS THE ENGINE'S. .esg-gap__points reuses the numeric
+   treatment .esg-rec__points already established for exactly this figure on
+   the dashboard, so the same number looks the same in both places.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.esg-gaps { display: grid; gap: var(--esg-space-4); }
+
+.esg-gap {
+  display: grid;
+  gap: var(--esg-space-3);
+  padding: var(--esg-space-5);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg, 12px);
+  min-width: 0;
+}
+.esg-gap__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--esg-space-2) var(--esg-space-3);
+  min-width: 0;
+}
+.esg-gap__code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--esg-text-xs);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.esg-gap__points {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--esg-text-lg);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--esg-problem);
+  white-space: nowrap;
+}
+.esg-gap__question {
+  flex: 1 1 20rem;
+  font-size: var(--esg-text-lg);
+  font-weight: 600;
+  line-height: var(--esg-lh-snug);
+  color: var(--text);
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The five answers. */
+.esg-gap__answers { display: grid; gap: var(--esg-space-3); margin: 0; }
+.esg-gap__q {
+  /* §3 RESERVES 11px FOR LEGAL AND META, "never a label, never a title". This
+     is the term of a definition list — it names the question its answer
+     answers — so it is a label by definition and 11px was the §3 violation the
+     P9 audit measured on /improvement at every viewport. */
+  font-size: var(--esg-text-xs);
+  font-weight: 700;
+  letter-spacing: var(--esg-track-label);
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 var(--esg-space-1);
+}
+.esg-gap__a {
+  font-size: var(--esg-text-md);
+  line-height: var(--esg-lh-body);
+  color: var(--text-2);
+  max-width: var(--esg-measure);
+  margin: 0;
+}
+/* An answer the platform genuinely does not have. NOT dimmed — see §26 — and
+   it reads as a statement about the platform rather than about the company. */
+.esg-gap__a--unknown { color: var(--text-2); font-style: italic; }
+
+.esg-gap__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--esg-space-2);
+  padding-top: var(--esg-space-2);
+  border-top: 1px solid var(--border);
+}
+
+
+/* ═══ 28 · THE ROADMAP — A LADDER THAT SAYS HOW ITS RUNGS ARE JOINED ══════
+   §19's track is five tight steps sharing one horizontal rail. This is ten
+   steps, each carrying a name, a state, a paragraph, a caveat and an action —
+   which is a different component, not a wider one. It is vertical at every
+   width, because ten columns is not a layout at any viewport this product
+   supports.
+
+   THE LINK IS THE POINT OF THE COMPONENT. Every rung carries
+   .esg-roadmap__link, which says what joins it to the one above: computed from
+   the step above, joined by a column, or merely next in the product. A ladder
+   drawn without it asserts causation with an arrow, which is the exact
+   invention the directive's data-integrity rule bans — and an arrow is not
+   falsifiable, so the words are the component.
+
+   The spine is DASHED where the link is 'sequence' and solid where it is
+   'derived' or 'recorded', so the strength of the claim is visible before it
+   is read. As always, the shape is a second channel and never the only one.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.esg-roadmap { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+
+.esg-roadmap__step {
+  position: relative;
+  display: grid;
+  gap: var(--esg-space-2);
+  padding: 0 0 var(--esg-space-5) var(--esg-space-7);
+  min-width: 0;
+  animation: mds-fade-up var(--esg-dur-base) var(--esg-ease) both;
+  animation-delay: calc(min(var(--esg-i, 0), 10) * 50ms);
+}
+/* The spine, drawn by the step so the last one can end it. */
+.esg-roadmap__step::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 18px;
+  bottom: 0;
+  width: 0;
+  border-left: 2px solid var(--border);
+}
+.esg-roadmap__step:last-child::before { display: none; }
+.esg-roadmap__step--sequence::before { border-left-style: dashed; }
+/* 'none' — nothing connects these two rungs at all, which is a weaker claim
+   than 'sequence' and gets a weaker line. Today it appears only on the FIRST
+   rung, which has nothing above it and whose link line is therefore suppressed
+   — but the modifier is still emitted, and a class the stylesheet does not
+   define fails SILENTLY. CSS never warns, which is why this repo checks every
+   rendered class against the loaded sheets; that check is what found it. */
+.esg-roadmap__step--none::before { border-left-style: dotted; }
+
+/* The mark. Shape first: filled, ringed, dashed, dotted. */
+.esg-roadmap__step::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--border-2);
+  background: var(--surface);
+  box-sizing: border-box;
+}
+.esg-roadmap__step--completed::after        { border-color: var(--esg-done); background: var(--esg-done); }
+.esg-roadmap__step--in_progress::after      { border-color: var(--esg-current); box-shadow: 0 0 0 4px var(--esg-current-bg); }
+.esg-roadmap__step--ready_for_review::after { border-color: var(--esg-current); background: var(--esg-current-bg); }
+.esg-roadmap__step--waiting::after          { border-color: var(--esg-caution); background: var(--esg-caution-bg); }
+.esg-roadmap__step--not_started::after      { border-style: dashed; }
+.esg-roadmap__step--blocked::after,
+.esg-roadmap__step--not_configured::after   { border-style: dotted; background: var(--esg-blocked-bg); }
+
+.esg-roadmap__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--esg-space-2) var(--esg-space-3);
+  min-width: 0;
+}
+.esg-roadmap__n {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--esg-text-xs);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.esg-roadmap__name {
+  font-size: var(--esg-text-lg);
+  font-weight: 600;
+  line-height: var(--esg-lh-snug);
+  color: var(--text);
+  margin: 0;
+  min-width: 0;
+}
+.esg-roadmap__what {
+  font-size: var(--esg-text-md);
+  line-height: var(--esg-lh-body);
+  color: var(--text-2);
+  max-width: var(--esg-measure);
+  margin: 0;
+}
+.esg-roadmap__caveat {
+  font-size: var(--esg-text-sm);
+  line-height: var(--esg-lh-body);
+  color: var(--muted);
+  max-width: var(--esg-measure);
+  margin: 0;
+}
+/* What joins this rung to the one above. Rendered ABOVE the step's own name,
+   because it qualifies the arrival rather than the departure. */
+.esg-roadmap__link {
+  /* The line that says how this rung is joined to the one above is the REASON
+     §28 exists — it is what stops the ladder asserting causation with a line.
+     Setting the component's load-bearing sentence in the size §3 reserves for
+     legal text was the wrong way round. */
+  font-size: var(--esg-text-xs);
+  letter-spacing: var(--esg-track-label);
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0;
+}
+.esg-roadmap__step--derived  > .esg-roadmap__link { color: var(--esg-done); }
+.esg-roadmap__step--recorded > .esg-roadmap__link { color: var(--esg-info); }
+
+
+/* ═══ 29 · THE COPILOT ANSWER ═════════════════════════════════════════════
+   Not a chat bubble, not an avatar, not a typing indicator. A contextual
+   answer attached to the thing it is about — and, because §7's .esg-ai already
+   owns "what the AI layer is doing", this owns only "what it said".
+
+   IT ALWAYS DECLARES WHICH IT IS. A generated answer and the platform's own
+   deterministic one are different things, and .esg-copilot__basis carries the
+   service's own sentence saying which. That is the same rule the opportunity
+   scan runs on: a failure must never be pixel-identical to a success.
+
+   .esg-copilot--template is not an error state and is not tinted red. The
+   deterministic answer is frequently the better one — for a disclosure with
+   configured guidance it is very nearly the whole of what there is to say.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.esg-copilot {
+  display: grid;
+  gap: var(--esg-space-2);
+  padding: var(--esg-space-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md, 10px);
+  min-width: 0;
+}
+.esg-copilot--ai       { border-inline-start: 3px solid var(--esg-current); }
+.esg-copilot--template { border-inline-start: 3px dashed var(--border-2); }
+
+.esg-copilot__label {
+  /* Which of the two answers you are reading — generated, or the platform's
+     own. §3 again: a label, not legal text. */
+  font-size: var(--esg-text-xs);
+  font-weight: 700;
+  letter-spacing: var(--esg-track-label);
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0;
+}
+.esg-copilot__text {
+  font-size: var(--esg-text-md);
+  line-height: var(--esg-lh-body);
+  color: var(--text);
+  max-width: var(--esg-measure);
+  margin: 0;
+}
+.esg-copilot__basis {
+  font-size: var(--esg-text-xs);
+  line-height: var(--esg-lh-snug);
+  color: var(--muted);
+  max-width: var(--esg-measure-wide);
+  margin: 0;
+}
+/* The four contextual asks, as a row of small buttons. They are .btn.btn-sm
+   from the master; this only spaces them and keeps them from becoming a
+   toolbar that competes with the answer above it. */
+.esg-copilot__asks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--esg-space-2);
+}
+
+/* §22's 44px floor is NOT restated here. The CTA inside an action card is a
+   master .btn, and the master's own ≤768px block already gives .btn the floor
+   — writing it again would be a rule whose SUBJECT is a master class, which is
+   a fork of a master component and is exactly what
+   esg-design-system-test.js's subject guard caught when this file first
+   shipped it. §22 exists for the targets nothing covers; a .btn is not one. */
+@media (max-width: 768px) {
+  .esg-action { padding: var(--esg-space-4); }
+  .esg-gap    { padding: var(--esg-space-4); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .esg-action,
+  .esg-roadmap__step { animation-delay: 0ms; }
 }

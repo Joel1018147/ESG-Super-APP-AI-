@@ -209,6 +209,13 @@ const MODULES = [
   // yet journey stages 9 and 10 require them, so two required stages had no
   // route from the interface. Giving them a home is a navigation fix, not a
   // new feature.
+  //
+  // P9 PUT IMPROVEMENT FIRST IN THIS TIER, and that is the ordering decision
+  // the whole run rests on: improvement is what the assessment is FOR, and
+  // before P9 it had no destination at all — the roadmap lived as three
+  // recommendations on the dashboard with no account of the other thirty.
+  // Everything below it in this tier is downstream of it.
+  { key: 'improvement',   tier: 'secondary', built: true, icon: 'ai',       label: 'Improvement',    path: '/improvement' },
   { key: 'greenFinance',  tier: 'secondary', built: true, icon: 'finance',  label: 'Green Finance',  path: '/green-finance' },
   { key: 'greenProjects', tier: 'secondary', built: true, icon: 'projects', label: 'Green projects', path: '/green-finance/projects' },
   { key: 'readiness',     tier: 'secondary', built: true, icon: 'finance',  label: 'Finance readiness', path: '/green-finance/readiness' },
@@ -220,8 +227,27 @@ const MODULES = [
   { key: 'frameworks', tier: 'contextual', built: true, icon: 'frameworks', label: 'Frameworks',      path: '/frameworks' },
   { key: 'governance', tier: 'contextual', built: true, icon: 'governance', label: 'Governance & Recognition', path: '/governance' },
 
+  /* P9 · TWO DESTINATIONS THAT ARE BUILT AND ARE NOT WHAT THEY SOUND LIKE.
+     Both are in the Reference tier deliberately.
+
+     `reports` moved from NOT BUILT to built, and it is the one entry in this
+     list where that flag needs explaining: THE REPORT GENERATOR IS STILL NOT
+     BUILT AND P9 DID NOT BUILD ONE. What is built is the readiness view — what
+     a report could be assembled from, what is missing, and the three sections
+     that cannot be in one at all. `built` here means "this destination now does
+     something", which is the only thing the sidebar can honestly promise; the
+     page itself is unambiguous about the generator, and reportReadiness.js
+     carries `generator.built = false` as a stated constant so the two cannot
+     drift apart.
+
+     `consultation` is the same shape: the page is real, the booking module
+     does not exist, and the journey stage for expert consultation stays
+     blocked. It is here rather than under "what it unlocks" because it unlocks
+     nothing on this platform. */
+  { key: 'reports',      tier: 'contextual', built: true, icon: 'frameworks', label: 'Reporting readiness', path: '/reports' },
+  { key: 'consultation', tier: 'contextual', built: true, icon: 'governance', label: 'Expert support',      path: '/consultation' },
+
   // ── NOT BUILT · stated, never promoted ────────────────────────────────────
-  { key: 'reports',      tier: 'secondary',      built: false, icon: 'future', label: 'Reports',       path: '/reports' },
   { key: 'analytics',    tier: 'secondary',      built: false, icon: 'future', label: 'Analytics',     path: '/analytics' },
   { key: 'kpis',         tier: 'secondary',      built: false, icon: 'future', label: 'KPIs',          path: '/kpis' },
   { key: 'assistant',    tier: 'secondary',      built: false, icon: 'future', label: 'AI Assistant',  path: '/assistant' },

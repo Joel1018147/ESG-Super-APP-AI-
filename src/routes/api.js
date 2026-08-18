@@ -1012,4 +1012,188 @@ router.get('/xp', wrap(async (req, res) => {
   });
 }));
 
+
+// ═══════════════════════════════════════════════════════════════════════════
+// P9 · THE OPERATING WORKFLOW — ACTIONS, GAPS, ROADMAP, REPORTING, COPILOT
+//
+// CLAUDE.md #9: every feature ships with its API equivalent, and smoke-test.js
+// checks it. Six endpoints, matching the six things P9 added to the interface.
+//
+// FIVE OF THE SIX ARE GET AND WRITE NOTHING. actionCenter, gapAnalysis,
+// roadmapService, reportReadiness and consultationTriggers all derive from
+// committed rows and store nothing at all, so there is no state for a caller
+// to corrupt and no ordering these can be called in that matters.
+//
+// THE SIXTH IS A POST AND STILL WRITES NO PRODUCT DATA. /copilot writes one
+// row to esg_ai_interactions — the log — and nothing else. It is a POST rather
+// than a GET because it calls a model and costs money, and a GET that costs
+// money gets prefetched by a browser.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const actionCenter = require('../services/actionCenter');
+const gapAnalysis = require('../services/gapAnalysis');
+const roadmapService = require('../services/roadmapService');
+const reportReadiness = require('../services/reportReadiness');
+const consultationTriggers = require('../services/consultationTriggers');
+const readinessSvc = require('../services/readinessService');
+const copilot = require('../services/copilotService');
+
+/** The live assessment id, or null. One helper rather than four copies of the
+ *  same lookup: journeyEngine already owns the definition of which assessment
+ *  is "live" (most recent non-archived), and a second definition here would be
+ *  the first place the API and the pages could disagree about which assessment
+ *  they are talking about. */
+const liveAssessmentId = async (req) => {
+  const a = await journeyEngine.loadLiveAssessment(cid(req));
+  return a ? a.id : null;
+};
+
+router.get('/actions', wrap(async (req, res) => {
+  const ab = await actionCenter.build(cid(req));
+  if (ab.state !== 'ok') {
+    return res.json({ state: ab.state, detail: ab.detail, actions: [], open: 0, counts: {} });
+  }
+  res.json({
+    state: 'ok',
+    counts: ab.counts,
+    open: ab.open.length,
+    // The lead is named separately as well as being first in the list, because
+    // a caller rendering one card should not have to re-derive which one it is
+    // — and null is a real answer meaning nothing is open.
+    lead: ab.lead ? ab.lead.code : null,
+    actions: ab.actions.map((a) => ({
+      code: a.code,
+      state: a.state,
+      what: a.what,
+      why: a.why,
+      // The rows. A client that shows a priority without it is showing a
+      // conclusion the user cannot check.
+      basis: a.basis,
+      cta: a.cta,
+      href: a.href,
+      count: a.count,
+      requirement: a.requirement,
+      opportunity: a.opportunity,
+      source: a.source,
+    })),
+    states: actionCenter.STATES.map((s) => ({
+      code: s, label: actionCenter.STATE_WORD[s], meaning: actionCenter.STATE_MEANING[s] })),
+  });
+}));
+
+router.get('/gaps', wrap(async (req, res) => {
+  const g = await gapAnalysis.analyse(cid(req), await liveAssessmentId(req));
+  if (g.state !== 'ok') return res.json({ state: g.state, detail: g.detail, gaps: [] });
+  res.json({
+    state: 'ok',
+    overall: g.overall,
+    counts: g.counts,
+    pillars: g.pillars.all,
+    strong: g.pillars.strong.map((p) => p.pillar),
+    priority: g.pillars.priority.map((p) => p.pillar),
+    gaps: g.gaps.map((x) => ({
+      indicator_id: x.indicator_id,
+      code: x.code,
+      pillar: x.pillar,
+      kind: x.kind,
+      priority: x.priority,
+      // FROM THE SCORING ENGINE. Never recomputed by the gap analysis and
+      // never by this route.
+      points_missed: x.points_missed,
+      mapping_status: x.mapping_status,
+      question: x.question,
+      what: x.what,
+      why: x.why,
+      // `configured:false` is the load-bearing case and travels with the text,
+      // so a client can render "we do not know" differently from advice.
+      evidence: x.evidence,
+      action: x.action,
+      href: x.href,
+      who: x.who,
+      narrative: x.narrative,
+      narrative_source: x.narrative_source,
+    })),
+  });
+}));
+
+router.get('/roadmap', wrap(async (req, res) => {
+  const r = await roadmapService.build(cid(req), await liveAssessmentId(req));
+  res.json({
+    counts: r.counts,
+    completed_through: r.completedThrough,
+    current: r.current ? r.current.code : null,
+    // `link` is the whole point of this payload: it says how each rung is
+    // joined to the one above — computed, joined by a column, or merely next.
+    // A client that drops it is drawing arrows it cannot defend.
+    steps: r.steps.map((s) => ({
+      code: s.code, name: s.name, state: s.state, link: s.link,
+      link_meaning: roadmapService.LINK_WORD[s.link],
+      what: s.what, detail: s.detail, cta: s.cta, href: s.href, figures: s.figures,
+    })),
+    states: roadmapService.STEP_STATES.map((s) => ({ code: s, label: roadmapService.STEP_WORD[s] })),
+  });
+}));
+
+router.get('/report-readiness', wrap(async (req, res) => {
+  const r = await reportReadiness.assess(cid(req), await liveAssessmentId(req));
+  res.json({
+    counts: r.counts,
+    // A STATED CONSTANT, not a computed state. Nothing in this codebase writes
+    // a report file, and a client must not infer otherwise from a populated
+    // section list.
+    generator: r.generator,
+    sections: r.sections,
+  });
+}));
+
+router.get('/consultation', wrap(async (req, res) => {
+  const ready = await readinessSvc.calculate(cid(req));
+  const c = await consultationTriggers.evaluate(cid(req), await liveAssessmentId(req), ready);
+  res.json({
+    recommended: c.recommended,
+    // The whole rule set, fired or not, with the figures it was tested
+    // against. A recommendation whose rule a caller cannot see is a conclusion
+    // it has to take on trust.
+    considered: c.considered,
+    triggers: c.triggers,
+    areas: c.areas,
+    thresholds: c.thresholds,
+    signals: c.signals,
+    booking: c.booking,
+  });
+}));
+
+/* POST, because it calls a model. A GET that costs money is a GET a browser
+   will prefetch.
+
+   THE INTENT IS VALIDATED AGAINST A CLOSED SET IN THE SERVICE and this route
+   does not widen it. A 400 here names the four intents rather than echoing
+   what was sent, so a caller learns the vocabulary from the error. */
+router.post('/copilot', wrap(async (req, res) => {
+  const { intent, subject_id: subjectId } = req.body || {};
+  if (!copilot.INTENT_CODES.includes(intent)) {
+    return res.status(400).json({
+      error: 'unknown intent',
+      intents: copilot.INTENT_CODES.map((c) => ({ code: c, label: copilot.INTENTS[c].label,
+        subject: copilot.INTENTS[c].subject })),
+    });
+  }
+  if (!subjectId) {
+    return res.status(400).json({ error: `intent "${intent}" needs subject_id`,
+      subject: copilot.INTENTS[intent].subject });
+  }
+  try {
+    const answer = await copilot.ask({ companyId: cid(req), userId: req.user.id, intent, subjectId });
+    res.json(answer);
+  } catch (err) {
+    // A subject this company cannot see is a 404, not a 500 and not an empty
+    // 200. Returning a polite nothing would make an authorisation failure and
+    // an absent row look the same to a caller.
+    if (/no .* this company can see/.test(err.message)) {
+      return res.status(404).json({ error: err.message });
+    }
+    throw err;
+  }
+}));
+
 module.exports = router;

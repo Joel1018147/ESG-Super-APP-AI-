@@ -94,8 +94,45 @@ const AGGREGATE_ZEROES = {
   n: 0, bytes: 0, entries: 0, provisional: 0, projects: 0, products: 0,
   proposals_live: 0, proposals_pending: 0, period_from: null, period_to: null,
   live: 0, reviewed: 0, pending: 0, accepted: 0, answered: 0, na: 0, filled: 0,
+  // ── P9's aggregates ────────────────────────────────────────────────────
+  // Every one of these is an alias no other query in this repo uses, which is
+  // deliberate on the query side and is what lets a fixture below name exactly
+  // one statement. Listed here so the EMPTY render reads a real zero from each
+  // rather than an undefined that would arrive on the page as NaN.
+  documents_total: 0, documents_read: 0, documents_unreadable: 0, documents_unattached: 0,
+  unanswered: 0, self_declared: 0,
+  projects_total: 0, projects_implemented: 0, projects_forecast: 0,
+  projects_unclassified: 0, projects_no_financing: 0,
+  opportunities_pending: 0, unverified_actuals: 0,
+  profile_filled: 0,
+  answers_total: 0, answers_na: 0, answers_documented: 0, answers_verified: 0, answers_declared: 0,
+  carbon_entries: 0, carbon_provisional: 0,
+  report_docs_total: 0, report_docs_read: 0,
+  report_projects_total: 0, report_projects_forecast: 0,
+  report_baselines: 0, report_actuals: 0, report_verified: 0,
+  trigger_gaps: 0, trigger_pillars: 0, trigger_draft: 0,
+  trigger_unevidenced: 0, trigger_unreadable: 0, trigger_unclassified: 0,
 };
-const isAggregate = (sql) => /\bcount\(\*\)/i.test(sql) && !/\bGROUP BY\b/i.test(sql);
+/* P9 WIDENED THIS FROM count(*) TO EVERY BARE AGGREGATE, and the change makes
+   the stub MORE truthful rather than more forgiving.
+
+   `SELECT coalesce(sum(byte_size), 0) FROM t WHERE …` with no GROUP BY returns
+   exactly one row in Postgres — on an empty table, on a table with no rows for
+   this company, always. That is what an aggregate IS, and it is as true of
+   sum() as of count(). The old predicate knew only count(*), so a sum-only
+   statement was answered `rows: []` — a database that cannot exist — and the
+   only way a route could survive it was by carrying a `rows[0] || {}` guard for
+   a case that never happens in production. That is RULE 6, forced on the code
+   by the test.
+
+   It caught exactly that on the dashboard's byte total, which is the query
+   that prompted the widening.
+
+   The GROUP BY exclusion still matters and is why this is not simply "does the
+   SQL mention sum": a grouped aggregate returns one row PER GROUP and may
+   legitimately return none. */
+const isAggregate = (sql) => /\b(count|sum|min|max|avg)\s*\(/i.test(sql)
+  && !/\bGROUP BY\b/i.test(sql);
 
 const EMPTY_DB = {
   query: async (text) => {
@@ -165,6 +202,53 @@ const FIXTURES = [
   // They sit above the row-returning patterns for the same reason the block
   // above them does.
   [/AS bytes FROM esg_documents/, [{ n: 4, bytes: 19500000 }]],
+  /* ── P9's aggregates ──────────────────────────────────────────────────────
+     Keyed on an alias no other statement in this repo selects, which is why
+     each of these names exactly one query and why none of them can be stolen
+     by the table patterns further down. actionCenter, reportReadiness,
+     roadmapService and consultationTriggers all issue correlated subqueries or
+     joins naming a table that already has a fixture, and a key on the TABLE
+     would have answered the wrong statement — silently, with a plausible row.
+
+     The figures are chosen to exercise the branches: two proposals pending
+     against a SCORED assessment fires actionCenter's U1, one implemented
+     project with a baseline and no actual fires U2, and four self-declared
+     answers sit one BELOW the consultation threshold of five so the trigger
+     table has a "No" row in it as well as a "Yes". */
+  [/AS documents_total/, [{ documents_total: 4, documents_read: 3,
+    documents_unreadable: 1, documents_unattached: 1 }]],
+  [/AS unanswered/, [{ unanswered: 22 }]],
+  [/AS self_declared/, [{ self_declared: 4 }]],
+  [/AS projects_total/, [{ projects_total: 1, projects_implemented: 1, projects_forecast: 1,
+    projects_unclassified: 0, projects_no_financing: 1 }]],
+  [/AS opportunities_pending/, [{ opportunities_pending: 1 }]],
+  [/AS unverified_actuals/, [{ unverified_actuals: 1 }]],
+  // actionCenter's U2 read: implemented, baselined, and never measured.
+  [/AND p.status = 'implemented'/, [{ id: 'gp-1', title: 'Rooftop solar' }]],
+  [/AS profile_filled/, [{ profile_filled: 5 }]],
+  [/AS answers_total/, [{ answers_total: 18, answers_na: 1, answers_documented: 5,
+    answers_verified: 2, answers_declared: 10 }]],
+  [/AS carbon_entries/, [{ carbon_entries: 2, carbon_provisional: 1 }]],
+  [/AS report_docs_total/, [{ report_docs_total: 4, report_docs_read: 3 }]],
+  [/AS report_projects_total/, [{ report_projects_total: 1, report_projects_forecast: 1 }]],
+  [/AS report_baselines/, [{ report_baselines: 1, report_actuals: 0, report_verified: 0 }]],
+  [/AS trigger_gaps/, [{ trigger_gaps: 3, trigger_pillars: 3, trigger_draft: 2 }]],
+  [/AS trigger_unevidenced/, [{ trigger_unevidenced: 4 }]],
+  [/AS trigger_unreadable/, [{ trigger_unreadable: 1 }]],
+  [/AS trigger_unclassified/, [{ trigger_unclassified: 0 }]],
+  // roadmapService's project list. Keyed on its own unique alias for the same
+  // reason: it names esg_green_project_baselines three times in subqueries.
+  [/AS roadmap_baselines/, [{ id: 'gp-1', title: 'Rooftop solar', status: 'implemented',
+    estimated_cost_myr: 250000, financing_required_myr: null,
+    expected_benefit_metric: 'electricity_kwh', expected_benefit_value: 4200,
+    expected_benefit_basis: 'supplier_quotation', ccpt_category_code: 'C1',
+    classification_basis: 'human_assigned', source_opportunity_id: 'o-1',
+    created_at: '2026-08-13T00:00:00.000Z',
+    roadmap_baselines: 1, roadmap_actuals: 0, roadmap_verified: 0 }]],
+  // gapAnalysis reads the scheme that scored the assessment — NOT whichever is
+  // active today, which may be a later version.
+  [/FROM esg_weighting_schemes/, [{ id: 'w-1', version: '1.0', weight_e: 0.4, weight_s: 0.3,
+    weight_g: 0.3, mult_self_declared: 0.6, mult_documented: 0.85, mult_verified: 1.0 }]],
   [/AS proposals_live/, [{ proposals_live: 3, proposals_pending: 2 }]],
   [/AS entries, min\(period_start\)/, [{
     entries: 2, period_from: '2026-01-01', period_to: '2026-06-30', provisional: 1 }]],
@@ -422,11 +506,45 @@ function newCompanyDb() {
         return { rows: [{ entries: 0, period_from: null, period_to: null, provisional: 0 }] };
       }
       if (/AS projects FROM esg_green_projects/.test(sql)) return { rows: [{ projects: 0 }] };
+      /* ── P9's aggregates, for a company that has done nothing ──────────────
+         Same rule as the block above and it is the rule this stub exists to
+         hold: a new company's aggregates are ZERO, not absent. The default
+         `rows: []` at the bottom of this function models a database that
+         answered nothing to a count(*), which cannot happen — and a route that
+         survived it would only do so by carrying a `rows[0] || {}` guard for a
+         case production never produces.
+
+         EVERY FIGURE HERE IS ZERO AND THAT IS THE POINT. This is the day-one
+         render: no documents, no answers, no projects, nothing pending. The
+         action list it produces is the journey's own stages and nothing else,
+         which is exactly what a company that registered ten minutes ago should
+         see. */
+      if (/AS documents_total/.test(sql)) {
+        return { rows: [{ documents_total: 0, documents_read: 0, documents_unreadable: 0, documents_unattached: 0 }] };
+      }
+      if (/AS unanswered/.test(sql)) return { rows: [{ unanswered: 0 }] };
+      if (/AS self_declared/.test(sql)) return { rows: [{ self_declared: 0 }] };
+      if (/AS projects_total/.test(sql)) {
+        return { rows: [{ projects_total: 0, projects_implemented: 0, projects_forecast: 0,
+          projects_unclassified: 0, projects_no_financing: 0 }] };
+      }
+      if (/AS opportunities_pending/.test(sql)) return { rows: [{ opportunities_pending: 0 }] };
+      if (/AS unverified_actuals/.test(sql)) return { rows: [{ unverified_actuals: 0 }] };
       // The register is a PUBLIC reference list, not this company's data, so it
       // is populated on day one. A new company sees products and no match.
       if (/AS products FROM esg_finance_products/.test(sql)) return { rows: [{ products: 31 }] };
       // readinessService (P6.5), for a company that has done nothing yet.
       if (/FROM esg_finance_inputs/.test(sql)) return { rows: [], rowCount: 0 };
+      /* THIS BRANCH MUST STAY ABOVE THE BASELINES ONE, and the reason is the
+         defect it was written from. actionCenter's U2 read is a ROW query over
+         esg_green_projects whose two EXISTS subqueries both name
+         esg_green_project_baselines — so the baselines branch below claimed it
+         and answered `[{ n: 0 }]`, one row with no title on it, and the empty
+         dashboard rendered "“undefined” is implemented and has never been
+         measured" as its lead action. A row query cannot be disambiguated by an
+         alias the way the aggregates above it can, so it is keyed on the
+         predicate that is unique to it. */
+      if (/AND p\.status = 'implemented'/.test(sql)) return { rows: [], rowCount: 0 };
       if (/FROM esg_green_project_baselines/.test(sql)) return { rows: [{ n: 0 }] };
       if (/FILTER \(WHERE is_provisional\)/.test(sql)) return { rows: [{ n: 0, provisional: 0 }] };
       if (/ORDER BY s\.computed_at DESC/.test(sql)) return { rows: [], rowCount: 0 };
@@ -663,7 +781,13 @@ let RENDERED = null;
     for (const [label, html] of [['empty', EMPTY_HTML], ['unseeded', UNSEEDED_HTML], ['full', FULL_HTML]]) {
       const c = contentOf(html);
       assert.ok(c && c.length > 400, `${label}: content region is ${c && c.length} bytes`);
-      assert.ok(!/undefined|NaN|\[object Object\]/.test(c), `${label}: a template hole rendered`);
+      /* THE FAILURE NAMES THE HOLE (P9). It used to say only that one existed,
+         which on a 40 KB page is a bisect rather than a finding — the run that
+         added the action list spent longer locating the word than fixing it.
+         The message now carries 60 characters either side of the first match. */
+      const hole = c.match(/undefined|NaN|\[object Object\]/);
+      assert.ok(!hole, hole ? `${label}: a template hole rendered — "${hole[0]}" in: …${
+        c.slice(Math.max(0, hole.index - 60), hole.index + 60).replace(/\s+/g, ' ')}…` : '');
       assert.ok(/class="(esg-)?card/.test(c), `${label}: rendered no card`);
     }
   });

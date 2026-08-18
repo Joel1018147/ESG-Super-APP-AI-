@@ -4,7 +4,11 @@ const express = require('express');
 const { query } = require('../db');
 const { layout, esc, dayOf, emptyState, frameworkLabel, icon } = require('../utils/layout');
 const { STAGE_LINK, STAGE_CTA } = require('../utils/journeyView');
-const readiness = require('../services/readinessService');
+/* readinessService is NO LONGER REQUIRED HERE (P9). The dashboard's only
+   caller of it was `readiness.calculate(cid)` in the pathway, and that result
+   now arrives on actionCenter's return — which ran the same engine on the same
+   request. Leaving the import would leave a second way for this route to reach
+   the engine, and the next author to need a readiness figure would take it. */
 const sedg = require('../data/sedgV2');
 const { scoreAssessment, loadActiveScheme } = require('../services/scoringEngine');
 const { generateRecommendations } = require('../services/aiAdvisor');
@@ -12,6 +16,9 @@ const { electricityToCo2e, fuelToCo2e } = require('../services/carbonEngine');
 const { mirrorStatus } = require('../services/verraService');
 const journey = require('../services/journeyEngine');
 const view = require('../utils/journeyView');
+const actionCenter = require('../services/actionCenter');
+const reportReadiness = require('../services/reportReadiness');
+const actionView = require('../utils/actionView');
 
 const router = express.Router();
 
@@ -169,16 +176,28 @@ function statCard(label, value, sub, glow) {
 router.get('/dashboard', async (req, res, next) => {
   try {
     const cid = companyIdOf(req);
-    const [{ stages, missions, levels }, facts] = await Promise.all([
-      journey.loadDefinitions(),
-      journey.gatherFacts(cid),
-    ]);
+
+    /* ── P9 · THE ACTION CENTER IS NOW THE FIRST THING THIS PAGE ASKS FOR ──
+       It loads the journey definitions, gathers the facts, computes the
+       journey, reads the counts behind each predicate and runs the readiness
+       engine — all of which this route used to do for itself, in three places,
+       and one of which (readiness) it ran a second time further down.
+
+       The reason is not fewer queries, although it is that too. It is that the
+       dashboard's "next action", the journey page's "current mission" and the
+       action list below now all come from ONE decision about what state
+       everything is in. Before P9 the hero picked the journey's active stage
+       and the pathway picked readiness's own largest gap, and the two could
+       point a user at different work on the same screen. */
+    const ab = await actionCenter.build(cid);
+    const { stages, missions, levels } = ab.definitions || { stages: [], missions: [], levels: [] };
+    const facts = ab.facts || await journey.gatherFacts(cid);
 
     // The journey is DEFINED in seed.sql. No rows means the seed did not run,
     // which is a deployment fault and not a company that has done nothing —
     // and those two must never render the same way.
     const journeyReady = stages.length > 0 && missions.length > 0 && levels.length > 0;
-    const j = journeyReady ? journey.computeJourney(facts, stages) : null;
+    const j = journeyReady ? ab.journey : null;
     const m = journeyReady ? journey.computeMissions(facts, missions) : null;
     // P8 REMOVED THE XP CHROME FROM THIS PAGE, not the XP engine.
     //
@@ -246,39 +265,41 @@ router.get('/dashboard', async (req, res, next) => {
     // Every one is an aggregate over a table this company owns, so each returns
     // exactly one row and is read without a guard. A count query that returns
     // nothing is a broken connection, and it should throw rather than render 0.
+    //
+    // P9 REMOVED THREE OF THE SIX. The proposal counts, the project count and
+    // the document total were being read here AND in actionCenter.gatherDetail
+    // on the same request, from the same tables, with the same predicates —
+    // two independent copies of the same aggregate on one page, which is the
+    // shape that eventually renders "12 proposals" beside "11 waiting". They
+    // now come from `ab.detail`. `recentDocs` and the byte total are the
+    // dashboard's own and stay here; nothing else needs them.
     const [
-      { rows: docTotals }, { rows: recentDocs }, { rows: propTotals },
-      { rows: carbonTotals }, { rows: greenTotals }, { rows: registerTotals },
+      { rows: docBytes }, { rows: recentDocs },
+      { rows: carbonTotals }, { rows: registerTotals },
     ] = await Promise.all([
       query(
-        `SELECT count(*)::int AS n, coalesce(sum(byte_size), 0)::bigint AS bytes
+        `SELECT coalesce(sum(byte_size), 0)::bigint AS bytes
            FROM esg_documents WHERE company_id = $1`, [cid]),
       query(
         `SELECT id, filename, byte_size, text_status
            FROM esg_documents WHERE company_id = $1
           ORDER BY created_at DESC, id DESC LIMIT 5`, [cid]),
-      // auto_rejected proposals never reach a human, so they are outside both
-      // the numerator and the denominator — the same rule journeyEngine applies.
-      query(
-        `SELECT count(*)::int AS proposals_live,
-                count(*) FILTER (WHERE e.status = 'pending')::int AS proposals_pending
-           FROM esg_document_extractions e
-           JOIN esg_documents d ON d.id = e.document_id
-          WHERE d.company_id = $1 AND e.status <> 'auto_rejected'`, [cid]),
       query(
         `SELECT count(*)::int AS entries, min(period_start) AS period_from,
                 max(period_end) AS period_to,
                 count(*) FILTER (WHERE is_provisional)::int AS provisional
            FROM esg_carbon_entries WHERE company_id = $1`, [cid]),
       query(
-        `SELECT count(*)::int AS projects FROM esg_green_projects WHERE company_id = $1`, [cid]),
-      query(
         `SELECT count(*)::int AS products FROM esg_finance_products WHERE is_active`, []),
     ]);
-    const docs = docTotals[0];
-    const props = propTotals[0];
+    // Shaped exactly as before so nothing downstream in this route changed.
+    // `ab.figures` is null only in the uninstrumented case, which this page
+    // already renders through `journeyReady`.
+    const d = ab.figures || { docs: { total: 0 }, proposals: { live: 0, pending: 0 }, projects: { total: 0 } };
+    const docs = { n: d.docs.total, bytes: docBytes[0].bytes };
+    const props = { proposals_live: d.proposals.live, proposals_pending: d.proposals.pending };
     const carbon = carbonTotals[0];
-    const green = greenTotals[0];
+    const green = { projects: d.projects.total };
     const register = registerTotals[0];
 
     /* ── panel chrome ─────────────────────────────────────────────────────
@@ -380,27 +401,38 @@ router.get('/dashboard', async (req, res, next) => {
             until an assessment exists, so there is no denominator to count against either.</p>`}
         </div>`;
 
-    // The ONE next action. It comes from the journey engine's active stage, so
-    // it cannot disagree with the mission map further down the page.
-    const nextPanel = active ? `
+    /* THE ONE NEXT ACTION (P9).
+       It used to be the journey engine's active stage read directly. It is now
+       actionCenter's `lead`, which is the SAME stage in every case where the
+       journey is the most pressing thing — and is something else in the two
+       cases where it is not: a score that predates unreviewed evidence, and an
+       implemented project that has never been measured. Both are situations
+       where the journey's active stage is genuinely not the next move, and
+       before P9 this panel could not say so.
+
+       `lead` is null when nothing is open. That is a real answer and it is
+       rendered as one; it is never backfilled with the first action of any
+       state, because "revisit this completed stage" is not a next move. */
+    const lead = ab.lead;
+    const nextPanel = lead ? `
       <div class="esg-next">
-        <span class="esg-next__label">Next mission</span>
-        <h2 class="esg-next__title">${esc(active.label_en)}</h2>
-        <p class="esg-next__why">${esc(active.description_en || '')}</p>
+        <span class="esg-next__label">${esc(actionCenter.STATE_WORD[lead.state])} · what to do next</span>
+        <h2 class="esg-next__title">${esc(lead.what)}</h2>
+        <p class="esg-next__why">${esc(lead.why)}</p>
         <div class="esg-next__actions">
-          <a class="btn btn-primary" href="${esc(STAGE_LINK[active.stage_code] || '/journey')}">${
-  esc(STAGE_CTA[active.stage_code] || 'Continue')}</a>
+          <a class="btn btn-primary" href="${esc(lead.href)}">${esc(lead.cta)}</a>
           <a class="btn btn-outline" href="/journey">See the whole journey</a>
         </div>
-        ${activeMission ? `<span class="esg-meta">${esc(view.stateWords(activeMission))} · mission ${
-  esc(j.stages.indexOf(active) + 1)} of ${esc(j.total_stages)} · ${esc(m.completed)} of ${
-  esc(m.total)} complete</span>` : ''}
+        <span class="esg-meta">${esc(lead.basis)}${activeMission
+    ? ` · mission ${esc(j.stages.indexOf(active) + 1)} of ${esc(j.total_stages)} · ${
+      esc(m.completed)} of ${esc(m.total)} complete` : ''}</span>
       </div>`
       : `<div class="esg-next">
-          <span class="esg-next__label">Next mission</span>
+          <span class="esg-next__label">What to do next</span>
           <h2 class="esg-next__title">Nothing is waiting for you</h2>
-          <p class="esg-next__why">Every stage you can currently reach is done. The stages that
-            remain are blocked on something outside this platform, and each one says what.</p>
+          <p class="esg-next__why">Every stage you can currently reach is done, no proposal is
+            outstanding and no measurement is overdue. The stages that remain are blocked on
+            something outside this platform, and each one says what.</p>
           <div class="esg-next__actions"><a class="btn btn-outline" href="/journey">Review the journey</a></div>
         </div>`;
 
@@ -408,6 +440,81 @@ router.get('/dashboard', async (req, res, next) => {
       ${heroLeft}
       ${nextPanel}
     </section>`;
+
+    /* ═══════════════════════════════════════════════════════════════════════
+       1b · THE ACTION CENTER                                            (P9)
+       ─────────────────────────────────────────────────────────────────────
+       WHAT SHOULD I DO NEXT — not once, in the hero, but the whole list, in
+       priority order, with the reason each item sits where it does.
+
+       THE OPEN WORK LEADS AND THE REST DISCLOSES. Completed, blocked and
+       not-configured actions are real and are not hidden — a blocked
+       capability is the one card that explains why something a user expected
+       is not there — but a company opening this page needs the four states it
+       can act on, and thirteen completed stages above them would bury the two
+       that matter. So the open list renders and the rest sits in a <details>,
+       which is the same treatment the rating ladder gets below.
+
+       THE LEGEND IS NARROWED TO THE STATES ACTUALLY PRESENT. Seven definitions
+       under a list showing three of them is noise; omitting one the reader IS
+       looking at is worse. actionView.legend() takes the set from the data.
+       ═════════════════════════════════════════════════════════════════════ */
+    const actionSection = (() => {
+      if (ab.state !== 'ok') {
+        return `<section class="esg-section">
+          <div class="esg-section__head">
+            <h2 class="esg-section__title">What needs you</h2>
+          </div>
+          <!-- THE SERVICE'S OWN SENTENCE, NOT A SECOND COPY OF IT.
+               This used to test ab.detail.text and fall back to a hand-written
+               string, which was wrong twice over: detail never had a .text
+               property on either branch, so the ternary always took the
+               fallback — and the fallback was a near-identical duplicate of
+               the words the service already publishes, which is exactly the
+               drift STAGE_DETAIL's own comment warns about. detail is now
+               unambiguously the sentence, and there is one copy of it. -->
+          ${emptyState('uninstrumented', {
+    title: 'The action list has nothing to derive from',
+    body: ab.detail })}
+        </section>`;
+      }
+      const openList = ab.open;
+      const rest = ab.actions.filter((a) => !openList.includes(a));
+      const openStates = [...new Set(openList.map((a) => a.state))];
+      const urgent = ab.counts.urgent;
+
+      return `<section class="esg-section">
+        <div class="esg-section__head">
+          <h2 class="esg-section__title">What needs you</h2>
+          <span class="esg-section__note">${openList.length
+    ? `${esc(openList.length)} open${urgent ? ` · ${esc(urgent)} urgent` : ''} · every one says which rows put it here`
+    : 'Nothing is open · every reachable stage is done'}</span>
+        </div>
+        ${openList.length ? `
+          <div class="esg-card"><div class="esg-card__body">
+            ${actionView.legend(openStates)}
+          </div></div>
+          <div class="esg-actions">
+            ${openList.map((a, i) => actionView.actionCard(a, i)).join('')}
+          </div>`
+    : emptyState('zero', {
+      title: 'Nothing is waiting on you',
+      body: 'Every stage you can reach is complete, no AI proposal is outstanding and no '
+          + 'measurement is overdue. That is a measured result — the list is empty rather than '
+          + 'switched off.' })}
+        ${rest.length ? `
+          <details class="esg-stage__more">
+            <summary>${esc(rest.length)} more: what is done, what is blocked, and what this
+              platform cannot do</summary>
+            <div class="esg-card"><div class="esg-card__body">
+              ${actionView.legend([...new Set(rest.map((a) => a.state))])}
+            </div></div>
+            <div class="esg-actions">
+              ${rest.map((a, i) => actionView.actionCard(a, i)).join('')}
+            </div>
+          </details>` : ''}
+      </section>`;
+    })();
 
     // ── 2 · POSITION · the pillar breakdown ─────────────────────────────────
     // ONE DENOMINATOR CONVENTION ON THE PAGE. The hero counts answered against
@@ -552,13 +659,25 @@ router.get('/dashboard', async (req, res, next) => {
           <p class="esg-rec__text">${esc(r.narrative_en || '')}</p>
         </div>`).join('')}
       </div></div>
-      ${recs.length > 3 ? `<div class="esg-row"><a class="btn btn-outline" href="/assessment/${esc(a.id)}">See every recommendation</a></div>` : ''}
+      <!-- P9 · THE THREE ON THIS CARD ARE THE TOP THREE OF A LONGER LIST, and
+           before P9 there was nowhere the rest of it lived. /improvement is
+           that page: every gap, ordered by the points the engine says it is
+           costing, each with what would resolve it. The count is real — it is
+           the number of recommendation rows this assessment carries. -->
+      <div class="esg-row">
+        <a class="btn btn-outline" href="/improvement">${recs.length > 3
+    ? `Work through all ${esc(recs.length)} gaps`
+    : 'Open the improvement roadmap'}</a>
+        <a class="btn btn-outline" href="/assessment/${esc(a.id)}">Open the assessment</a>
+      </div>
     </section>` : '';
 
-    // The engine reads eight scoped aggregates of its own. Awaited here rather
-    // than folded into the waves above because it is a SERVICE call, not a
-    // query this route owns — the route must not know its shape.
-    const ready = await readiness.calculate(cid);
+    /* The readiness engine reads eight scoped aggregates of its own. It used to
+       be awaited here; P9 takes actionCenter's result instead, because that
+       function has already run it on this very request and a second run would
+       be the same engine reaching the same conclusion twice on one page — the
+       shape that eventually renders two different readiness figures. */
+    const ready = ab.readiness;
 
     /* ── Green Finance Readiness, from the ENGINE ─────────────────────────
        P6.5 replaced a hardcoded "Not configured" string with a real service.
@@ -687,6 +806,7 @@ router.get('/dashboard', async (req, res, next) => {
 
     const body = `<div class="esg-page">
       ${hero}
+      ${actionSection}
       ${positionSection}
       ${attentionSection}
       ${improvementSection}
@@ -707,9 +827,19 @@ router.get('/dashboard', async (req, res, next) => {
           <div class="esg-rec"><span class="esg-rec__head">No AI confidence percentage</span>
             <p class="esg-rec__text">There is deliberately no confidence column. What exists is stronger:
               a verbatim quote checked against the document, or the proposal is discarded before you see it.</p></div>
-          <div class="esg-rec"><span class="esg-rec__head">No expert consultation</span>
-            <p class="esg-rec__text">Not built. A button that opens nothing is worse than an absent
-              feature, because you would believe the capability exists and stop looking.</p></div>
+          <!-- P9 CHANGED WHAT THIS CARD SAYS, AND NOT WHAT IT ADMITS.
+               There is still no consultation module: no availability, no
+               booking, no record, no fee. What P9 added is the platform's
+               account of WHY it might be worth talking to somebody — six
+               configured situations tested against this company's own rows,
+               each printing the threshold it crossed. /consultation opens that
+               account and books nothing, which is why the link is a real
+               destination rather than the dead control §4.3c bans. -->
+          <div class="esg-rec"><span class="esg-rec__head">No expert consultation booking</span>
+            <p class="esg-rec__text">Still not built — no availability, no booking, no record of a
+              session. What the platform can now do is say whether anything in your own data
+              suggests a conversation would help, and show you the rule it used.
+              <a href="/consultation">See what it noticed</a>.</p></div>
         </div></div>
       </section>
     </div>`;
@@ -1368,6 +1498,22 @@ router.get('/assessment/:id', async (req, res, next) => {
   }[i.mapping_status] || i.mapping_status)}">${esc(i.mapping_status)}</span>` : ''}
           </div>
           ${i.guidance_en ? `<p class="esg-q__guide">${esc(i.guidance_en)}</p>` : ''}
+          <!-- P9 · THE TWO CONTEXTUAL ASKS.
+               Not "Chat with AI". Two specific questions about THIS disclosure,
+               each a plain link to a page that renders one answer server-side.
+               No JavaScript, no spinner, no chat box — and one model call per
+               deliberate click rather than thirty-nine on page load.
+               The copilot is given the question and its configured guidance and
+               nothing else: no score, no points, no answer of yours. Every
+               digit it emits is stripped, because it was handed no figures. -->
+          <div class="esg-copilot__asks">
+            <a class="btn btn-outline"
+               href="/explain?intent=explain_requirement&amp;subject=${esc(i.id)}&amp;back=${encodeURIComponent(`/assessment/${a[0].id}#q-${i.code}`)}"
+               >Explain this requirement</a>
+            <a class="btn btn-outline"
+               href="/explain?intent=evidence_for&amp;subject=${esc(i.id)}&amp;back=${encodeURIComponent(`/assessment/${a[0].id}#q-${i.code}`)}"
+               >What evidence can I provide?</a>
+          </div>
           ${pend.map((x) => proposalBlock(i, x)).join('')}
           <div class="esg-q__controls">
             <div class="esg-q__control">
@@ -1976,11 +2122,130 @@ router.get('/governance', async (req, res, next) => {
 });
 
 // ── Reports & documents (sprint 2 surfaces, honestly labelled) ─────────────
-router.get('/reports', (req, res) => {
-  res.send(layout('Reports', emptyState('uninstrumented', {
-    title: 'Report generation is not built yet',
-    body: 'The scoring data it needs exists. PDF/DOCX/XLSX export is sprint 2 — this page is here so the gap is visible rather than hidden behind a broken button.',
-  }), req.user, '/reports'));
+/* ═══════════════════════════════════════════════════════════════════════════
+   REPORTING READINESS                                             (Run 63/P9)
+   ───────────────────────────────────────────────────────────────────────────
+   THERE IS STILL NO REPORT GENERATOR, AND P9 DID NOT BUILD ONE.
+
+   What this page replaced was a single uninstrumented empty state that said
+   the gap was visible. It was — and it was also the only answer this product
+   gave to "what would go in a report", which is a question an SME asks the
+   week before they need one.
+
+   So the page now answers the OTHER half, which is genuinely answerable: if a
+   report were assembled today, what would be in it, what would be missing, and
+   what could not be in it at all. Eleven sections in three states, from
+   reportReadiness.js. The generator's absence is the FIRST thing on the page
+   rather than a footnote, and there is no button anywhere on it that produces
+   a file — §4.3c, and the reason the old page existed in the first place.
+   ═══════════════════════════════════════════════════════════════════════════ */
+router.get('/reports', async (req, res, next) => {
+  try {
+    const companyId = companyIdOf(req);
+    const live = await journey.loadLiveAssessment(companyId);
+    const r = await reportReadiness.assess(companyId, live ? live.id : null);
+
+    const STATE_CLASS = { available: 'verified', missing: 'missing', not_configured: 'na' };
+
+    const notBuilt = `
+      <div class="esg-reserved">
+        <span class="esg-reserved__mark" aria-hidden="true">${icon('frameworks')}</span>
+        <div>
+          <h3 class="esg-reserved__title">Nothing on this platform produces a report file</h3>
+          <p class="esg-reserved__body">${esc(r.generator.detail)}</p>
+        </div>
+        <span class="esg-reserved__status">Generator not built</span>
+      </div>`;
+
+    const section = (s, i) => `
+      <div class="esg-fact${s.state === 'available' ? ' esg-fact--verified' : ' esg-fact--absent'} esg-fact--text"
+           style="--esg-i:${esc(i)}">
+        <span class="esg-fact__label">${esc(s.name)}</span>
+        <span class="esg-fact__value">
+          <span class="esg-astate esg-astate--${esc(STATE_CLASS[s.state])}">${esc(reportReadiness.STATE_WORD[s.state])}</span>
+          ${s.count !== null ? `<span class="esg-num">${esc(s.count)}</span> ${esc(s.unit || '')}` : ''}
+        </span>
+        <span class="esg-fact__from">${esc(s.what)}${s.why ? ` ${esc(s.why)}` : ''}</span>
+      </div>`;
+
+    const available = r.sections.filter((s) => s.state === 'available');
+    const missing = r.sections.filter((s) => s.state === 'missing');
+    const impossible = r.sections.filter((s) => s.state === 'not_configured');
+
+    const group = (title, note, list, idx) => (list.length ? `
+      <section class="esg-section esg-enter" style="--esg-i:${idx}">
+        <div class="esg-section__head">
+          <h3 class="esg-section__title">${esc(title)}</h3>
+          <span class="esg-section__note">${esc(note)}</span>
+        </div>
+        <div class="esg-facts">${list.map(section).join('')}</div>
+      </section>` : '');
+
+    res.send(layout('Reporting readiness', `
+      <div class="esg-page">
+        <header class="esg-page-header esg-enter">
+          <div class="esg-page-header__text">
+            <h2 class="esg-h1">Reporting readiness</h2>
+            <p class="esg-page-header__intro">What an ESG report could be assembled from today,
+              what is not there yet, and the three sections this platform cannot produce for any
+              company. Assembling the document itself is not built, and this page will not offer
+              a button that produces a stub.</p>
+          </div>
+        </header>
+
+        <section class="esg-section esg-enter" style="--esg-i:1">
+          <div class="esg-stack">${notBuilt}</div>
+        </section>
+
+        <section class="esg-section esg-enter" style="--esg-i:2">
+          <div class="esg-section__head">
+            <h3 class="esg-section__title">Where you stand</h3>
+            <span class="esg-section__note">Eleven sections a report would have</span>
+          </div>
+          <div class="esg-facts">
+            <div class="esg-fact">
+              <span class="esg-fact__label">Available</span>
+              <span class="esg-fact__value esg-num">${esc(r.counts.available)}</span>
+              <span class="esg-fact__from">Rows exist and the count is real</span>
+            </div>
+            <div class="esg-fact${r.counts.missing ? ' esg-fact--absent' : ''}">
+              <span class="esg-fact__label">Nothing recorded</span>
+              <span class="esg-fact__value esg-num">${esc(r.counts.missing)}</span>
+              <span class="esg-fact__from">The platform can hold these and you have none yet</span>
+            </div>
+            <div class="esg-fact esg-fact--absent">
+              <span class="esg-fact__label">Not configured</span>
+              <span class="esg-fact__value esg-num">${esc(r.counts.not_configured)}</span>
+              <span class="esg-fact__from">This platform cannot produce these for anyone</span>
+            </div>
+          </div>
+        </section>
+
+        ${group('What a report could draw on today', 'Every count names the table it came from', available, 3)}
+        ${group('What is not there yet', 'An empty account, and you can change it', missing, 4)}
+        ${group('What cannot be in a report at all', 'Not your data — a capability nobody has published', impossible, 5)}
+
+        <section class="esg-section esg-enter" style="--esg-i:6">
+          <div class="esg-section__head">
+            <h3 class="esg-section__title">Why there is no download button</h3>
+            <span class="esg-section__note">A stated decision, not an oversight</span>
+          </div>
+          <div class="esg-card"><div class="esg-card__body">
+            <div class="esg-rec"><span class="esg-rec__head">A stub would be worse than nothing</span>
+              <p class="esg-rec__text">A button that produced a thin PDF would make you believe the
+                capability exists, and you would stop looking for the real one. The material above
+                is genuinely there and can be read on the screens it lives on; what is missing is
+                the thing that turns it into a document.</p></div>
+            <div class="esg-rec"><span class="esg-rec__head">The hard part is not the file format</span>
+              <p class="esg-rec__text">It is deciding how a report labels a self-declared answer next
+                to a documented one, an expected benefit next to a measured one, and a provisional
+                emission factor next to a sourced one. This platform keeps those apart everywhere
+                else; a report that flattened them would be a weaker document than the data behind
+                it.</p></div>
+          </div></div>
+        </section>
+      </div>`, req.user, '/reports'));
+  } catch (err) { next(err); }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2120,7 +2385,24 @@ router.get('/frameworks', (req, res) => {
       </div></div>
     </section>
 
+    <!-- .alert-body ADDED IN P9, AND IT IS NOT COSMETIC.
+         The master's .alert is display:flex, so its children are flex ITEMS
+         IN A ROW. This block put a badge and two long paragraphs directly
+         inside it, which is fine at desktop and collapses at phone width:
+         MEASURED at 360px, the badge took its width first and the first
+         paragraph was squeezed into a 74px column whose right edge landed at
+         391 — clipped by .app-main's own overflow: hidden, with no scrollbar
+         and no gesture to recover it. The whole "what this platform claims,
+         precisely" statement, which is the most carefully worded paragraph in
+         the product, was unreadable on a phone.
+
+         .alert-body is the master's own wrapper for exactly this and the
+         company-profile banner in this same file already uses it. Nothing
+         about the master changed; this block was simply not using it. Found by
+         the 360px viewport P9 added to the visual probe — it is not a P9
+         surface and the defect predates this run. -->
     <div class="alert">
+      <div class="alert-body">
       <span class="esg-astate esg-astate--missing">SEDG-ALIGNED (DRAFT)</span>
       <p><strong>What this platform claims, precisely.</strong> The assessment you take on this
       platform is <em>${esc(frameworkLabel('MODUS_SEDG_ALIGNED', '0.9-draft'))}</em>. The
@@ -2139,6 +2421,7 @@ router.get('/frameworks', (req, res) => {
       ${c.total} disclosures; and <strong>no Bahasa Melayu or 中文 text exists</strong> for them,
       because the official translations are Version 1 and three of these disclosures are new in
       Version 2. This platform is <strong>not SEDG-compliant</strong> and does not claim to be.</p>
+      </div>
     </div>
 
     ${pillars}

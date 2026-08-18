@@ -258,8 +258,26 @@ const step = (n, msg) => console.log(`  ${n}. ${msg}`);
   });
   step(2, `company profile set — grid ${co.grid_region}, ${co.employee_count} employees`);
 
-  // 3 · Assessment. Idempotent per (company, framework, year) in the route.
-  const a = await json('/api/assessments', 'POST', { reporting_year: DEMO.reporting_year });
+  /* 3 · Assessment. Idempotent per (company, framework, year) in the route.
+   *
+   * THE FRAMEWORK IS NAMED, AND IT HAS TO BE (found in P9, broken since
+   * Run 25). This call used to send only `reporting_year`, and it worked
+   * because the route resolved a framework by ORDER BY when none was given.
+   * Run 25 closed that — RULE 6: a caller who names nothing gets a 400 rather
+   * than quietly receiving whichever framework happened to sort first — and
+   * this script was never updated, so it has 400'd at step 3 on any database
+   * where the demo company did not already have an assessment. Nobody saw it
+   * because on the databases people actually use, it already did.
+   *
+   * The 40 answers below are written against MODUS_SEDG_ALIGNED's codes
+   * (E-01 … G-13), so the framework is not a free choice here: sending SEDG
+   * would have every one of them rejected. It is named explicitly rather than
+   * left to a default for exactly the reason Run 25 removed the default. */
+  const a = await json('/api/assessments', 'POST', {
+    reporting_year: DEMO.reporting_year,
+    framework: 'MODUS_SEDG_ALIGNED',
+    framework_version: '0.9-draft',
+  });
   step(3, `assessment ${DEMO.reporting_year} — ${a.id}`);
 
   // 4 · The 40 answers. Upsert; rejections are reported, never swallowed.
