@@ -158,7 +158,16 @@ test('the overall product claim was NOT upgraded', () => {
     console.log(`sedg-ui-test: ${passed} passed, ${failures.length} failed, DB checks SKIPPED`);
     process.exit(failures.length ? 1 : 0);
   }
-  const c = new Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+  /* SSL COMES FROM THE APP'S OWN sslConfig, NOT FROM A LITERAL HERE.
+     Hardcoding `ssl: { rejectUnauthorized: false }` demanded TLS from every
+     server, and CI's postgres:16 service on localhost does not offer it — so
+     this suite failed test-with-db with "The server does not support SSL
+     connections" while the app it tests connected fine, because
+     src/db/index.js has always turned SSL off for localhost. One decision,
+     one place; sslConfig is already unit-tested in no-model-figures-test.js. */
+  const { sslConfig } = require('../src/db');
+  const c = new Client({ connectionString: process.env.DATABASE_URL,
+                         ssl: sslConfig(process.env.DATABASE_URL) });
   await c.connect();
 
   const { rows } = await c.query(
