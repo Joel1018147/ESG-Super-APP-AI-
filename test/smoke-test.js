@@ -329,12 +329,20 @@ const json = (method, o) => ({ method, headers: { 'Content-Type': 'application/j
     assert.ok(profileAward, 'the profile mission earned no award after the profile was completed');
   });
 
-  await check('every one of the 16 navigable screens renders signed-in', async () => {
+  await check('every navigable screen renders signed-in', async () => {
     // The demo is "one navigable screen per requirement section". A 500 or a
     // redirect on any of them is the whole thing failing in front of someone.
-    // 14 until Run 47 added Green Finance; 15 until Run 52 added ESG Journey.
+    //
+    // THE COUNT PIN MOVED TO THE END OF THIS CHECK, and that is the point of
+    // the change rather than a tidy-up. It used to run FIRST, so when P1–P7
+    // took the nav from 16 entries to 20 the assertion aborted before a single
+    // screen had been fetched — the suite reported one failure and had in fact
+    // verified nothing at all about any of the twenty. A tripwire that
+    // suppresses the check it guards is worse than no tripwire.
+    //
+    // It is still a pin: a nav change still has to be deliberate. It just no
+    // longer decides whether the real work runs.
     const { MODULES } = require('../src/utils/layout');
-    assert.strictEqual(MODULES.length, 16, `expected 16 nav entries, found ${MODULES.length}`);
     for (const m of MODULES) {
       const r = await A(m.path);
       assert.strictEqual(r.status, 200, `${m.path} returned ${r.status}`);
@@ -343,7 +351,14 @@ const json = (method, o) => ({ method, headers: { 'Content-Type': 'application/j
       // still looks like a working screen in a screenshot.
       assert.ok(html.includes('modus-design-system.css'), `${m.path} rendered unstyled`);
       assert.ok(html.includes('data-platform="esg"'), `${m.path} lost the platform accent`);
-      assert.ok(/class="(card|empty-state|coming-soon|stat-card|alert)/.test(html),
+      // THE SAME INVARIANT, AGAINST THE COMPONENTS THE PAGES NOW USE.
+      // P8 moved the product onto the additive ESG layer, so a migrated page
+      // renders .esg-card / .esg-section and no .card at all. The question this
+      // asks is unchanged — "did this screen render a real content block, or
+      // just the shell?" — and answering it against a component set the product
+      // has stopped using would have made it pass vacuously on every page P8
+      // touched. The master names stay for the pages still on them.
+      assert.ok(/class="(card|empty-state|coming-soon|stat-card|alert|esg-card|esg-section|esg-page-header|esg-hero|esg-facts|esg-track|esg-table-scroll|esg-ai|esg-reserved)/.test(html),
         `${m.path} rendered no real content block`);
 
       // THE SAME VISIBLE-TEXT RULE AS THE UNIT GUARD, BUT WITH REAL DATA.
@@ -368,6 +383,15 @@ const json = (method, o) => ({ method, headers: { 'Content-Type': 'application/j
           + `…${text.slice(Math.max(0, text.search(re) - 80), text.search(re) + 80)}…`);
       }
     }
+
+    // THE PIN, after every screen above has actually been fetched and checked.
+    // 14 until Run 47 added Green Finance; 15 until Run 52 added ESG Journey;
+    // 20 after P1–P7 added Green projects, Finance readiness, AI suggestions
+    // and ESG Impact. A change here must be deliberate — but it can no longer
+    // stop the twenty screens above from being verified.
+    assert.strictEqual(MODULES.length, 20,
+      `the nav is ${MODULES.length} entries, not 20 — every one of them rendered, so this is a `
+      + 'deliberate-change pin rather than a failure: update the count and the history line above');
   });
 
   await check('the official disclosure set is complete and not claimed as implemented', async () => {
