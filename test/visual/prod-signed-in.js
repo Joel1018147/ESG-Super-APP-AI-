@@ -20,6 +20,10 @@ async (page) => {
     '/green-finance', '/green-finance/projects', '/green-finance/readiness',
     '/green-finance/opportunities', '/impact', '/company', '/governance',
     '/frameworks', '/reports',
+    // P9's two new destinations. /reports is above and is the SAME path — it
+    // is a real page now rather than an empty state, so this walk covers it as
+    // one for the first time.
+    '/improvement', '/consultation',
   ];
 
   const out = [];
