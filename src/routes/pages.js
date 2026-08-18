@@ -1259,10 +1259,13 @@ router.get('/governance', async (req, res, next) => {
         carbon-credit lookup. That registry certifies individual carbon <em>projects</em> and issues
         tradable carbon units — it does not rate companies on E, S and G, so nothing here feeds your
         ESG score. The scoring engine refuses to score against it by design.
+        <br><br>
+        <strong>What is mirrored, and what is not.</strong> Projects are ingested. Methodology
+        records and credit issuances are <em>not</em> — nothing writes those tables, so this page
+        shows no count for them rather than a zero that would read as "none exist".
       </div>
       <div class="grid grid-3" style="margin-bottom:16px">
         <div class="stat-card"><div class="stat-label">Projects mirrored</div><div class="stat-value">${esc(status.projects)}</div></div>
-        <div class="stat-card"><div class="stat-label">Methodologies</div><div class="stat-value">${esc(status.methodologies)}</div></div>
         <div class="stat-card"><div class="stat-label">Last fetch</div><div class="stat-value" style="font-size:16px">${status.last_fetch ? esc(new Date(status.last_fetch).toISOString().slice(0, 10)) : '—'}</div></div>
       </div>
       ${body}`, req.user, '/governance'));

@@ -452,6 +452,16 @@ CREATE INDEX IF NOT EXISTS idx_esg_carbon_entries_company
 -- see docs/VERRA_BENCHMARK.md for why that boundary exists.
 -- ═══════════════════════════════════════════════════════════════════════════
 
+-- NOT INGESTED (Run 61 / D11). verraService.syncProjects() ingests PROJECTS
+-- only; there is no INSERT INTO esg_verra_methodologies anywhere in src/. The
+-- table shipped with the mirror in Sprint 1 and its writer never followed.
+-- It is kept rather than dropped because the mirror is a decided feature with a
+-- live sibling (esg_verra_projects) and these columns are the mapping of
+-- Verra's published methodology fields — deleting them makes the next author
+-- re-derive them. It carries NO reader: the /governance count that displayed it
+-- as a permanent "0" was removed in Run 61.
+-- A change that gives this table a writer must also restore a reader; a change
+-- that adds a reader without a writer is the defect this comment records.
 CREATE TABLE IF NOT EXISTS esg_verra_methodologies (
   id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   methodology_id text NOT NULL,          -- 'VM0042'
@@ -493,6 +503,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_esg_verra_projects
 CREATE INDEX IF NOT EXISTS idx_esg_verra_projects_country ON esg_verra_projects (country);
 CREATE INDEX IF NOT EXISTS idx_esg_verra_projects_method  ON esg_verra_projects (methodology_code);
 
+-- NOT INGESTED (Run 61 / D11), for the same reason as esg_verra_methodologies
+-- above, and it has never had a reader either. Zero writers, zero readers.
 CREATE TABLE IF NOT EXISTS esg_verra_issuances (
   id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   verra_project_id text NOT NULL,
@@ -560,20 +572,24 @@ CREATE TABLE IF NOT EXISTS esg_ai_interactions (
 CREATE INDEX IF NOT EXISTS idx_esg_ai_interactions_created
   ON esg_ai_interactions (created_at DESC);
 
-CREATE TABLE IF NOT EXISTS esg_audit_log (
-  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  company_id  uuid REFERENCES esg_companies(id) ON DELETE SET NULL,
-  user_id     uuid REFERENCES esg_users(id) ON DELETE SET NULL,
-  action      text NOT NULL,
-  entity      text,
-  entity_id   uuid,
-  detail      jsonb,
-  ip          text,
-  created_at  timestamptz NOT NULL DEFAULT now(),
-  updated_at  timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_esg_audit_log_company
-  ON esg_audit_log (company_id, created_at DESC);
+-- esg_audit_log — REMOVED in Run 61 (D11). Do not re-add it empty.
+--
+-- It had ZERO writers and ZERO readers: no INSERT, no SELECT, no route, no
+-- service, nothing. An empty table called "audit log" in a compliance-reporting
+-- product is worse than no table, because its presence in the schema reads as a
+-- capability to anyone auditing the schema — including us. This is
+-- recurring-bugs-checklist.md #22 with no reader to make it visible, which is
+-- the version that survives longest.
+--
+-- NOT dropped here. schema.sql is replayed on EVERY boot inside one implicit
+-- transaction, so a permanent DROP TABLE in this file would delete the table
+-- again on every deploy — including the deploy after somebody legitimately
+-- rebuilds it. The empty table therefore remains in any database that already
+-- ran this file and can be dropped by hand once; nothing reads it either way.
+--
+-- If ESG needs an audit trail, that is a designed feature with its own brief:
+-- which actions are recorded, who may read them, and how long they are kept.
+-- It is not a CREATE TABLE.
 
 
 -- ═══════════════════════════════════════════════════════════════════════════

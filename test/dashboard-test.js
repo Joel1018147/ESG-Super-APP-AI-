@@ -237,7 +237,11 @@ const FIXTURES = [
     earned_at: '2026-08-12T00:00:00.000Z',
   }]],
   [/FROM esg_verra_projects\b|AS projects/, [{
-    projects: 4, methodologies: 2, last_fetch: '2026-08-01T00:00:00.000Z',
+    // `methodologies` is deliberately absent (Run 61 / D11). Nothing writes
+    // esg_verra_methodologies, so a stub supplying a count fed the page a
+    // number the real system cannot produce — a fixture asserting against a
+    // capability that does not exist. mirrorStatus() no longer selects it.
+    projects: 4, last_fetch: '2026-08-01T00:00:00.000Z',
     verra_project_id: 'VCS-1', name: 'A project', country: 'Malaysia',
     methodology_code: 'VM0042', status: 'Registered', proponent: 'X',
     estimated_annual_reductions: 1000, registration_date: '2020-01-01',

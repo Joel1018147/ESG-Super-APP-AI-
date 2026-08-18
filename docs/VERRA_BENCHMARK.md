@@ -48,9 +48,18 @@ unevidenced self-assessment is worth nothing to the bank or the buyer reading it
 
 ### 2. Verra's DATA is mirrored, as reference
 
-`esg_verra_projects`, `esg_verra_methodologies` and `esg_verra_issuances` hold a
-local read-only copy of Verra's **public** registry records, for methodology
-lookup and for the carbon-credit module in section 7 of the MoM.
+`esg_verra_projects` holds a local read-only copy of Verra's **public**
+registry records, for the carbon-credit module in section 7 of the MoM.
+`esg_verra_methodologies` and `esg_verra_issuances` exist in the schema and are
+**NOT INGESTED** — `verraService.syncProjects()` writes projects only, and
+neither of the other two has ever had a writer.
+
+**Corrected in Run 61.** This paragraph previously named all three as though
+all three were mirrored, and the section above still opens with "both built" —
+the METHOD half is built and the DATA half is built for projects only. The
+`/governance` page rendered a methodologies count as a stat-card reading `0`
+for ever; that card is removed rather than left to be read as "Verra publishes
+no methodologies". Restoring it means writing the ingest first.
 
 Constraints on that mirror:
 

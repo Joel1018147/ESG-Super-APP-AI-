@@ -121,17 +121,44 @@ register(JOB_TYPE, async (payload) => {
   }
 });
 
-/** What the mirror currently holds. Distinguishes the three empty states. */
+/**
+ * What the mirror currently holds. Distinguishes the three empty states.
+ *
+ * ── Run 61 / D11: the methodologies count is GONE, not zeroed ──────────────
+ * This used to also return `(SELECT count(*) FROM esg_verra_methodologies)`,
+ * and `/governance` rendered it as a stat-card. Nothing anywhere writes that
+ * table — `syncProjects` ingests PROJECTS only — so the card read "0" for
+ * ever, beside a "Projects mirrored" card that was genuinely populated. A
+ * confident zero next to a real number is read as a real zero, which is the
+ * under-reported-capability failure: a wrong number gets checked the first time
+ * somebody cares, a false "nothing here" never does.
+ *
+ * The count is REMOVED rather than reported as 0, so a caller reading
+ * `status.methodologies` now gets `undefined` and breaks loudly instead of
+ * rendering a lie quietly. `methodologies_state` is what a caller may render,
+ * and it is a NAME, not a number — there is no figure to misread.
+ *
+ * To make this a real count again, the same change must add the writer: a
+ * methodology ingest against Verra's published methodology list, upserting into
+ * esg_verra_methodologies exactly as upsertProject() does for projects. Until
+ * that exists the honest answer is "not ingested", not "0".
+ */
 async function mirrorStatus() {
   const { rows } = await query(
-    `SELECT (SELECT count(*)::int FROM esg_verra_projects)       AS projects,
-            (SELECT count(*)::int FROM esg_verra_methodologies)  AS methodologies,
-            (SELECT max(fetched_at) FROM esg_verra_projects)     AS last_fetch`);
+    `SELECT (SELECT count(*)::int FROM esg_verra_projects)   AS projects,
+            (SELECT max(fetched_at) FROM esg_verra_projects) AS last_fetch`);
   const r = rows[0];
   const state = !ingestEnabled() ? 'uninstrumented'
               : r.projects === 0  ? 'instrumented_but_empty'
               : 'populated';
-  return { ...r, state, ingest_enabled: ingestEnabled() };
+  return {
+    ...r,
+    state,
+    ingest_enabled: ingestEnabled(),
+    // Not a count. There is no ingest for methodologies, so there is no number
+    // that could be true. See the note above before turning this back into one.
+    methodologies_state: 'uninstrumented',
+  };
 }
 
 module.exports = { JOB_TYPE, ingestEnabled, syncProjects, upsertProject, mirrorStatus };
