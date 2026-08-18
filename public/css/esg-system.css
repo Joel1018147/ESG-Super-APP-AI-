@@ -2255,6 +2255,15 @@ a.esg-topbar__chip:focus-visible { outline: 2px solid var(--accent); outline-off
   color: var(--accent-text);
   font-weight: 600;
   text-decoration: none;
+  /* A URL IS ONE UNBREAKABLE TOKEN, and this component is used for one.
+     MEASURED at 360px on the register's detail page: a BNM document URL
+     rendered 492px wide with nothing above it to scroll, so the provenance
+     link — the whole point of that section — ran off the screen. min-width: 0
+     lets the block shrink below its content's intrinsic width; overflow-wrap
+     lets the token itself break. Together they are what stops a long link
+     being data loss, and they cost nothing on a short one. */
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .esg-cell-link:hover { text-decoration: underline; }
 .esg-cell-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }

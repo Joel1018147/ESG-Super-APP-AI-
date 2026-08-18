@@ -353,37 +353,77 @@ router.get('/green-finance/register/:id', wrap(async (req, res) => {
           + 'eligibility criteria for this programme. The programme is real and this record is '
           + 'complete — the institution does not disclose the terms.' });
 
+  /* P10 · THE DETAIL PAGE, MIGRATED WITH ITS LIST.
+     The derived page list found this the moment it started deriving: the same
+     module, the same pre-P8 markup, and a source URL 492px wide rendered
+     off-screen at 360 and 390 with nothing to scroll it. A BNM document URL is
+     one unbreakable token, so it needs a wrapping rule rather than a container
+     — .esg-prose-wide plus overflow-wrap is what /frameworks already uses for
+     the same kind of link. The 11px master badges go with it, for the reason
+     §3 gives: 11px is reserved for legal and provenance, never for a status. */
   res.send(layout(p.product_name, `
-    <h2 class="page-title">${esc(p.product_name)}</h2>
-    <p class="text-muted">${esc(p.institution_name)} ·
-       ${esc(copy.labelFor(copy.INSTITUTION_KIND_LABELS, p.institution_kind))}</p>
-    ${disclaimerBlock()}
+    <div class="esg-page">
+      <header class="esg-page-header esg-enter">
+        <div class="esg-page-header__text">
+          <h2 class="esg-h1">${esc(p.product_name)}</h2>
+          <p class="esg-page-header__intro">${esc(p.institution_name)} ·
+             ${esc(copy.labelFor(copy.INSTITUTION_KIND_LABELS, p.institution_kind))}</p>
+        </div>
+      </header>
+      ${disclaimerBlock()}
 
-    <div class="card">
-      <h3 class="section-title">Status</h3>
-      <p><span class="badge ${p.availability_status === 'open' ? 'badge-green' : 'badge-amber'}">${
-        esc(copy.labelFor(copy.AVAILABILITY_LABELS, p.availability_status))}</span>
-        ${p.is_active ? '' : ' <span class="badge badge-gray">not current</span>'}
-        ${ageBadge(p.days_since_verified)}</p>
-      <p>${esc(p.status_note)}</p>
-    </div>
+      <section class="esg-section esg-enter" style="--esg-i:1">
+        <div class="esg-section__head">
+          <h3 class="esg-section__title">Status</h3>
+          <span class="esg-section__note">As the institution publishes it</span>
+        </div>
+        <div class="esg-card"><div class="esg-card__body esg-stack">
+          <div class="esg-row">
+            <span class="esg-astate esg-astate--${
+  p.availability_status === 'open' ? 'verified' : 'missing'}">${
+  esc(copy.labelFor(copy.AVAILABILITY_LABELS, p.availability_status))}</span>
+            ${p.is_active ? '' : '<span class="esg-astate esg-astate--na">not current</span>'}
+            ${ageBadge(p.days_since_verified)}
+          </div>
+          <p class="esg-body esg-prose">${esc(p.status_note)}</p>
+        </div></div>
+      </section>
 
-    <div class="card">
-      <h3 class="section-title">What the institution publishes</h3>
-      <div class="table-wrap"><table><tbody>
-        <tr><th scope="row">Financing type</th><td>${esc(copy.labelFor(copy.FINANCING_TYPE_LABELS, p.financing_type))}</td></tr>
-        <tr><th scope="row">Borrower</th><td>${esc(copy.labelFor(copy.BORROWER_SCOPE_LABELS, p.borrower_scope))}</td></tr>
-      </tbody></table></div>
-      ${terms}
-    </div>
+      <section class="esg-section esg-enter" style="--esg-i:2">
+        <div class="esg-section__head">
+          <h3 class="esg-section__title">What the institution publishes</h3>
+          <span class="esg-section__note">Recorded from the source, never inferred</span>
+        </div>
+        <div class="esg-card"><div class="esg-card__body esg-stack">
+          <div class="esg-table-scroll" tabindex="0" role="region" aria-label="Published terms">
+            <table class="esg-table esg-table--stack"><tbody>
+              <tr><th scope="row">Financing type</th>
+                  <td data-label="Financing type">${esc(copy.labelFor(copy.FINANCING_TYPE_LABELS, p.financing_type))}</td></tr>
+              <tr><th scope="row">Borrower</th>
+                  <td data-label="Borrower">${esc(copy.labelFor(copy.BORROWER_SCOPE_LABELS, p.borrower_scope))}</td></tr>
+            </tbody></table>
+          </div>
+          ${terms}
+        </div></div>
+      </section>
 
-    <div class="card">
-      <h3 class="section-title">Where this came from</h3>
-      <p>${esc(copy.labelFor(copy.SOURCE_PUBLISHER_LABELS, p.source_publisher))} ·
-         read ${esc(dayOf(p.last_verified))}</p>
-      <p><a href="${esc(p.source_url)}" rel="noreferrer noopener" target="_blank">${esc(p.source_url)}</a></p>
-    </div>
-    <p><a class="btn btn-outline" href="${NAV}/register">Back to the register</a></p>`,
+      <section class="esg-section esg-enter" style="--esg-i:3">
+        <div class="esg-section__head">
+          <h3 class="esg-section__title">Where this came from</h3>
+          <span class="esg-section__note">Provenance, and when it was last read</span>
+        </div>
+        <div class="esg-card"><div class="esg-card__body esg-stack">
+          <p class="esg-body">${esc(copy.labelFor(copy.SOURCE_PUBLISHER_LABELS, p.source_publisher))} ·
+             read ${esc(dayOf(p.last_verified))}</p>
+          <p class="esg-prose-wide"><a class="esg-cell-link" href="${esc(p.source_url)}"
+             rel="noreferrer noopener" target="_blank">${esc(p.source_url)}</a></p>
+        </div></div>
+      </section>
+
+      <div class="esg-row">
+        <a class="btn btn-outline" href="${NAV}/register">Back to the register</a>
+      </div>
+    </div>`,
   req.user, NAV));
 }));
 
