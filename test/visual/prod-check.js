@@ -31,6 +31,25 @@ async (page) => {
   };
   const assert = (c, m) => { if (!c) throw new Error(m); };
 
+  /* SIGNED OUT IS AN ASSERTION, NOT AN ASSUMPTION.
+   *
+   * Every step below is about what an ANONYMOUS visitor sees, and the browser
+   * this runs in is a long-lived profile: test/visual/prod-signed-in.js signs
+   * in to this same origin, and its `connect.sid` outlives the run.
+   *
+   * MEASURED on the P9 deploy: a leftover session made `/` answer 302 ->
+   * /dashboard, which is correct behaviour for a signed-in visitor and a FALSE
+   * FAILURE on a production post-deploy check. This file already records that
+   * a false failure is worse than a missed one — it sends the next run to
+   * repair something that was never broken — and a post-deploy check is the
+   * worst possible place for one.
+   *
+   * Clearing first also makes the pass mean what it says: without this, a
+   * stale session could have made the protected-route steps pass for the wrong
+   * reason on some future run.
+   */
+  await page.context().clearCookies();
+
   await page.setViewportSize({ width: 1440, height: 900 });
 
   await step('health reports the production database up', async () => {
