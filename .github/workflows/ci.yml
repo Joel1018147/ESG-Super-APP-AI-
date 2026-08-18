@@ -15,6 +15,21 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # FULL HISTORY, BECAUSE ONE GUARD NEEDS A MERGE-BASE.
+          #
+          # test/no-new-fallbacks.js scans only the lines added since the
+          # merge-base with origin/main, and it FAILS rather than skips when it
+          # cannot find one — deliberately, because a check that no-ops on
+          # missing input is a check that has never once said no.
+          #
+          # checkout's default fetch-depth of 1 gives it no merge-base on a
+          # feature branch, so the guard failed on every PR while passing on
+          # main (where origin/main is the checked-out ref and the merge-base is
+          # trivially itself). PRs #3 and #5 were both merged with these two
+          # jobs red for that reason alone, which is how CI stopped carrying
+          # any signal. 0 fetches all branches, so origin/main resolves.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -51,6 +66,21 @@ jobs:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/esg_ci_test
     steps:
       - uses: actions/checkout@v4
+        with:
+          # FULL HISTORY, BECAUSE ONE GUARD NEEDS A MERGE-BASE.
+          #
+          # test/no-new-fallbacks.js scans only the lines added since the
+          # merge-base with origin/main, and it FAILS rather than skips when it
+          # cannot find one — deliberately, because a check that no-ops on
+          # missing input is a check that has never once said no.
+          #
+          # checkout's default fetch-depth of 1 gives it no merge-base on a
+          # feature branch, so the guard failed on every PR while passing on
+          # main (where origin/main is the checked-out ref and the merge-base is
+          # trivially itself). PRs #3 and #5 were both merged with these two
+          # jobs red for that reason alone, which is how CI stopped carrying
+          # any signal. 0 fetches all branches, so origin/main resolves.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
