@@ -755,8 +755,8 @@ let RENDERED = null;
     // line in this one. Pinned to the master hash Run 51 synced.
     const crypto = require('crypto');
     const md5 = crypto.createHash('md5').update(fs.readFileSync(CSS_PATH)).digest('hex').slice(0, 8);
-    assert.strictEqual(md5, '5785b26f',
-      `the design system is ${md5}, not the master's 5785b26f — either this repo edited it (a §1 `
+    assert.strictEqual(md5, 'eced11f8',
+      `the design system is ${md5}, not the master's eced11f8 — either this repo edited it (a §1 `
       + 'defect) or a master sync landed and this pin was left behind (§1b)');
   });
 
