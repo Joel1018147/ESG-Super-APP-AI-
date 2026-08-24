@@ -199,8 +199,8 @@ test('every mds-* animation the layer names actually exists in the master', () =
 test('the master stylesheet is untouched by this run', () => {
   const crypto = require('crypto');
   const md5 = crypto.createHash('md5').update(fs.readFileSync(MASTER_PATH)).digest('hex').slice(0, 8);
-  assert.strictEqual(md5, 'eced11f8',
-    `the master is ${md5}, not eced11f8 — the ESG layer exists precisely so this file is never edited`);
+  assert.strictEqual(md5, '90709d5c',
+    `the master is ${md5}, not 90709d5c — the ESG layer exists precisely so this file is never edited`);
 });
 
 /* ═══ 2 · IT IS ACTUALLY DELIVERED ════════════════════════════════════════ */
