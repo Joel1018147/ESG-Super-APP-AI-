@@ -278,6 +278,17 @@ const FIXTURES = [
     id: ASSESSMENT_ID, framework_id: 'fw-1', framework_code: 'MODUS_SEDG_ALIGNED',
     framework_version: '0.9-draft', reporting_year: 2025, status: 'scored', overall: 78,
   }]],
+  /* Run 68's score history, ABOVE the esg_scores row fixture that would
+     otherwise answer it — the same ordering rule the count queries at the top
+     of this list are here for. Two years, because that is what exercises the
+     branches that only exist with a trend: the history columns render at all,
+     one of them is marked as the current year, and the metric row prints a
+     delta. A single-year fixture would silently take the empty-state branch on
+     both and neither would ever be rendered by this suite. */
+  [/AS history_year/, [
+    { history_year: 2024, score_0_100: 71, band_code: 'A' },
+    { history_year: 2025, score_0_100: 78, band_code: 'AA' },
+  ]],
   [/FROM esg_scores\b/, SCORE_ROWS],
   [/FROM esg_recommendations\b/, [
     { id: 'rec-1', pillar: 'E', points_missed: 12, priority: 'high', narrative_en: 'Track electricity monthly.', source: 'ai_phrasing', code: 'E-01', question_en: 'Does the company track its monthly electricity consumption?' },
@@ -772,6 +783,18 @@ let RENDERED = null;
     EMPTY_HTML = await renderRoute('routes/pages', '/dashboard', newCompanyDb());
     UNSEEDED_HTML = await renderRoute('routes/pages', '/dashboard', EMPTY_DB);
     FULL_HTML = await renderRoute('routes/pages', '/dashboard', populatedDb().exports);
+    /* ESG_DUMP_HTML — the only way to LOOK at this page on a machine with no
+       database. test/visual/README is explicit that its probes need a live
+       server at 127.0.0.1:3000 and a real Postgres behind it, which a Windows
+       box with a private production database does not have; this suite already
+       renders the three states this repo cares about, and writing them out
+       costs three lines. Off unless the variable is set, so it is inert in CI
+       and asserts nothing — it is a viewer, not a guard. */
+    if (process.env.ESG_DUMP_HTML) {
+      for (const [name, html] of [['empty', EMPTY_HTML], ['unseeded', UNSEEDED_HTML], ['full', FULL_HTML]]) {
+        fs.writeFileSync(path.join(process.env.ESG_DUMP_HTML, `dashboard-${name}.html`), html);
+      }
+    }
     assert.notStrictEqual(contentOf(EMPTY_HTML), contentOf(FULL_HTML),
       'a company with no data and a scored company render byte-identical dashboards');
     assert.notStrictEqual(contentOf(EMPTY_HTML), contentOf(UNSEEDED_HTML),
@@ -822,11 +845,28 @@ let RENDERED = null;
           `the ${label} dashboard renders no .${anchor} — this test's anchor is gone, so its `
           + 'verdict means nothing until the anchor is updated');
       }
-      // The hero is FIRST. Anything above it is chrome that has leaked in.
-      // Only the .esg-page wrapper may precede it. A section that has drifted
-      // above the hero pushes this well past a wrapper's length.
-      assert.ok(c.indexOf('esg-hero') < 120,
-        `the ${label} dashboard puts ${c.indexOf('esg-hero')} characters above the hero`);
+      /* RUN 68 PUT A PAGE HEAD ABOVE THE HERO, and the rule this assertion
+         exists for survives it unchanged.
+
+         The rule was never "nothing precedes the hero" — it was that no
+         SECTION has drifted above it, which is what a character budget was a
+         proxy for. A budget is the wrong instrument now that something is
+         legitimately up there: raising the number would let a whole section
+         through as long as it was terse, and keeping it at 120 would fail on
+         a greeting. So the invariant is asserted directly instead.
+
+         The page head is a greeting and the reporting period. It carries no
+         figure, no state and no card, which is why it may lead. */
+      const above = c.slice(0, c.indexOf('esg-hero'));
+      assert.ok(!/esg-section|esg-metrics|esg-insight|esg-card/.test(above),
+        `the ${label} dashboard puts a section above the hero: ${above.slice(-160)}`);
+      // Matched on the FULL class attribute, not the substring: the head's own
+      // children are all `esg-pagehead__*`, so a substring count would report
+      // four blocks where there is one.
+      const heads = (above.match(/class="esg-pagehead(?: |")/g) || []).length;
+      assert.strictEqual(heads, 1,
+        `the ${label} dashboard renders ${heads} blocks above the hero — exactly one, the page `
+        + 'head, is allowed there');
       // The next action comes before the long-horizon sections, always.
       assert.ok(c.indexOf('esg-next') < c.indexOf('esg-pathway'),
         `the ${label} dashboard puts the pathway above the next action`);
@@ -923,8 +963,24 @@ let RENDERED = null;
 
   await atest('every zero region on the empty dashboard NAMES which empty state it is', async () => {
     const c = contentOf(EMPTY_HTML);
-    const states = (c.match(/class="empty-state"/g) || []).length;
-    assert.ok(states >= 2, `the empty dashboard renders ${states} empty states`);
+    /* TWO MECHANISMS NOW CARRY ONE RULE, and the count spans both.
+
+       Run 68 moved the document and carbon zero-states out of two standalone
+       .esg-ai cards and into §33's insight rows, where an `info`-toned row is
+       the named-zero: "No documents to read yet", "No carbon data yet",
+       "Nothing to rank yet". The component changed and the obligation did not
+       — each still says WHICH empty state it is, in its own words — so this
+       counts both rather than dropping to whatever .empty-state survived.
+
+       Counting only .empty-state would have passed at 1 with the threshold
+       lowered, and that is the version of this edit that quietly stops
+       protecting anything. */
+    const boxes = (c.match(/class="empty-state"/g) || []).length;
+    const namedRows = (c.match(/class="esg-insight__rowmark esg-insight__rowmark--info"/g) || []).length;
+    const states = boxes + namedRows;
+    assert.ok(states >= 2,
+      `the empty dashboard names ${states} zero regions (${boxes} empty-state blocks, `
+      + `${namedRows} info-toned insight rows)`);
     // layout.emptyState()'s own defaults. Generic copy is banned: the point of
     // the three states is that each says WHICH it is, in its own words.
     for (const generic of [
@@ -980,10 +1036,30 @@ let RENDERED = null;
     // The fact under test is "the number is TEXT in the DOM", which has nothing
     // to do with which element carries it — pinning the tag made a composition
     // change look like a missing figure. The class is the contract.
+    /* RUN 68 MOVED THE THREE PILLAR FIGURES OFF RINGS AND ONTO BARS, which is
+       a rendering change and not a change to the fact under test. The fact is
+       "every figure this page animates is TEXT in the DOM before any script
+       runs"; the pillars are now .esg-pillar__value beside an .esg-progress
+       bar whose width is a server-written percentage, so the number is if
+       anything more plainly text than it was inside a ring.
+
+       Both readers are asserted to find something before the figures are
+       checked, so a renamed class fails here loudly instead of shrinking the
+       denominator and passing. */
     const c = contentOf(FULL_HTML);
-    const rendered = [...c.matchAll(/class="score-ring-value"[^>]*>([^<]*)</g)].map((x) => x[1].trim());
+    const ringValues = [...c.matchAll(/class="score-ring-value"[^>]*>([^<]*)</g)].map((x) => x[1].trim());
+    const pillarValues = [...c.matchAll(/class="esg-pillar__value"[^>]*>([^<]*)</g)].map((x) => x[1].trim());
+    assert.strictEqual(ringValues.length, 1,
+      `${ringValues.length} score-ring values rendered — the hero ring is the only one left`);
+    assert.strictEqual(pillarValues.length, 3,
+      `${pillarValues.length} pillar values rendered — E, S and G are three`);
+    const rendered = [...ringValues, ...pillarValues];
     assert.ok(rendered.length >= 4,
-      `only ${rendered.length} score-ring values rendered — the overall ring and three pillars are four`);
+      `only ${rendered.length} figures rendered — the overall ring and three pillars are four`);
+    // The bar's WIDTH is server-written too, and from the same whole number.
+    // A bar drawn by script would leave the page at 0% for anyone without one.
+    assert.ok(/class="esg-progress__fill" style="width:\d+%"/.test(c),
+      'a pillar bar has no server-rendered width — it would draw at zero without JavaScript');
     for (const figure of ['78', '82', '74', '77']) {
       assert.ok(rendered.includes(figure),
         `${figure} is not present as server-rendered text — a ring that only reads its value after `
@@ -1012,9 +1088,15 @@ let RENDERED = null;
        covering rounding down, up, and the .5 boundary. */
     const c = contentOf(await renderRoute('routes/pages', '/dashboard',
       populatedDb({ fractionalScores: true }).exports));
-    const rendered = [...c.matchAll(/class="score-ring-value"[^>]*>([^<]*)</g)].map((x) => x[1].trim());
+    // Run 68: one hero ring plus three bar figures. Read from both classes for
+    // the reason the sibling test above states — the rounding rule applies to
+    // every score on the page, wherever it is drawn.
+    const rendered = [
+      ...[...c.matchAll(/class="score-ring-value"[^>]*>([^<]*)</g)].map((x) => x[1].trim()),
+      ...[...c.matchAll(/class="esg-pillar__value"[^>]*>([^<]*)</g)].map((x) => x[1].trim()),
+    ];
     assert.strictEqual(rendered.length, 4,
-      `${rendered.length} ring values rendered, not the overall ring plus three pillars — the `
+      `${rendered.length} score figures rendered, not the overall ring plus three pillars — the `
       + 'reader broke, so this check would pass by finding nothing');
     assert.deepStrictEqual(rendered.filter((v) => v.includes('.')), [],
       `a score renders with decimal places: ${rendered.join(', ')}`);
@@ -1245,9 +1327,20 @@ let RENDERED = null;
     // §3.4 rule 1. Animating width, height, top or box-shadow on a dashboard
     // this dense drops frames on the mid-range Android a Malaysian SME owner
     // will actually open it on.
+    /* §50 IS BOUNDED AT THE NEXT SECTION, and it was not before.
+       `CSS.slice(i)` ran to the end of the file, so §50 was being graded on
+       §52's and §53's declarations as well as its own. That was harmless while
+       §50 was last; the master sync to edc02c0c appended §53, whose header
+       comment contains the words "transition: all`, which" as PROSE, and the
+       transition reader picked them up and reported §50 animating `all`. The
+       section this test names is the section it should read. */
     const i = CSS.indexOf('50. GAMIFICATION & MOTION LAYER');
     assert.ok(i > 0, 'the §50 section is gone — the anchor moved');
-    const section = CSS.slice(i);
+    const rest = CSS.slice(i + 1);
+    const next = rest.search(/\n\s*5[1-9]\. [A-Z]/);
+    assert.ok(next > 0, 'no section follows §50 — the end bound is gone and this test is reading '
+      + 'the rest of the file again');
+    const section = rest.slice(0, next);
     const animated = [...section.matchAll(/transition:\s*([^;]+);/g)].map((m) => m[1]);
     assert.ok(animated.length >= 5, `only ${animated.length} transitions in §50 — the reader broke`);
     const properties = new Set();
@@ -1395,6 +1488,29 @@ let RENDERED = null;
     ['var(--muted)', ['var(--surface)', 'var(--bg)'], '.checklist-status, .checklist-mark resting'],
     ['var(--accent-contrast)', ['var(--accent)'], '.checklist-item.is-done .checklist-mark'],
     ['var(--muted)', ['var(--accent-bg)', 'var(--surface)'], '.checklist-item.is-active .checklist-mark'],
+    /* ── Run 68 · §31–§33 ────────────────────────────────────────────────
+       Most of what the metric row and the insight triad choose is already
+       pinned above under another component's name — --muted and --text on a
+       card, the three status tints as chip backgrounds. The pairs listed here
+       are the ones this run genuinely introduces, and there is one shape that
+       had never been measured before it: a STATUS colour as text on
+       --surface-2, which is what .esg-insight__figure is. Every earlier use
+       put a status colour on its own -bg tint; the recessed row inside a card
+       is a different background and a different ratio.
+
+       THESE THREE FAILED WHEN THEY WERE FIRST WRITTEN, which is the only
+       reason to trust the fourth line. .esg-insight__figure took its card's
+       tint and measured 4.47:1 and 4.46:1 in dark; it now takes --text, and
+       the three tint pairs are kept here as the record of a measurement rather
+       than deleted — reinstating that colour puts the ratio back under AA and
+       these lines say so before anyone has to re-derive it.
+       The tints are still asserted where they DO appear: on their own -bg,
+       under .badge-accent / .badge-blue / .badge-green above. */
+    ['var(--text)', ['var(--surface-2)', 'var(--surface)'], '.esg-insight__figure'],
+    ['var(--text)', ['var(--surface)', 'var(--bg)'], '.esg-metric__value, .esg-pillar__value, .esg-chartcard__title'],
+    ['var(--muted)', ['var(--surface)', 'var(--bg)'], '.esg-metric__label, .esg-metric__basis, .esg-chartcard__note, .esg-col__x'],
+    ['var(--text-2)', ['var(--surface)', 'var(--bg)'], '.esg-pagehead__context, .esg-col__value'],
+    ['var(--muted)', ['var(--surface-2)', 'var(--surface)'], '.esg-metric__delta--flat, .esg-insight__rownote'],
   ];
 
   test('CONTRAST ≥ 4.5:1 IN BOTH THEMES for every pair this page chooses', () => {

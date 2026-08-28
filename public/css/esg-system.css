@@ -1191,7 +1191,27 @@ a.esg-topbar__chip:focus-visible { outline: 2px solid var(--accent); outline-off
   margin: 0;
   max-width: var(--esg-measure);
 }
-.esg-hero__score { display: flex; align-items: center; gap: var(--esg-space-5); flex-wrap: wrap; }
+/* RUN 68 · TEXT LEFT, RING RIGHT — and a grid rather than a wrapping flex.
+   MEASURED before the change, at 1440: the ring sat first, the band block
+   wrapped underneath it, and the hero's left column carried roughly 380 x 200
+   of nothing to the ring's right. A wrapping flex row cannot fill that space,
+   because the thing that would fill it is the block that wrapped away.
+
+   The reference dashboard's own hero is the fix and it is the more legible
+   order anyway: the sentence is read from the left edge like every other line
+   on the page, and the figure sits at the end of it. `auto` on the second
+   track lets the ring keep its own geometry — the master owns that, and
+   nothing here sizes it. */
+.esg-hero__score {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--esg-space-6);
+}
+@media (max-width: 620px) {
+  /* Below this the two tracks put the ring against the text's descenders. */
+  .esg-hero__score { grid-template-columns: minmax(0, 1fr); }
+}
 
 /* The next action. ONE per page, and it looks like the only one. */
 .esg-next {
@@ -2801,4 +2821,493 @@ a.esg-topbar__chip:focus-visible { outline: 2px solid var(--accent); outline-off
 @media (prefers-reduced-motion: reduce) {
   .esg-action,
   .esg-roadmap__step { animation-delay: 0ms; }
+}
+
+
+/* ═══ 30 · THE PAGE HEAD ══════════════════════════════════════════════════
+   Run 68. Adopted from the reference dashboard's first row: a greeting on the
+   left, the period the page is describing on the right.
+
+   THE PERIOD IS A STATEMENT, NOT A CONTROL. The reference puts a dropdown
+   there — "Last 7 days" — and a dropdown is right for a product whose data has
+   a continuous time axis to slice. This one does not: a company holds one
+   assessment per reporting year, and every figure on this page belongs to the
+   assessment named in that chip. A select that could only ever offer the year
+   already shown is the dead control §4.3c bans and dashboard-test asserts
+   against by name. So the slot renders what the reference's control renders —
+   which period you are looking at — without pretending you can change it here.
+   ─────────────────────────────────────────────────────────────────────────── */
+.esg-pagehead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--esg-space-4);
+  flex-wrap: wrap;
+}
+.esg-pagehead__greeting {
+  font-family: var(--font-display);
+  font-size: var(--esg-text-xl);
+  line-height: var(--esg-lh-tight);
+  letter-spacing: var(--esg-track-tight);
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+  min-width: 0;
+}
+.esg-pagehead__context {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--esg-space-2);
+  padding: var(--esg-space-2) var(--esg-space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  font-size: var(--esg-text-sm);
+  line-height: var(--esg-lh-snug);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.esg-pagehead__context-icon { display: inline-flex; color: var(--muted); flex: none; }
+
+
+/* ═══ 31 · THE METRIC ROW — A FIGURE IS NOTHING WITHOUT ITS BASIS ═════════
+   Run 68. The reference's key-metric row, and the one thing it does that P4's
+   deleted tile row did not: every card states WHAT IT IS BEING COMPARED
+   AGAINST — "today's snapshot vs your weekly average". P4 removed five tiles
+   because five equal-weight numbers with no comparison and no next step is a
+   scoreboard, not a dashboard. The comparison is what earns the row back, and
+   it is why this component has a `__basis` slot that is not optional.
+
+   WHY THIS IS NOT THE MASTER'S .stat-card. Checked first, per the rule P4
+   wrote after the .esg-score__dial duplication — and it is genuinely a
+   different component. .stat-card has label / value / sub and no slot for a
+   comparison or a delta, and its .stat-label is 11px, which D3 reserves for
+   legal and meta text and which the audit named as the defect that made a
+   label smaller than the thing it labelled. Giving .stat-card those two slots
+   is a master change and therefore §1b's thirteen-path fan-out; this is the
+   local component until somebody runs that.
+
+   THE DELTA IS RENDERED ONLY WHERE ONE WAS MEASURED. There is no --flat
+   fallback for "we did not look". A company with one reporting year has no
+   previous year to compare to, and the card says so in words rather than
+   printing 0% — which is a claim that the score did not move.
+   ─────────────────────────────────────────────────────────────────────────── */
+.esg-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--esg-space-3);
+}
+.esg-metric {
+  display: flex;
+  flex-direction: column;
+  gap: var(--esg-space-2);
+  padding: var(--esg-space-4) var(--esg-space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  /* §18.1's sequence, on its own cadence. Four cards 70ms apart read as a row
+     being laid down left to right; the same four at once read as a flash. */
+  animation: mds-fade-up var(--esg-dur-base) var(--esg-ease) both;
+  animation-delay: calc(min(var(--esg-i, 0), 8) * 70ms);
+  /* ELEVATION, NOT MOVEMENT. The master's .stat-card lifts 1px on hover and
+     this deliberately does not: every card here carries a resting `transform`
+     from the entrance above, an animation's fill wins over a declaration, and
+     a hover transform would therefore do nothing at all until the animation
+     was removed — a rule that silently stops working. Shadow and border are
+     free of that conflict and read as the same affordance. */
+  transition: box-shadow var(--esg-dur-base) var(--esg-ease),
+              border-color var(--esg-dur-base) var(--esg-ease);
+}
+.esg-metric:hover { box-shadow: var(--shadow); border-color: var(--border-2); }
+.esg-metric__label {
+  font-size: var(--esg-text-xs);
+  letter-spacing: var(--esg-track-label);
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--muted);
+}
+.esg-metric__figure {
+  display: flex;
+  align-items: baseline;
+  gap: var(--esg-space-2);
+  flex-wrap: wrap;
+}
+.esg-metric__value {
+  font-family: var(--font-display);
+  font-size: var(--esg-text-3xl);
+  line-height: var(--esg-lh-tight);
+  letter-spacing: var(--esg-track-tight);
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.esg-metric__unit { font-size: var(--esg-text-sm); color: var(--muted); }
+/* The delta carries a WORD as well as a direction — §6: the state is never the
+   colour. "+6 on 2025" is legible to a reader who cannot tell green from red
+   and to one reading it aloud; the tint is the second encoding, not the only
+   one. */
+.esg-metric__delta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--esg-space-1);
+  padding: var(--esg-space-1) var(--esg-space-2);
+  border-radius: 999px;
+  font-size: var(--esg-text-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.esg-metric__delta--up   { color: var(--esg-done);    background: var(--esg-done-bg); }
+.esg-metric__delta--down { color: var(--esg-problem); background: var(--esg-problem-bg); }
+.esg-metric__delta--flat { color: var(--muted);       background: var(--esg-blocked-bg); }
+.esg-metric__basis {
+  font-size: var(--esg-text-xs);
+  line-height: var(--esg-lh-snug);
+  color: var(--muted);
+  margin: 0;
+  max-width: var(--esg-measure);
+}
+
+
+/* ═══ 32 · CHARTS — THE FIRST ONES IN THIS PRODUCT ═══════════════════════
+   Run 68. The master ships no chart of any kind — checked, as §31 was — and
+   the CSP names no script host, which dashboard-test asserts by testing that
+   nothing loads Chart.js. So a chart here is server-rendered geometry: a
+   height or a width computed from a row and written into a custom property,
+   with no client-side library and nothing measured in the browser.
+
+   TWO CHARTS, AND EACH ANSWERS A QUESTION THE SCORE CANNOT. The ring says
+   where you are. The pillar profile says which of the three is carrying you,
+   which three inline rings could not — they were three small dials competing
+   with the hero, and P4 already wrote that down as the defect. The history
+   column says whether the position is moving, which nothing on this page has
+   ever said.
+
+   A CHART WITH ONE COLUMN IS NOT A TREND, and this renders a named empty
+   state rather than a single bar on an axis, because one bar drawn on a time
+   axis is a chart claiming a direction it does not have.
+   ─────────────────────────────────────────────────────────────────────────── */
+.esg-charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--esg-space-4);
+}
+.esg-chartcard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--esg-space-5);
+  padding: var(--esg-space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--esg-dur-base) var(--esg-ease),
+              border-color var(--esg-dur-base) var(--esg-ease);
+}
+.esg-chartcard:hover { box-shadow: var(--shadow); border-color: var(--border-2); }
+.esg-chartcard__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--esg-space-3);
+  flex-wrap: wrap;
+}
+.esg-chartcard__title {
+  font-family: var(--font-display);
+  font-size: var(--esg-text-lg);
+  line-height: var(--esg-lh-snug);
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+}
+.esg-chartcard__note {
+  font-size: var(--esg-text-xs);
+  line-height: var(--esg-lh-snug);
+  color: var(--muted);
+}
+.esg-chartcard__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--esg-space-5);
+  flex: 1;
+}
+
+/* ── 32.1 · The pillar profile ────────────────────────────────────────────
+   §9's .esg-pillar, with the inline ring replaced by §8's .esg-progress. Not
+   a new bar: the track, the fill, the radius and the fill's own width
+   transition already exist and are already guarded, and a second bar in this
+   file would be the duplication P4 caught. The modifier only makes it tall
+   enough to read as a chart rather than as a progress indicator. */
+.esg-progress--chart { height: 10px; border: 1px solid var(--border); }
+/* ONE COLUMN, WHICH IS THE WHOLE CLAIM THE CARD MAKES. §9's .esg-pillars is an
+   auto-fit grid, so inside the chart card it laid the three out SIDE BY SIDE —
+   three short bars of three different widths, each on its own axis, under a
+   caption reading "one axis, so the three are comparable". The caption was
+   false as rendered. Stacked, the three tracks are the same length and the
+   comparison the card exists for is the one the eye actually makes. */
+.esg-pillars--chart { grid-template-columns: minmax(0, 1fr); gap: var(--esg-space-5); }
+.esg-pillar--chart {
+  gap: var(--esg-space-3);
+  animation: mds-fade-up var(--esg-dur-base) var(--esg-ease) both;
+  animation-delay: calc(min(var(--esg-i, 0), 8) * 70ms);
+}
+.esg-pillar__figure {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--esg-space-3);
+}
+
+/* ── 32.2 · The history columns ───────────────────────────────────────────
+   One column per reporting year that has a scored OVERALL row. The stem's
+   height is `--esg-h` pixels, written server-side from the score, so nothing
+   animates a height and nothing is measured in the browser. */
+.esg-cols {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--esg-space-3);
+  min-height: 148px;
+  /* GROWS, so the columns stand on the bottom of the card rather than floating
+     at the top of it. The two cards in this row are the same height — the grid
+     makes them so — and the history card has less content, which left the
+     chart hanging with 90px of nothing under its axis. The stems keep their
+     server-written heights; only the space above them changes. */
+  flex: 1;
+}
+.esg-col {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--esg-space-2);
+  animation: mds-fade-up var(--esg-dur-base) var(--esg-ease) both;
+  animation-delay: calc(min(var(--esg-i, 0), 8) * 70ms);
+}
+.esg-col__value {
+  font-family: var(--font-display);
+  font-size: var(--esg-text-sm);
+  font-weight: 700;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.esg-col__stem {
+  width: 100%;
+  max-width: 56px;
+  height: calc(var(--esg-h, 0) * 1px);
+  border-radius: var(--r-sm) var(--r-sm) 0 0;
+  border: 1px solid var(--border-2);
+  border-bottom: none;
+  /* --surface-2, NOT the accent tint. An 8%-alpha accent over a dark surface
+     is very nearly the surface: the 2024 column was legible in light mode and
+     all but invisible in dark, so the chart had one bar in one theme and two
+     in the other. A neutral raised surface reads as a column in both. */
+  background: var(--surface-2);
+}
+/* The year this page is about is the filled one. Every other year is the same
+   shape in a tint, so the comparison is between two heights and not between
+   two colours — and the current column also carries the word "this year"
+   under it, which is the encoding a colour cannot replace. */
+.esg-col--current .esg-col__stem { background: var(--esg-current); border-color: var(--esg-current); }
+.esg-col__x {
+  font-size: var(--esg-text-xs);
+  line-height: var(--esg-lh-snug);
+  color: var(--muted);
+  text-align: center;
+}
+.esg-col--current .esg-col__x { color: var(--text-2); font-weight: 600; }
+.esg-cols__base {
+  height: 1px;
+  background: var(--border-2);
+  margin-top: calc(var(--esg-space-2) * -1);
+}
+
+
+/* ═══ 33 · THE INSIGHT TRIAD ══════════════════════════════════════════════
+   Run 68. The reference's three tinted cards — a prediction, a set of vitals,
+   a set of recommended actions — are the single most transferable thing on it,
+   and the reason they read as one system is that all three share exactly one
+   structure: a tinted mark, a title, a badge stating the card's scope, and a
+   column of equal rows on a recessed surface.
+
+   THESE THREE REPLACE TWO FLAT SECTIONS RATHER THAN ADDING A FOURTH. What was
+   "What the platform did, and what needs you" (two .esg-ai cards) and "What
+   would move the score" (a card of three .esg-rec rows) is the same content in
+   this component. Nothing on this page is now said twice — which is the test
+   this repo's audits keep applying and which a summary triad above an
+   identical list would fail.
+
+   THE TINT IS A DOMAIN, NOT A SEVERITY. accent = what the platform read,
+   info = the evidence position, done = what would move the score. A card does
+   not change colour when its contents get worse; the ROWS carry state, in
+   words, exactly as §26's action card does.
+   ─────────────────────────────────────────────────────────────────────────── */
+.esg-insights {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--esg-space-4);
+}
+.esg-insight {
+  display: flex;
+  flex-direction: column;
+  gap: var(--esg-space-5);
+  padding: var(--esg-space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  /* The wash is the reference's device and it is worth being exact about why
+     it works: it fades out by 42%, so the card's own surface — not a tint —
+     is what sits behind the rows, and the rows stay readable at the same
+     contrast on all three cards. A tint carried the whole height would change
+     the contrast ratio of every row on the card by its own tone. */
+  background-color: var(--surface);
+  background-image: linear-gradient(180deg, var(--esg-tint, var(--accent-bg)) 0%, transparent 42%);
+  box-shadow: var(--shadow-sm);
+  animation: mds-fade-up var(--esg-dur-base) var(--esg-ease) both;
+  animation-delay: calc(min(var(--esg-i, 0), 8) * 80ms);
+  transition: box-shadow var(--esg-dur-base) var(--esg-ease),
+              border-color var(--esg-dur-base) var(--esg-ease);
+}
+.esg-insight:hover { box-shadow: var(--shadow); border-color: var(--border-2); }
+.esg-insight[data-tone="accent"] { --esg-tint: var(--esg-current-bg); --esg-ink: var(--esg-current); }
+.esg-insight[data-tone="info"]   { --esg-tint: var(--esg-info-bg);    --esg-ink: var(--esg-info); }
+.esg-insight[data-tone="done"]   { --esg-tint: var(--esg-done-bg);    --esg-ink: var(--esg-done); }
+.esg-insight__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--esg-space-3);
+  flex-wrap: wrap;
+}
+.esg-insight__id { display: flex; align-items: center; gap: var(--esg-space-3); min-width: 0; }
+/* The reference fills this square with the status colour and puts a white
+   glyph on it. This tints it instead and takes the -text variant for the
+   glyph, because §6 forbids a status colour as text and white is a colour
+   literal this layer is not allowed to ship outside the brand rail. */
+.esg-insight__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: var(--r-sm);
+  background: var(--esg-tint, var(--accent-bg));
+  color: var(--esg-ink, var(--accent-text));
+}
+.esg-insight__title {
+  font-family: var(--font-display);
+  font-size: var(--esg-text-lg);
+  line-height: var(--esg-lh-snug);
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+}
+.esg-insight__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--esg-space-1) var(--esg-space-3);
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: var(--esg-text-xs);
+  line-height: var(--esg-lh-snug);
+  font-weight: 600;
+  color: var(--text-2);
+}
+.esg-insight__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--esg-space-2);
+  flex: 1;
+  margin: 0;
+}
+.esg-insight__row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--esg-space-3);
+  align-items: start;
+  padding: var(--esg-space-3);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+/* A row's own icon takes the ROW's meaning, not the card's, so a caution row
+   inside the accent card is still amber. `currentColor` on the glyph and the
+   colour set here is the whole mechanism. */
+.esg-insight__rowmark { display: inline-flex; flex: none; margin-top: 2px; color: var(--muted); }
+.esg-insight__rowmark--done    { color: var(--esg-done); }
+.esg-insight__rowmark--caution { color: var(--esg-caution); }
+.esg-insight__rowmark--problem { color: var(--esg-problem); }
+.esg-insight__rowmark--info    { color: var(--esg-info); }
+/* The label and its figure share a baseline and sit at opposite ends of the
+   row, which is what makes a column of five of them scannable — the eye reads
+   the right-hand edge alone. A figure inline after the label would put every
+   number at a different x. */
+.esg-insight__rowhead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--esg-space-3);
+}
+.esg-insight__rowtitle {
+  font-size: var(--esg-text-md);
+  line-height: var(--esg-lh-snug);
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+.esg-insight__rownote {
+  font-size: var(--esg-text-xs);
+  line-height: var(--esg-lh-snug);
+  color: var(--muted);
+  margin: var(--esg-space-1) 0 0;
+}
+/* The points a gap is costing. The scoring engine writes this number and the
+   model writes the sentence beside it — the rule is in CLAUDE.md and this is
+   only where it is rendered. */
+/* --text, NOT the card's tint. The first version took --esg-ink so the figure
+   picked up its card's domain colour, and the contrast pairs added for this
+   run MEASURED it at 4.47:1 (info) and 4.46:1 (done) against --surface-2 in
+   dark — under AA, by a margin small enough that nobody would have caught it
+   by eye and large enough to matter to somebody reading on a phone outdoors.
+
+   Every earlier use of a status colour in this ecosystem puts it on its own
+   8%-alpha -bg tint; a recessed row inside a card is a different background,
+   and that is the shape nothing had measured before.
+
+   Taking --text is also the better design. The tint was the CARD's domain, not
+   the row's state, so it was colour carrying no information the card head did
+   not already carry — and this is the most important text in the row, which
+   argues for the highest-contrast colour on the page rather than the third. */
+.esg-insight__figure {
+  font-family: var(--font-display);
+  font-size: var(--esg-text-md);
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.esg-insight__foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--esg-space-2);
+  margin-top: auto;
+}
+
+@media (max-width: 768px) {
+  .esg-metric     { padding: var(--esg-space-4); }
+  .esg-insight    { padding: var(--esg-space-4); }
+  .esg-chartcard  { padding: var(--esg-space-4); }
+  .esg-pagehead__context { white-space: normal; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Same rule as §18: the master's §41 already collapses the DURATION, so all
+     that is left to remove is the delay. A staggered row under reduced motion
+     otherwise still spends half a second assembling itself with nothing
+     visible moving, which is the worst of both. */
+  .esg-metric,
+  .esg-pillar--chart,
+  .esg-col,
+  .esg-insight { animation-delay: 0ms; }
 }
