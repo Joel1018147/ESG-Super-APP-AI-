@@ -1,4 +1,11 @@
 'use strict';
+/* NOT A TEST OF THE PRIVATE-PREVIEW LOCK.
+   previewLock.js fails closed, so this suite's own fixture users — which are
+   not on the allowlist — would be refused at sign-in or by layer 3, and every
+   assertion below would measure the lock instead of what it was written for.
+   The lock has its own suite in this repo, test/private-preview-test.js,
+   which sets this variable itself and asserts all three layers. */
+process.env.PREVIEW_LOCK = 'off';
 /* ═══════════════════════════════════════════════════════════════════════════
    GREEN FINANCE — the register's invariants                       (Run 47)
    ───────────────────────────────────────────────────────────────────────────

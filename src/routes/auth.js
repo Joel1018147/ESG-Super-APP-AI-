@@ -6,6 +6,7 @@ const passport = require('passport');
 const { query } = require('../db');
 const { layout, esc } = require('../utils/layout');
 
+const previewLock = require('../utils/previewLock');
 const router = express.Router();
 
 function authPage(title, body, error) {
@@ -34,6 +35,7 @@ router.get('/login', (req, res) => {
 });
 
 router.post('/login',
+  previewLock.guardCredentials,
   passport.authenticate('local', { failureRedirect: '/auth/login?error=Invalid+email+or+password' }),
   (req, res) => res.redirect('/dashboard'));
 
@@ -52,7 +54,7 @@ router.get('/register', (req, res) => {
     </form>`, req.query.error));
 });
 
-router.post('/register', async (req, res, next) => {
+router.post('/register', previewLock.guardCredentials, async (req, res, next) => {
   try {
     const { company, name, email, password } = req.body;
     if (!company || !name || !email || !password || String(password).length < 10) {
@@ -77,6 +79,10 @@ if (process.env.GOOGLE_CLIENT_ID) {
   router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
   router.get('/google/callback',
     passport.authenticate('google', { failureRedirect: '/auth/login?error=Google+sign-in+failed' }),
+  // The Google address is not known until passport has resolved the profile, so
+    // the preview lock runs HERE rather than on /auth/google. A refused account
+    // holds a session for the length of this handler and no longer.
+    previewLock.guardSession,
     (req, res) => res.redirect('/dashboard'));
 }
 

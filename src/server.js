@@ -45,6 +45,19 @@ if (!process.env.GROQ_API_KEY) {
 
 // ── Middleware ─────────────────────────────────────────────────────────────
 app.set('trust proxy', 1);                     // Railway terminates TLS upstream
+const previewLockPublic = require('./utils/previewLock');
+
+// ── Private preview, the public half ─────────────────────────────────────────
+// The landing page asks this whether the lock is on, and rewrites its sign-in
+// buttons into "Request a demo" when it is. It is deliberately public and
+// deliberately uncacheable: it is one boolean, and a cached answer would
+// outlive the change it describes. It reveals nothing — the refusal message
+// it carries is the same one a refused visitor already sees.
+app.get('/preview-state', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ locked: previewLockPublic.isLocked(), message: previewLockPublic.MESSAGE });
+});
+
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {

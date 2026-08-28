@@ -1,6 +1,7 @@
 'use strict';
 
 const { normaliseRole, homePathForRole } = require('../services/roles');
+const previewLock = require('../utils/previewLock');
 
 /* THE HOME PATHS THAT ACTUALLY RESOLVE.
    homePathForRole() is a product statement about where a role belongs; this is
@@ -17,8 +18,14 @@ const wantsJson = (req) =>
   req.originalUrl.startsWith('/api/') ||
   (req.headers.accept || '').includes('application/json');
 
+// PRIVATE PREVIEW, LAYER 3. Every authenticated path goes through requireAuth,
+// so this is the one place that can promise a session belonging to a refused
+// address cannot be used — including sessions that predate the lock and any
+// credential path added later that forgets layers 1 and 2. It destroys the
+// session rather than only refusing, so a signed-in visitor is not left
+// bouncing off every page. See previewLock.js.
 const requireAuth = (req, res, next) => {
-  if (req.isAuthenticated && req.isAuthenticated()) return next();
+  if (req.isAuthenticated && req.isAuthenticated()) return previewLock.guardSession(req, res, next);
   if (wantsJson(req)) return res.status(401).json({ error: 'Unauthorized' });
   return res.redirect('/auth/login');
 };
