@@ -75,7 +75,7 @@ async (page) => {
     const r = await page.request.get(BASE + '/css/modus-design-system.css');
     assert(r.status() === 200, `master css returned ${r.status()}`);
     const css = await r.text();
-    // The repo pins md5 edc02c0c. Production must be serving that same file —
+    // The repo pins md5 8425f456. Production must be serving that same file —
     // a drift here means something edited the master on the way to the box.
     assert(!css.includes('.esg-'), 'the deployed master contains esg- classes — it has been edited');
     say(`${Math.round(css.length / 1024)} KB, no esg- classes in it`);
