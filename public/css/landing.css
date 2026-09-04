@@ -310,7 +310,7 @@ body.lp {
      and weighted to the left where the type sits. White on the darkest band
      still measures well past 4.5:1. */
   background:
-    linear-gradient(90deg, rgba(0,0,0,.66) 0%, rgba(0,0,0,.40) 45%, rgba(0,0,0,.12) 100%),
+    linear-gradient(90deg, rgba(0,0,0,.76) 0%, rgba(0,0,0,.50) 45%, rgba(0,0,0,.14) 100%),
     rgba(0, 0, 0, 0.10);
 }
 .lp-hero-inner {
@@ -321,6 +321,15 @@ body.lp {
 }
 .lp-hero h1 {
   color: #fff;
+  /* The reel is a montage: snow, bright skies and sunsets pass under this
+     headline as well as dark jungle. A 66-frame sweep of the composited
+     pixels puts the worst case at 3.54:1 — over the 3:1 large-text floor, but
+     that is 66 samples of ~9,900 frames. The shadow is not there to move the
+     measured ratio (WCAG credits none) but so legibility does not depend on
+     which frames the sweep happened to catch. Deepening the scrim further
+     would have bought the same margin by hiding the video the page exists to
+     show. */
+  text-shadow: 0 2px 20px rgba(0, 0, 0, 0.55), 0 1px 3px rgba(0, 0, 0, 0.4);
   font-size: clamp(32px, 3.9vw, 54px);
   font-weight: 900;
   line-height: 1.14;
@@ -331,6 +340,7 @@ body.lp {
 }
 .lp-hero p {
   color: rgba(255, 255, 255, 0.92);
+  text-shadow: 0 1px 14px rgba(0, 0, 0, 0.5);
   font-size: 18px; line-height: 1.6;
   max-width: 46ch; margin: 0 0 34px;
 }
