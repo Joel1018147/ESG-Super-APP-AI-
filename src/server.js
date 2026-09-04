@@ -217,12 +217,37 @@ app.get('/favicon.ico', (req, res) => res.redirect(301, '/favicon.svg'));
 app.get('/robots.txt', (req, res) =>
   res.sendFile(path.join(__dirname, '../public/robots.txt')));
 
-// Public landing page. A signed-in visitor still goes straight to their
-// dashboard — the marketing page is for people who do not have an account yet,
-// and bouncing a signed-in user onto it looks like being logged out.
+// Public landing page — ALWAYS, signed in or not. Joel's ruling, 2026-09-04.
+//
+// This used to 302 an authenticated visitor to /dashboard. The reasoning on
+// record was that the marketing page is for people without an account, and
+// that bouncing a signed-in user onto it "looks like being logged out". That
+// was right about the SYMPTOM and wrong about the cause: the page looked
+// logged out because it SAID "Sign in" and "Register" to someone already
+// signed in — not because it was shown to them. Hiding the page treated the
+// symptom by removing the page.
+//
+// So the redirect is gone and the page tells the truth instead: it asks
+// /session-state and swaps those CTAs for "Go to your dashboard". A signed-in
+// visitor is one clearly-labelled click from the app, and a URL someone was
+// sent is never silently answered with a different page than the one the
+// sender saw.
 app.get('/', (req, res) => {
-  if (req.isAuthenticated && req.isAuthenticated()) return res.redirect('/dashboard');
   res.sendFile(path.join(__dirname, '../public/index.html'));
+});
+
+// One boolean, for the landing page's CTA labels.
+//
+// It MUST sit here rather than beside /preview-state: that one is mounted
+// above the session middleware, where req.isAuthenticated does not yet exist.
+//
+// Public and uncacheable for the same reasons as /preview-state — a cached
+// answer would outlive the session it describes. It discloses nothing: no
+// name, no email, no company, and nothing an anonymous caller could not
+// already infer by requesting /dashboard and reading the redirect.
+app.get('/session-state', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ signedIn: !!(req.isAuthenticated && req.isAuthenticated()) });
 });
 app.use('/auth', require('./routes/auth'));
 app.use('/api',  requireAuth, denyWritesForReadOnly, require('./routes/api'));
