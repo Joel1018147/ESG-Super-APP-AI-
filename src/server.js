@@ -102,6 +102,16 @@ app.use(cookieParser());
 // `must-revalidate` with a zero lifetime costs one conditional request and a
 // 304; everything else in public/ (images, the hero video, the favicon) keeps
 // the long max-age, which is where the bytes actually are.
+//
+// THE LONG MAX-AGE ON MEDIA IS SAFE ONLY BECAUSE THE URLS ARE IMMUTABLE.
+// It was not, briefly, and the failure is worth recording: three different
+// hero videos shipped to /media/hero.mp4, and every browser that had cached
+// the first kept playing it — no request, no revalidation — for seven days.
+// A header change cannot rescue that, because inside max-age the browser
+// never asks. scripts/hash-media.js now names every media file for a hash of
+// its own content (hero.1c490b84.mp4), so new bytes always mean a new URL and
+// a cache has nothing stale to hold. test/landing-cta-test.js §1d fails if a
+// file is swapped without re-hashing.
 app.use(express.static(path.join(__dirname, '../public'), {
   maxAge: IS_PROD ? '7d' : 0,
   index: false,

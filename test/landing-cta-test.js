@@ -95,6 +95,29 @@ ok('the video still declares autoplay, muted, loop and playsinline',
   /<video[^>]*\bautoplay\b/.test(INDEX) && /<video[^>]*\bmuted\b/.test(INDEX)
   && /<video[^>]*\bloop\b/.test(INDEX) && /<video[^>]*\bplaysinline\b/.test(INDEX));
 
+console.log('\n── §1d  media cannot be served stale ───────────────────────');
+// express.static caches public/ for 7 days in production. That is right for
+// media only while a URL always returns the same bytes — and it did not: three
+// hero videos shipped to /media/hero.mp4 in one afternoon and browsers kept
+// playing the first for a week, reported as "why is it only showing one
+// scenery repeatedly". A cache header cannot fix that after the fact; inside
+// max-age a browser never asks. Only a different URL reaches an already-cached
+// visitor, so every media file is named for a hash of its own content.
+{
+  const { execFileSync } = require('child_process');
+  let out = '';
+  let clean = true;
+  try {
+    out = execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'hash-media.js'), '--check'],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (e) {
+    clean = false;
+    out = ((e.stdout || '') + (e.stderr || '')).toString();
+  }
+  ok('every media reference is content-hashed and present on disk', clean,
+    out.trim().split('\n').slice(0, 6).join(' | '));
+}
+
 // ── §2  live: the same page, relabelled, in a real browser ──────────────────
 console.log('\n── §2  rendered behaviour ──────────────────────────────────');
 
