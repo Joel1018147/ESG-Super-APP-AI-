@@ -262,6 +262,76 @@ const read = (page) => page.evaluate(() => {
     await ctx.close();
   }
 
+  // §4 — PHONE LAYOUT. An image overlapping its own card text shipped to
+  // production and was reported by the owner, not caught here: the geometry
+  // checks only ever ran at 1440, which is the one width where the defect does
+  // not appear. The cause was a width stated twice — a 150px grid track and a
+  // hardcoded 150px on the image — where the 640px breakpoint changed only the
+  // track. These assertions run at the widths where that class of bug lives.
+  for (const w of [320, 390, 640]) {
+    ctx = await browser.newContext({ viewport: { width: w, height: 800 }, isMobile: true, hasTouch: true });
+    page = await ctx.newPage();
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1800);
+    await page.evaluate(async () => {
+      await new Promise((r) => { let y = 0; const t = setInterval(() => { window.scrollBy(0, 900); y += 900; if (y > document.body.scrollHeight) { clearInterval(t); r(); } }, 50); });
+      window.scrollTo(0, 0);
+    });
+    await page.waitForTimeout(500);
+
+    const m = await page.evaluate(() => {
+      const de = document.documentElement;
+      const res = { hOverflow: de.scrollWidth > de.clientWidth, collisions: [], offRight: [], smallTaps: [] };
+
+      // An image in NORMAL FLOW colliding with text is a bug. A positioned
+      // full-bleed backdrop with type layered over it is the design, which is
+      // why position is the discriminator rather than geometry alone.
+      const flowImgs = [...document.querySelectorAll('img, video')]
+        .filter((i) => getComputedStyle(i).position === 'static'
+          && !i.closest('.lp-hero-media, .lp-band, .lp-cta-tile'));
+      const texts = [...document.querySelectorAll('p, h1, h2, h3, h4, li, span')]
+        .filter((e) => [...e.childNodes].some((n) => n.nodeType === 3 && n.nodeValue.trim()));
+      for (const im of flowImgs) {
+        const a = im.getBoundingClientRect();
+        if (a.width < 8) continue;
+        for (const tx of texts) {
+          if (im.contains(tx) || tx.contains(im)) continue;
+          const b = tx.getBoundingClientRect();
+          if (b.width < 8) continue;
+          const ox = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+          const oy = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+          if (ox > 3 && oy > 3) res.collisions.push(`${im.getAttribute('src') || im.tagName} over "${(tx.textContent || '').trim().slice(0, 20)}" ${Math.round(ox)}x${Math.round(oy)}px`);
+        }
+      }
+
+      document.querySelectorAll('body *').forEach((el) => {
+        let host = el.parentElement; let scrollable = false;
+        while (host && host !== document.body) {
+          const ov = getComputedStyle(host).overflowX;
+          if (ov === 'auto' || ov === 'scroll') { scrollable = true; break; }
+          host = host.parentElement;
+        }
+        const b = el.getBoundingClientRect();
+        if (!scrollable && b.width > 0 && b.right > de.clientWidth + 1) {
+          res.offRight.push(el.tagName + '.' + (el.className || '').toString().split(' ')[0]);
+        }
+      });
+
+      document.querySelectorAll('a.lp-btn, button, .lp-drawer a, .lp-tab').forEach((el) => {
+        const b = el.getBoundingClientRect();
+        if (b.height < 4 || getComputedStyle(el).display === 'none') return;
+        if (b.height < 44) res.smallTaps.push((el.className || el.tagName).toString().split(' ')[0] + ' h=' + Math.round(b.height));
+      });
+      return res;
+    });
+
+    const uniq = (a) => [...new Set(a)];
+    ok(`${w}px: no image overlaps card text`, m.collisions.length === 0, uniq(m.collisions).slice(0, 3).join(' | '));
+    ok(`${w}px: nothing escapes the viewport`, m.offRight.length === 0 && !m.hOverflow, uniq(m.offRight).slice(0, 3).join(' | '));
+    ok(`${w}px: every tap target clears 44px`, m.smallTaps.length === 0, uniq(m.smallTaps).slice(0, 4).join(' | '));
+    await ctx.close();
+  }
+
   await browser.close();
   server.close();
   console.log(`\nlanding-cta-test: ${pass} passed, ${fail} failed`);

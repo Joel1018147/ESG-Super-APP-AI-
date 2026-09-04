@@ -439,7 +439,14 @@ a.lp-card:hover, .lp-card:hover { border-color: var(--lp-ink); }
    width is what gets stated; min-width:0 stops the text track being sized by
    its own longest word. */
 .lp-mini { display: grid; grid-template-columns: 150px minmax(0, 1fr); align-items: stretch; }
-.lp-mini .lp-card-media { width: 150px; height: 100%; min-height: 150px; }
+/* WIDTH IS STATED ONCE, BY THE GRID TRACK.
+   It used to be stated twice — `grid-template-columns: 150px` here and
+   `width: 150px` on the image — and the 640px breakpoint changed the track to
+   110px without changing the image. A 150px image in a 110px column printed
+   16px of itself over the first characters of every line of text beside it, at
+   every width from 320 to 640. Following the track means a future breakpoint
+   cannot reintroduce it. */
+.lp-mini .lp-card-media { width: 100%; height: 100%; min-height: 150px; overflow: hidden; }
 .lp-mini .lp-card-media img { width: 100%; height: 100%; object-fit: cover; }
 .lp-mini-body { padding: 20px 24px; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
 .lp-mini-body h3 {
@@ -736,7 +743,13 @@ a.lp-who-panel:hover .lp-who-foot i { background: var(--lp-green-tint); }
 @media (max-width: 640px) {
   :root { --lp-gut: 18px; }
   .lp-grid, .lp-grid-3 { grid-template-columns: 1fr; }
-  .lp-mini { grid-template-columns: 110px 1fr; }
+  /* minmax(0, 1fr), not 1fr: a bare 1fr is floored at the content's MIN-CONTENT
+     width, so one long unbroken word in the body would push the track wider
+     than the card and reintroduce an overlap from the other direction. */
+  .lp-mini { grid-template-columns: 104px minmax(0, 1fr); }
+  .lp-mini .lp-card-media { min-height: 124px; }
+  .lp-mini-body { padding: 15px 16px; }
+  .lp-mini-body h3 { font-size: 17px; }
   .lp-stat { grid-template-columns: 96px 1fr; }
   .lp-stat-mark { min-height: 108px; }
   .lp-stat-mark svg { width: 38px; height: 38px; }
@@ -747,6 +760,59 @@ a.lp-who-panel:hover .lp-who-foot i { background: var(--lp-green-tint); }
   .lp-footer-top { grid-template-columns: 1fr; }
   .lp-footer-bottom { flex-direction: column; gap: 16px; }
   .lp-tabs { gap: 18px; }
+
+  /* ── RECLAIM THE HEADER ────────────────────────────────────────────────
+     The fixed bar was 108px — 13% of a 390x844 screen, permanently, on every
+     scroll position. The utility strip was 34px of that and carried two links
+     ("Governance", "Sign in") which the drawer already lists, so on a phone it
+     was spending an eighth of the fold to duplicate itself.
+
+     --lp-util-h is set to 0 rather than the strip merely being hidden, because
+     the drawer's offset, every section's scroll-margin-top and the hero's top
+     padding are all composed from it. Change the variable and they all follow;
+     hide the element alone and they would each be 34px wrong. */
+  .lp-util { display: none; }
+  :root { --lp-util-h: 0px; --lp-nav-h: 62px; }
+  .lp-logo-mark { padding: 6px 9px; font-size: 14px; }
+
+  /* Padding that reads as generous at 1440 is a squeeze at 390: the who-panel
+     was spending 64px of a 354px content width on its own gutters. */
+  .lp-card-body { padding: 22px 20px 20px; }
+  .lp-card-plain .lp-card-body { padding: 24px 20px; }
+  .lp-card-foot { padding: 16px 20px; }
+  .lp-who-body { padding: 24px 20px; }
+  .lp-who-foot span { padding: 18px 20px; }
+  .lp-who-foot i { padding: 0 18px; }
+  .lp-31-lead .lp-card-body { padding: 22px 20px 24px; }
+  .lp-stats-head { padding: 18px 20px; }
+  .lp-stat-body { padding: 18px 20px; }
+  .lp-band-inner { padding: 64px 20px; }
+  .lp-cta-tile { padding: 40px 22px; min-height: 340px; }
+  .lp-aud { padding: 48px 0 54px; }
+
+  /* A wrapping tab row grew to three lines and pushed the panel off the fold.
+     One scrolling row keeps the group readable as a group. -webkit-overflow-
+     scrolling and a negative gutter let it bleed to the screen edge so the
+     last tab does not look clipped by the container. */
+  .lp-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin-left: calc(-1 * var(--lp-gut));
+    margin-right: calc(-1 * var(--lp-gut));
+    padding-left: var(--lp-gut);
+    padding-right: var(--lp-gut);
+  }
+  .lp-tabs::-webkit-scrollbar { display: none; }
+  /* 33px tall was under the 44px touch floor. The extra height is padding, so
+     the underline still meets the row rule beneath it. */
+  .lp-tab { white-space: nowrap; flex: none; padding: 14px 0 15px; }
+
+  /* 44px is the floor for a touch target. .lp-btn-sm's desktop padding lands
+     just under it once the border is counted. */
+  .lp-btn { padding: 15px 22px; }
+  .lp-btn-sm { padding: 14px 18px; }
+  .lp-burger { padding: 12px; }
 }
 
 /* ── §15  motion ────────────────────────────────────────────────────────── */
