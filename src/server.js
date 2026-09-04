@@ -90,8 +90,26 @@ app.use(cookieParser());
 // landing page would be served by middleware ordering rather than by a route
 // anyone can find, and the `app.get('/')` handler would be unreachable dead
 // code that still reads as live.
+//
+// STYLESHEETS ARE REVALIDATED, NOT CACHED FOR A WEEK.
+// The signed-in shells dodge this by versioning the href — utils/layout.js
+// builds `/css/modus-design-system.css?v=<sha256 slice>` for exactly the
+// reason spelled out there: a sync lands and every returning user keeps the
+// old sheet for up to a week, which reads as "the change silently did not
+// work". The LANDING page is static HTML and cannot compute a hash at request
+// time, so when its CSS moved out of an inline <style> and into
+// /css/landing.css it inherited that week-long window with no way to bust it.
+// `must-revalidate` with a zero lifetime costs one conditional request and a
+// 304; everything else in public/ (images, the hero video, the favicon) keeps
+// the long max-age, which is where the bytes actually are.
 app.use(express.static(path.join(__dirname, '../public'), {
-  maxAge: IS_PROD ? '7d' : 0, index: false,
+  maxAge: IS_PROD ? '7d' : 0,
+  index: false,
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.css')) {
+      res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+    }
+  },
 }));
 
 app.use(session({

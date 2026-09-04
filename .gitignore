@@ -4,3 +4,9 @@ node_modules/
 !.env.example
 *.log
 .DS_Store
+
+# The 247MB HEVC source reel for the hero. GitHub hard-rejects any file over
+# 100MB, so committing this would fail the push outright. The shipped hero is
+# the trimmed, transcoded 2.7MB loop at public/media/hero.mp4 — see
+# public/media/CREDITS.md for exactly how it was derived from this file.
+Landing page Hero video/

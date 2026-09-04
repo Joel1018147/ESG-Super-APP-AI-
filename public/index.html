@@ -9,283 +9,670 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <!-- TWO FONTS, TWO JOBS (UI contract §5.1). Outfit for what you SCAN, Inter for
-     what you READ, never a third. The design system already declares both as
-     --font / --font-display and applies --font-display automatically to
-     .section-title, .card-title and friends — but ESG's shells load Inter ONLY,
-     so Outfit silently fell back to Inter everywhere. Loading it here fixes the
-     landing page; src/utils/layout.js:160,227 still load Inter alone and the
-     signed-in shell still has no Outfit. That is a real gap, out of scope for
-     this change, and deliberately not papered over here. -->
-<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<!-- The design system supplies every colour, radius and font. This page adds
-     layout only — it does not redeclare a single token. A landing page that
-     defines its own palette is how a repo forks away from the master. -->
+     what you READ, never a third. Outfit now carries 900 as well: the reference
+     grammar this page adopts sets its display headings in a black weight, and a
+     weight of a face already in the contract is not a third font. The design
+     system declares both as --font / --font-display; ESG's signed-in shells
+     still load Inter ONLY (src/utils/layout.js:160,227), so --font-display
+     silently falls back to Inter there. That is a real gap, unchanged by this
+     page, and deliberately not papered over here. -->
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!-- The design system supplies the accent. It is READ here (var(--accent)) and
+     never redeclared — see landing.css §0 for why that is safe in both themes
+     and what the local surface variables do and do not cover. -->
 <link rel="stylesheet" href="/css/modus-design-system.css">
-<style>
-/* GEOMETRY ONLY. Every colour below resolves through a token that EXISTS —
-   checked against the stylesheet, not assumed (§3: a custom property that
-   merely looks like a token renders transparent and throws nothing).
-
-   The dark band uses --brand, which is dark in BOTH themes (#0f172a light,
-   #020817 dark), so the hero cannot invert into an unreadable light-on-light.
-   --bg and --surface DO flip and are wrong here for exactly that reason.
-   Foreground on the band is --accent-contrast, ESG's declared sixth accent
-   token and the only one that stays light in both themes. */
-*, *::before, *::after { box-sizing: border-box; }
-body { background: var(--bg); color: var(--text); line-height: 1.65; margin: 0; }
-a { color: inherit; text-decoration: none; }
-
-/* ── the dark band: nav + hero + stats are one continuous surface ────────── */
-.lp-dark { background: var(--brand); color: var(--accent-contrast); }
-
-.lp-nav { position: sticky; top: 0; z-index: 100; background: var(--brand);
-  border-bottom: 1px solid var(--brand-3); display: flex; align-items: center;
-  justify-content: space-between; gap: 24px; padding: 0 24px; height: 64px; }
-.lp-brand { display: flex; align-items: center; gap: 10px; font-weight: 700;
-  color: var(--accent-contrast); white-space: nowrap; }
-.lp-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--accent); flex: none; }
-.lp-nav-links { display: flex; gap: 28px; }
-.lp-nav-links a { color: var(--muted); font-size: 14px; font-weight: 500; }
-.lp-nav-links a:hover, .lp-nav-links a:focus-visible { color: var(--accent-contrast); }
-.lp-nav-right { display: flex; align-items: center; gap: 10px; flex: none; }
-
-.lp-wrap { max-width: 1060px; margin: 0 auto; padding: 0 24px; }
-
-.lp-hero { padding: 96px 0 72px; text-align: center; }
-.lp-pill { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 28px;
-  padding: 7px 16px; border-radius: 999px; background: var(--brand-3);
-  border: 1px solid var(--border-2); color: var(--muted); font-size: 13px; font-weight: 500; }
-.lp-pill .lp-dot { width: 8px; height: 8px; }
-.lp-hero h1 { font-size: clamp(38px, 6.2vw, 76px); font-weight: 800; line-height: 1.06;
-  letter-spacing: -2px; margin: 0 0 26px; color: var(--accent-contrast); }
-.lp-hero h1 .lp-accent { color: var(--accent); display: block; }
-.lp-hero p { color: var(--muted); max-width: 620px; margin: 0 auto 36px; font-size: 17px; }
-.lp-cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
-
-/* ── stat strip ─────────────────────────────────────────────────────────── */
-.lp-stats { border-top: 1px solid var(--brand-3); background: var(--brand-2); }
-.lp-stat-grid { display: grid; gap: 24px; padding: 36px 0;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
-.lp-stat { text-align: center; }
-.lp-stat-num { display: block; font-size: 40px; font-weight: 800; line-height: 1;
-  letter-spacing: -1.5px; color: var(--accent-contrast); }
-.lp-stat-label { display: block; margin-top: 8px; color: var(--muted); font-size: 14px; }
-
-/* ── light sections ─────────────────────────────────────────────────────── */
-.lp-section { padding: 64px 0; border-top: 1px solid var(--border); }
-.lp-section > h2 { margin: 0 0 8px; }
-.lp-section > p.lead { color: var(--text-2); margin: 0 0 28px; max-width: 700px; }
-.lp-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
-.lp-list { margin: 0 0 8px; padding-left: 20px; }
-.lp-list > li { margin-bottom: 8px; }
-.lp-list-2 { columns: 2; column-gap: 32px; }
-.lp-list-2 > li { break-inside: avoid; }
-.lp-foot { border-top: 1px solid var(--border); padding: 32px 0 56px; color: var(--text-2); }
-
-@media (max-width: 860px) { .lp-nav-links { display: none; } }
-@media (max-width: 640px) {
-  .lp-hero { padding: 60px 0 48px; }
-  .lp-list-2 { columns: 1; }
-  .lp-nav { gap: 12px; padding: 0 14px; }
-  .lp-brand { font-size: 13px; white-space: normal; }
-}
-</style>
+<link rel="stylesheet" href="/css/landing.css">
+<noscript><style>
+  /* data-over is only ever cleared by script. With no script the transparent
+     state persists past the hero and the fixed bar becomes white-on-white, so
+     pin it to the solid state — correct everywhere, at every scroll offset. */
+  .lp-header[data-over="1"]::before { display: none; }
+  .lp-header[data-over="1"] .lp-util,
+  .lp-header[data-over="1"] .lp-nav { background: #fff; border-bottom-color: var(--lp-line); }
+  .lp-header[data-over="1"] .lp-util a,
+  .lp-header[data-over="1"] .lp-util span,
+  .lp-header[data-over="1"] .lp-logo-text { color: var(--lp-muted); }
+  .lp-header[data-over="1"] .lp-util-sep { color: var(--lp-line); }
+  .lp-header[data-over="1"] .lp-nav-links > a,
+  .lp-header[data-over="1"] .lp-burger { color: var(--lp-ink); }
+  .lp-header[data-over="1"] .lp-logo-mark { border-color: var(--lp-green); color: var(--lp-green); }
+  .lp-header[data-over="1"] .lp-btn-solid { background: var(--lp-green); color: #fff; border-color: var(--lp-green); }
+</style></noscript>
 </head>
-<body>
 
-<a class="skip-link" href="#main">Skip to content</a>
+<body class="lp">
+<a class="lp-skip" href="#main">Skip to content</a>
 
-<div class="lp-dark">
-  <nav class="lp-nav">
-    <div class="lp-brand"><span class="lp-dot"></span> Malaysia SMEs ESG e-Reporting System</div>
-    <!-- Every anchor here resolves to a section that exists further down. A nav
-         link to nothing is a dead control (§4.3c). No language selector: this
-         page has no translation engine behind it, and a switcher that sets a
-         variable and translates nothing is the same defect one rung along. -->
-    <div class="lp-nav-links">
-      <a href="#what">What it does</a>
-      <a href="#limits">What it doesn't claim</a>
-      <a href="#governance">Governance</a>
-    </div>
-    <div class="lp-nav-right">
-      <a class="btn btn-outline" href="/auth/login">Sign in</a>
-      <a class="btn btn-primary" href="/auth/register">Register your company</a>
-    </div>
-  </nav>
-
-  <main id="main">
-    <div class="lp-wrap">
-      <section class="lp-hero">
-        <span class="lp-pill"><span class="lp-dot"></span>
-          Malaysia SMEs ESG e-Reporting System — by Modus AI Associates</span>
-        <h1 class="h-display">Answer the ESG questions
-          <span class="lp-accent">your customers already ask</span></h1>
-        <p>A self-assessment and evidence platform for Malaysian SMEs. Work through the
-           disclosures once, attach the documents you already have, and get a score you can
-           explain — with every figure traceable to the answer and the evidence behind it.</p>
-        <div class="lp-cta">
-          <a class="btn btn-primary btn-lg" href="/auth/register">Register your company</a>
-          <a class="btn btn-outline btn-lg" href="/auth/login">Sign in</a>
-        </div>
-      </section>
-    </div>
-
-    <!-- EVERY NUMBER HERE IS TRUE AND CHECKABLE IN THIS REPO.
-         38 — src/data/sedgV2.js DISCLOSURES.length, asserted in smoke-test.js:292
-         40 — seeded indicators, asserted in schema-idempotency-test.js
-          3 — E, S and G
-         EN — there is no i18n engine in this repo yet, so this says so
-         No adoption or customer count appears here, because there is not one
-         this repo can prove. A stat a stakeholder can disprove in the room is
-         worth less than no stat at all. -->
-    <div class="lp-stats">
-      <div class="lp-wrap">
-        <div class="lp-stat-grid">
-          <div class="lp-stat"><span class="lp-stat-num h-display">38</span>
-            <span class="lp-stat-label">SEDG v2 disclosures published in full</span></div>
-          <div class="lp-stat"><span class="lp-stat-num h-display">40</span>
-            <span class="lp-stat-label">Assessment indicators scored</span></div>
-          <div class="lp-stat"><span class="lp-stat-num h-display">3</span>
-            <span class="lp-stat-label">Pillars — Environmental, Social, Governance</span></div>
-          <div class="lp-stat"><span class="lp-stat-num h-display">EN</span>
-            <span class="lp-stat-label">English only for now — BM and 中文 not built yet</span></div>
-        </div>
+<!-- ══ HEADER ══════════════════════════════════════════════════════════════
+     Transparent over the hero, solid white once the page scrolls past it.
+     data-over is set by script; it starts at "1" because the page loads at
+     the top, so the first paint is already correct with JS disabled. -->
+<header class="lp-header" id="lp-header" data-over="1">
+  <div class="lp-util">
+    <div class="lp-wrap-wide">
+      <div class="lp-util-links">
+        <span class="lp-util-hide">Registered under the SMEs Sustainable Entrepreneur Organisation (SSEO)</span>
+      </div>
+      <div class="lp-util-links">
+        <a href="#governance">Governance</a>
+        <span class="lp-util-sep" aria-hidden="true">|</span>
+        <a href="/auth/login">Sign in</a>
       </div>
     </div>
-  </main>
-</div>
-
-<div class="lp-wrap">
-
-  <section class="lp-section" id="what">
-    <h2 class="section-title">What it does</h2>
-    <p class="lead">Four things, and it is honest about where each one stops.</p>
-    <div class="lp-grid">
-      <div class="card">
-        <h3 class="card-title">Assess</h3>
-        <p>A structured questionnaire across Environmental, Social and Governance.
-           Quantitative questions score on <em>disclosure</em>, not on whether the number
-           is good — inventing a pass mark would be a judgement nobody has agreed.</p>
-      </div>
-      <div class="card">
-        <h3 class="card-title">Evidence</h3>
-        <p>Upload a policy, a utility bill or a full report. An answer backed by a
-           document scores higher than one that is only declared, and the platform
-           records which is which.</p>
-      </div>
-      <div class="card">
-        <h3 class="card-title">Carbon</h3>
-        <p>Scope 1 and Scope 2 from activity data, using published emission factors.
-           Every entry stores the factor, its version and its source, so a figure can be
-           re-checked years later.</p>
-      </div>
-      <div class="card">
-        <h3 class="card-title">Read your own documents</h3>
-        <p>The system reads an uploaded report and <em>proposes</em> answers, each with the
-           quoted sentence it came from. Nothing is recorded until a person accepts it.</p>
-      </div>
-    </div>
-  </section>
-
-  <section class="lp-section">
-    <h2 class="section-title">How a company uses it</h2>
-    <div class="lp-grid">
-      <div class="card"><h3 class="card-title">1 · Register</h3>
-        <p>Company details, sector and location, so the right emission factors apply.</p></div>
-      <div class="card"><h3 class="card-title">2 · Answer</h3>
-        <p>Work through the disclosures. Not applicable is a real answer and is treated
-           as one.</p></div>
-      <div class="card"><h3 class="card-title">3 · Attach evidence</h3>
-        <p>Upload what you already have. Review what the system proposes from it.</p></div>
-      <div class="card"><h3 class="card-title">4 · Score and share</h3>
-        <p>A score with its framework version, weighting version and engine version
-           attached.</p></div>
-    </div>
-  </section>
-
-  <section class="lp-section" id="limits">
-    <h2 class="section-title">What this platform does not claim</h2>
-    <p class="lead">Stated up front, because a counterparty will ask and the answer should
-       be the same on the website as it is inside the product.</p>
-    <div class="lp-grid">
-      <div class="card">
-        <h3 class="card-title">Not a certification</h3>
-        <p>A score here is a self-assessment supported by evidence. It is not an audit, not
-           an assurance opinion, and not a certificate.</p>
-      </div>
-      <div class="card">
-        <h3 class="card-title">Aligned, not compliant</h3>
-        <p>The assessment is aligned in draft to Malaysia's Simplified ESG Disclosure Guide.
-           The official disclosure set is published in full inside the platform, and the
-           reconciliation against it is not finished.</p>
-      </div>
-      <div class="card">
-        <h3 class="card-title">The model never writes a number</h3>
-        <p>AI drafts recommendations and proposes answers from your documents. It is
-           structurally prevented from producing or altering a score.</p>
-      </div>
-    </div>
-  </section>
-
-  <section class="lp-section" id="governance">
-    <h2 class="section-title">Governance</h2>
-    <p class="lead">The Malaysia SMEs ESG e-Reporting System is registered under the SMEs
-       Sustainable Entrepreneur Organisation (SSEO) as the official platform for
-       participating SME organisations and ESG reporting initiatives.</p>
-    <p class="lead"><strong>Platform owner.</strong> SMEs Sustainable Entrepreneur
-       Organisation (SSEO). SSEO owns the assessment framework and is the body that revises
-       it. A revision is issued as a new framework version, never as an edit to the one
-       companies have already been scored against.</p>
-    <p class="lead">The platform covers self-assessment and evidence. Independent
-       verification, certification, and investor or customer due diligence sit outside it
-       and are performed by other parties.</p>
-  </section>
-
-  <section class="lp-section">
-    <h2 class="section-title">Purpose</h2>
-    <p class="lead">The platform aims to:</p>
-    <ul class="lp-list">
-      <li>Accelerate ESG adoption among Malaysian SMEs.</li>
-      <li>Simplify ESG reporting through a user-friendly digital system.</li>
-      <li>Enhance ESG readiness for local and international supply chains.</li>
-      <li>Support access to sustainable finance and ESG-linked opportunities.</li>
-      <li>Strengthen SME competitiveness through improved governance and sustainability
-          practices.</li>
-    </ul>
-  </section>
-
-  <section class="lp-section">
-    <h2 class="section-title">Supporting partners</h2>
-    <p class="lead">The types of organisation that support the platform alongside its
-       owner.</p>
-    <ul class="lp-list lp-list-2">
-      <li>Universities and Research Institutions</li>
-      <li>ESG Consultants</li>
-      <li>Professional Bodies</li>
-      <li>Financial Institutions</li>
-      <li>Technology Providers</li>
-      <li>Sustainability Assurance Partners</li>
-    </ul>
-  </section>
-
-  <div class="lp-foot">
-    <p><strong>Malaysia SMEs ESG e-Reporting System</strong> — Governance &amp; Recognition</p>
-    <p class="text-sm">Have an account? <a href="/auth/login"><strong>Sign in</strong></a>.
-       New here? <a href="/auth/register"><strong>Register your company</strong></a>.</p>
-    <p class="text-sm">Built by Modus AI Associates.</p>
   </div>
 
+  <nav class="lp-nav" aria-label="Primary">
+    <div class="lp-wrap-wide">
+      <a class="lp-logo" href="/" aria-label="Malaysia SMEs ESG e-Reporting System — home">
+        <span class="lp-logo-mark">ESG</span>
+        <span class="lp-logo-text">Malaysia SMEs<br>e-Reporting System</span>
+      </a>
+
+      <div class="lp-nav-links">
+        <a href="#what">What it does</a>
+        <a href="#how">How it works</a>
+        <a href="#limits">What it doesn't claim</a>
+        <a href="#governance">Governance</a>
+        <a href="#partners">Partners</a>
+      </div>
+
+      <div class="lp-nav-cta">
+        <a class="lp-btn lp-btn-solid lp-btn-sm" href="/auth/register">Register</a>
+        <button class="lp-burger" id="lp-burger" type="button"
+                aria-label="Open menu" aria-expanded="false" aria-controls="lp-drawer">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+        </button>
+      </div>
+    </div>
+  </nav>
+</header>
+
+<div class="lp-drawer" id="lp-drawer" hidden>
+  <a href="#what">What it does</a>
+  <a href="#how">How it works</a>
+  <a href="#limits">What it doesn't claim</a>
+  <a href="#governance">Governance</a>
+  <a href="#partners">Partners</a>
+  <a href="/auth/login">Sign in</a>
+  <a class="lp-btn lp-btn-solid" href="/auth/register">Register your company</a>
 </div>
 
+<main id="main">
+
+  <!-- ══ HERO ══════════════════════════════════════════════════════════════
+       Full-bleed muted looping footage behind a scrim, the reference's hero
+       treatment. The footage is licensed for commercial use and is NOT the
+       reference site's own — see public/media/CREDITS.md.
+
+       The poster carries the frame before the video is ready and IS the hero
+       for anyone who has asked for reduced motion; the script below stops the
+       video and restores the poster for them rather than letting a decorative
+       loop run against a stated preference. -->
+  <section class="lp-hero">
+    <div class="lp-hero-media">
+      <video id="lp-hero-video" autoplay muted loop playsinline preload="metadata"
+             poster="/media/hero-poster.jpg" aria-hidden="true" tabindex="-1">
+        <source id="lp-hero-src" src="/media/hero.mp4" type="video/mp4">
+      </video>
+      <script>
+      /* INLINE AND IMMEDIATE, on purpose. This check used to sit at the foot of
+         the body, by which time the browser had already begun buffering 10.4MB
+         for a visitor who asked for no motion. Here is the earliest point the
+         element exists. Detaching the <source> before load() is what actually
+         stops the fetch: removing `autoplay` alone left preload in place, so
+         load() re-ran resource selection and fetched the file a SECOND time. */
+      (function () {
+        try {
+          if (!window.matchMedia) return;
+          if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+          var v = document.getElementById('lp-hero-video');
+          var src = document.getElementById('lp-hero-src');
+          if (!v) return;
+          v.removeAttribute('autoplay');
+          v.preload = 'none';
+          if (src && src.parentNode) src.parentNode.removeChild(src);
+          v.pause();
+          v.load();   /* with no source attached, this restores the poster */
+        } catch (e) { /* the poster is already showing; nothing to recover */ }
+      })();
+      </script>
+    </div>
+    <div class="lp-hero-scrim" aria-hidden="true"></div>
+
+    <div class="lp-hero-inner">
+      <div class="lp-wrap-wide">
+        <h1>Answer the ESG questions your customers already ask</h1>
+        <p>A self-assessment and evidence platform for Malaysian SMEs. Work through the
+           disclosures once, attach the documents you already have, and get a score you
+           can explain — every figure traceable to the answer and the evidence behind it.</p>
+        <div class="lp-hero-cta">
+          <a class="lp-btn lp-btn-light" href="/auth/register">Register your company</a>
+          <a class="lp-btn lp-btn-outline-light" href="#what">What it does</a>
+        </div>
+      </div>
+    </div>
+
+    <a class="lp-chev" href="#how" aria-label="Skip to how a company uses it">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+    </a>
+  </section>
+
+  <!-- ══ HOW A COMPANY USES IT ═════════════════════════════════════════════
+       The reference's 3-in-1 block: one lead card and three stacked minis.
+       Here it carries the four steps, in order, which is what that geometry
+       is actually good at. No dates and no categories are shown, because
+       there is no news feed behind this page to date anything from. -->
+  <section class="lp-section" id="how">
+    <div class="lp-wrap">
+      <div class="lp-head">
+        <h2 class="lp-eyebrow">How a company uses it</h2>
+        <a class="lp-more" href="/auth/register">Start now
+          <svg width="18" height="14" viewBox="0 0 18 14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M1 7h15M11 2l5 5-5 5"/></svg>
+        </a>
+      </div>
+
+      <div class="lp-31">
+        <article class="lp-card lp-31-lead">
+          <div class="lp-card-media"><img src="/media/news-lead.jpg" alt="" loading="lazy" decoding="async"></div>
+          <div class="lp-card-body">
+            <h3>Register your company, then say which grid you draw power from</h3>
+            <p>Registration itself takes a name and an email. Your state and sector go on the
+               company profile afterwards — and Scope 2 then uses the published emission factor
+               for your grid: Peninsular, Sabah or Sarawak.</p>
+            <div class="lp-meta">
+              <span class="lp-meta-step">Step 1</span>
+              <span class="lp-meta-kind">Register</span>
+            </div>
+          </div>
+        </article>
+
+        <div class="lp-31-side">
+          <article class="lp-card lp-mini">
+            <div class="lp-card-media"><img src="/media/news-1.jpg" alt="" loading="lazy" decoding="async"></div>
+            <div class="lp-mini-body">
+              <h3>Work through the disclosures</h3>
+              <p>Not applicable is a real answer here, and it is treated as one rather than
+                 counted as a gap.</p>
+              <div class="lp-meta" style="margin-top:12px">
+                <span class="lp-meta-step">Step 2</span><span class="lp-meta-kind">Answer</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="lp-card lp-mini">
+            <div class="lp-card-media"><img src="/media/news-2.jpg" alt="" loading="lazy" decoding="async"></div>
+            <div class="lp-mini-body">
+              <h3>Attach the evidence you already have</h3>
+              <p>Upload a policy, a bill or a full report, then review what the platform
+                 proposes from it.</p>
+              <div class="lp-meta" style="margin-top:12px">
+                <span class="lp-meta-step">Step 3</span><span class="lp-meta-kind">Evidence</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="lp-card lp-mini">
+            <div class="lp-card-media"><img src="/media/news-3.jpg" alt="" loading="lazy" decoding="async"></div>
+            <div class="lp-mini-body">
+              <h3>Get a score you can defend</h3>
+              <p>Framework version, weighting version and engine version are stamped on the
+                 record, so it can be re-checked years later.</p>
+              <div class="lp-meta" style="margin-top:12px">
+                <span class="lp-meta-step">Step 4</span><span class="lp-meta-kind">Score</span>
+              </div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ WHAT IT DOES ══════════════════════════════════════════════════════
+       The reference's programme-card grid: image, icon, uppercase title, a
+       line of prose, and a bordered action row along the bottom. Four cards,
+       not the reference's six, because four is what this platform actually
+       does. Padding the grid to six with invented capabilities is the one
+       thing this page must not do. -->
+  <section class="lp-section" id="what">
+    <div class="lp-wrap">
+      <div class="lp-head">
+        <h2 class="lp-eyebrow">What it does</h2>
+        <a class="lp-more" href="#limits">And what it doesn't
+          <svg width="18" height="14" viewBox="0 0 18 14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M1 7h15M11 2l5 5-5 5"/></svg>
+        </a>
+      </div>
+      <p class="lp-intro">Four things, and it is honest about where each one stops.</p>
+
+      <div class="lp-grid">
+        <article class="lp-card">
+          <div class="lp-card-media"><img src="/media/program-1.jpg" alt="" loading="lazy" decoding="async"></div>
+          <div class="lp-card-body">
+            <svg class="lp-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3h6a1 1 0 011 1v1H8V4a1 1 0 011-1z"/><path d="M16 5h2a1 1 0 011 1v14a1 1 0 01-1 1H6a1 1 0 01-1-1V6a1 1 0 011-1h2"/><path d="M9 12l2 2 4-4"/></svg>
+            <h3 class="lp-card-title">Assess</h3>
+            <p>A structured questionnaire across Environmental, Social and Governance.
+               Quantitative questions score on <em>disclosure</em>, not on whether the number
+               is good — inventing a pass mark would be a judgement nobody has agreed.</p>
+          </div>
+          <div class="lp-card-foot">Environmental · Social · Governance</div>
+        </article>
+
+        <article class="lp-card">
+          <div class="lp-card-media"><img src="/media/program-2.jpg" alt="" loading="lazy" decoding="async"></div>
+          <div class="lp-card-body">
+            <svg class="lp-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a1 1 0 00-1 1v16a1 1 0 001 1h10a1 1 0 001-1V7z"/><path d="M14 3v4h4"/><path d="M9 13h6M9 17h4"/></svg>
+            <h3 class="lp-card-title">Evidence</h3>
+            <p>Upload a policy, a utility bill or a full report. An answer backed by a
+               document scores higher than one that is only declared, and the platform
+               records which is which.</p>
+          </div>
+          <div class="lp-card-foot">Self-declared · Documented · Verified</div>
+        </article>
+
+        <article class="lp-card">
+          <div class="lp-card-media"><img src="/media/program-3.jpg" alt="" loading="lazy" decoding="async"></div>
+          <div class="lp-card-body">
+            <svg class="lp-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19a4.5 4.5 0 000-9 6 6 0 00-11.4 1.8A3.6 3.6 0 006.6 19z"/><path d="M12 8V4M12 4l2 2M12 4l-2 2"/></svg>
+            <h3 class="lp-card-title">Carbon</h3>
+            <p>Scope 1 and Scope 2 from activity data, using published emission factors.
+               Every entry stores the factor, its version and its source, so a figure can be
+               re-checked years later.</p>
+          </div>
+          <div class="lp-card-foot">Scope 1 · Scope 2</div>
+        </article>
+
+        <article class="lp-card">
+          <div class="lp-card-media"><img src="/media/program-4.jpg" alt="" loading="lazy" decoding="async"></div>
+          <div class="lp-card-body">
+            <svg class="lp-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8V5a2 2 0 012-2h3M16 3h3a2 2 0 012 2v3M21 16v3a2 2 0 01-2 2h-3M8 21H5a2 2 0 01-2-2v-3"/><path d="M7 12h10"/></svg>
+            <h3 class="lp-card-title">Reads your own documents</h3>
+            <p>The system reads an uploaded report and <em>proposes</em> answers, each with the
+               quoted sentence it came from. Nothing is recorded until a person accepts it.</p>
+          </div>
+          <div class="lp-card-foot">Proposed · Accepted by a person</div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ IMAGE CTA BAND ════════════════════════════════════════════════════ -->
+  <section class="lp-band">
+    <img src="/media/cta-band.jpg" alt="" loading="lazy" decoding="async">
+    <div class="lp-band-inner">
+      <h2>See where your company actually stands</h2>
+      <p>Not a rating bought from a consultant, and not a badge. A score you can put in
+         front of a buyer with the answer and the document behind every point of it.</p>
+      <a class="lp-btn lp-btn-light" href="/auth/register">Register your company</a>
+    </div>
+  </section>
+
+  <!-- ══ WHAT IT DOESN'T CLAIM ═════════════════════════════════════════════
+       Bordered cards with no images. The reference gives its two-up block
+       photography; this content is an argument rather than a picture, and a
+       stock photo above each of these would soften exactly the claims that
+       are here to be read plainly. -->
+  <section class="lp-section" id="limits">
+    <div class="lp-wrap">
+      <div class="lp-head">
+        <h2 class="lp-eyebrow">What this platform does not claim</h2>
+      </div>
+      <p class="lp-intro">Stated up front, because a counterparty will ask and the answer
+         should be the same on the website as it is inside the product.</p>
+
+      <div class="lp-grid lp-grid-3">
+        <article class="lp-card lp-card-plain">
+          <div class="lp-card-body">
+            <h3 class="lp-card-title">Not a certification</h3>
+            <p>A score here is a self-assessment supported by evidence. It is not an audit,
+               not an assurance opinion, and not a certificate.</p>
+          </div>
+        </article>
+        <article class="lp-card lp-card-plain">
+          <div class="lp-card-body">
+            <h3 class="lp-card-title">Aligned, not compliant</h3>
+            <p>The assessment is aligned in draft to Malaysia's Simplified ESG Disclosure
+               Guide. The official disclosure set is published in full inside the platform,
+               and the reconciliation against it is not finished.</p>
+          </div>
+        </article>
+        <article class="lp-card lp-card-plain">
+          <div class="lp-card-body">
+            <h3 class="lp-card-title">The model never writes a number</h3>
+            <p>AI drafts recommendations and proposes answers from your documents. It is
+               structurally prevented from producing or altering a score.</p>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ GOVERNANCE — the reference's spotlight split ══════════════════════ -->
+  <section class="lp-section" id="governance">
+    <div class="lp-wrap">
+      <div class="lp-head">
+        <h2 class="lp-eyebrow">Governance</h2>
+      </div>
+
+      <div class="lp-split">
+        <div class="lp-split-media">
+          <img src="/media/spotlight.jpg" alt="" loading="lazy" decoding="async">
+        </div>
+        <div>
+          <h3>Owned by SSEO, versioned like a standard</h3>
+          <p>The Malaysia SMEs ESG e-Reporting System is registered under the SMEs
+             Sustainable Entrepreneur Organisation (SSEO) as the official platform for
+             participating SME organisations and ESG reporting initiatives.</p>
+          <p>SSEO owns the assessment framework and is the body that revises it. A revision
+             is issued as a new framework version, never as an edit to the one companies
+             have already been scored against.</p>
+          <p>The platform covers self-assessment and evidence. Independent verification,
+             certification, and investor or customer due diligence sit outside it and are
+             performed by other parties.</p>
+          <a class="lp-btn lp-btn-ghost" href="#limits">What it doesn't claim</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ START TODAY + PURPOSE ═════════════════════════════════════════════ -->
+  <section class="lp-section">
+    <div class="lp-wrap">
+      <div class="lp-head">
+        <h2 class="lp-eyebrow">Purpose</h2>
+      </div>
+
+      <div class="lp-split">
+        <div class="lp-cta-tile">
+          <img src="/media/contact-cta.jpg" alt="" loading="lazy" decoding="async">
+          <div class="lp-cta-tile-inner">
+            <h3>Start today</h3>
+            <p>Register your company and work through the first disclosures. Nothing is
+               scored until you have answered.</p>
+            <a class="lp-btn lp-btn-light" href="/auth/register">Register your company</a>
+          </div>
+        </div>
+
+        <div>
+          <ul class="lp-aims">
+            <li><b>01</b><span>Accelerate ESG adoption among Malaysian SMEs.</span></li>
+            <li><b>02</b><span>Simplify ESG reporting through a user-friendly digital system.</span></li>
+            <li><b>03</b><span>Enhance ESG readiness for local and international supply chains.</span></li>
+            <li><b>04</b><span>Support access to sustainable finance and ESG-linked opportunities.</span></li>
+            <li><b>05</b><span>Strengthen SME competitiveness through improved governance and
+                sustainability practices.</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ SUPPORTING PARTNERS — the reference's audience band ═══════════════
+       The reference tabs an audience and reveals a column of links for it.
+       The tabs here are real controls doing a real thing: they switch the
+       panel. They do NOT reveal a list of links, because the destinations
+       those links would need do not exist on this site yet, and a row of
+       arrows pointing nowhere is the same defect as a dead button. -->
+  <section class="lp-aud" id="partners">
+    <div class="lp-wrap-wide">
+      <h2 class="lp-aud-label">Supporting partners</h2>
+      <p class="lp-aud-intro">The types of organisation this platform is built to work
+         alongside, and the role each would play. No organisation is named here, and none of
+         this describes work already done — a partner appears on this page when there is an
+         agreement to point at.</p>
+
+      <div class="lp-tabs" role="tablist" aria-label="Types of supporting partner">
+        <button class="lp-tab" role="tab" id="tab-1" aria-controls="panel-1" aria-selected="true">Universities &amp; research</button>
+        <button class="lp-tab" role="tab" id="tab-2" aria-controls="panel-2" aria-selected="false" tabindex="-1">ESG consultants</button>
+        <button class="lp-tab" role="tab" id="tab-3" aria-controls="panel-3" aria-selected="false" tabindex="-1">Professional bodies</button>
+        <button class="lp-tab" role="tab" id="tab-4" aria-controls="panel-4" aria-selected="false" tabindex="-1">Financial institutions</button>
+        <button class="lp-tab" role="tab" id="tab-5" aria-controls="panel-5" aria-selected="false" tabindex="-1">Technology providers</button>
+        <button class="lp-tab" role="tab" id="tab-6" aria-controls="panel-6" aria-selected="false" tabindex="-1">Sustainability assurance</button>
+      </div>
+
+      <div class="lp-aud-panel" role="tabpanel" tabindex="0" id="panel-1" aria-labelledby="tab-1">
+        <h3>Universities &amp; research institutions</h3>
+        <p class="lp-role"><span>The role</span> Reviewing the methodology behind the indicator set and the emission factors, and testing the assessment against what an SME can realistically evidence.</p>
+      </div>
+      <div class="lp-aud-panel" role="tabpanel" tabindex="0" id="panel-2" aria-labelledby="tab-2" hidden>
+        <h3>ESG consultants</h3>
+        <p class="lp-role"><span>The role</span> Working alongside a company through the disclosures, and turning a completed assessment into the changes that move a score rather than a report that sits still.</p>
+      </div>
+      <div class="lp-aud-panel" role="tabpanel" tabindex="0" id="panel-3" aria-labelledby="tab-3" hidden>
+        <h3>Professional bodies</h3>
+        <p class="lp-role"><span>The role</span> Anchoring the framework to the standards their members already carry, and giving the assessment recognition inside the professions SMEs depend on.</p>
+      </div>
+      <div class="lp-aud-panel" role="tabpanel" tabindex="0" id="panel-4" aria-labelledby="tab-4" hidden>
+        <h3>Financial institutions</h3>
+        <p class="lp-role"><span>The role</span> Reading a completed assessment as one input to sustainable finance and ESG-linked lending, with the evidence tier visible behind every answer.</p>
+      </div>
+      <div class="lp-aud-panel" role="tabpanel" tabindex="0" id="panel-5" aria-labelledby="tab-5" hidden>
+        <h3>Technology providers</h3>
+        <p class="lp-role"><span>The role</span> Connecting the systems an SME already runs — utilities, accounting, operations — so activity data reaches the carbon module without being re-keyed.</p>
+      </div>
+      <div class="lp-aud-panel" role="tabpanel" tabindex="0" id="panel-6" aria-labelledby="tab-6" hidden>
+        <h3>Sustainability assurance partners</h3>
+        <p class="lp-role"><span>The role</span> Performing the independent verification this platform deliberately does not, which is what moves an answer from documented to third-party verified.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ WHO WE ARE + THE PLATFORM IN NUMBERS ══════════════════════════════
+       EVERY NUMBER HERE IS TRUE AND CHECKABLE IN THIS REPO.
+       38 — src/data/sedgV2.js DISCLOSURES.length, asserted in smoke-test.js:292
+       40 — seeded indicators, asserted in schema-idempotency-test.js
+        3 — E, S and G
+       EN — there is no i18n engine in this repo yet, so this says so
+       No adoption or customer count appears here, because there is not one
+       this repo can prove. A stat a stakeholder can disprove in the room is
+       worth less than no stat at all. -->
+  <section class="lp-section">
+    <div class="lp-wrap">
+      <div class="lp-head">
+        <h2 class="lp-eyebrow">Who we are</h2>
+      </div>
+
+      <div class="lp-who">
+        <a class="lp-who-panel lp-card" href="#governance">
+          <div class="lp-who-body">
+            <p>The Malaysia SMEs ESG e-Reporting System gives Malaysian SMEs one place to
+               answer the ESG disclosures their customers, their banks and their supply
+               chains are already asking for.</p>
+            <p>Everything it reports is traceable: an answer, the evidence tier behind it,
+               and the framework and engine versions the score was produced under. Nothing
+               is asserted that the record cannot support.</p>
+          </div>
+          <div class="lp-who-foot">
+            <span>How it is governed</span>
+            <i aria-hidden="true"><svg width="22" height="16" viewBox="0 0 18 14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M1 7h15M11 2l5 5-5 5"/></svg></i>
+          </div>
+        </a>
+
+        <div class="lp-stats">
+          <div class="lp-stats-head">The platform in numbers</div>
+
+          <div class="lp-stat">
+            <div class="lp-stat-mark lp-stat-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg></div>
+            <div class="lp-stat-body">
+              <span class="lp-stat-num">38</span>
+              <span class="lp-stat-label">SEDG v2 disclosures published in full</span>
+            </div>
+          </div>
+
+          <div class="lp-stat">
+            <div class="lp-stat-mark lp-stat-2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/></svg></div>
+            <div class="lp-stat-body">
+              <span class="lp-stat-num">40</span>
+              <span class="lp-stat-label">Assessment indicators scored</span>
+            </div>
+          </div>
+
+          <div class="lp-stat">
+            <div class="lp-stat-mark lp-stat-3"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/></svg></div>
+            <div class="lp-stat-body">
+              <span class="lp-stat-num">3</span>
+              <span class="lp-stat-label">Pillars — Environmental, Social, Governance</span>
+            </div>
+          </div>
+
+          <div class="lp-stat">
+            <div class="lp-stat-mark lp-stat-4"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 000 18M12 3a14 14 0 010 18"/></svg></div>
+            <div class="lp-stat-body">
+              <span class="lp-stat-num">EN</span>
+              <span class="lp-stat-label">English only for now — BM and 中文 not built yet</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ══ FOOTER ══════════════════════════════════════════════════════════════
+     Deep navy in the reference; white here, per the brief. The colour was
+     doing structural work — it gave the page a floor — so a 2px rule does
+     that job instead. There is no newsletter form: this repo has no list to
+     subscribe anyone to, and a field that accepts an address and drops it is
+     worse than no field. -->
+<footer class="lp-footer">
+  <div class="lp-wrap">
+    <div class="lp-footer-top">
+      <div>
+        <a class="lp-logo" href="/" aria-label="Malaysia SMEs ESG e-Reporting System — home">
+          <span class="lp-logo-mark">ESG</span>
+        </a>
+        <p style="margin:18px 0 0;font-size:15px;color:var(--lp-muted);max-width:34ch">
+          Malaysia SMEs ESG e-Reporting System — Governance &amp; Recognition.
+        </p>
+      </div>
+
+      <div>
+        <h3 class="lp-foot-h">The platform</h3>
+        <ul class="lp-footer-links">
+          <li><a href="#what">What it does</a></li>
+          <li><a href="#how">How it works</a></li>
+          <li><a href="#limits">What it doesn't claim</a></li>
+        </ul>
+      </div>
+
+      <div>
+        <h3 class="lp-foot-h">Governance</h3>
+        <ul class="lp-footer-links">
+          <li><a href="#governance">Owner and framework</a></li>
+          <li><a href="#partners">Supporting partners</a></li>
+        </ul>
+      </div>
+
+      <div>
+        <h3 class="lp-foot-h">Get started</h3>
+        <div class="lp-footer-actions">
+          <a class="lp-btn lp-btn-solid lp-btn-sm" href="/auth/register">Register</a>
+          <a class="lp-btn lp-btn-ghost lp-btn-sm" href="/auth/login">Sign in</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="lp-footer-bottom">
+      <p>Registered under the SMEs Sustainable Entrepreneur Organisation (SSEO) as the
+         official platform for participating SME organisations and ESG reporting
+         initiatives. Self-assessment and evidence only — not an audit, an assurance
+         opinion or a certificate.</p>
+      <span class="lp-copy">Built by Modus AI Associates</span>
+    </div>
+  </div>
+</footer>
+
 <script>
-// Theme only. Shared ecosystem key, applied before paint by the same convention
-// every other platform uses. No switcher is rendered: this page has no
-// translation engine behind it, and a control that does not act is worse than
-// an absent one (UI contract 4.3c).
+/* ═══════════════════════════════════════════════════════════════════════════
+   Landing behaviour. Three things, no framework.
+
+   NO THEME RESTORER. The previous version of this page read `modus-theme`
+   from localStorage and re-applied it. The marketing canvas is now light in
+   both themes (landing.css §0), so that script changed nothing a visitor
+   could see — a dead control, and §4.3c applies to a script exactly as it
+   applies to a button. `<html data-theme="dark">` stays because Ruling A's
+   guard walks the repo for it and because the shared token layer reads it.
+   ═══════════════════════════════════════════════════════════════════════════ */
 (function () {
-  var KEY = 'modus-theme', saved = null;
-  try { saved = localStorage.getItem(KEY); } catch (e) {}
-  if (saved) document.documentElement.setAttribute('data-theme', saved);
+  'use strict';
+
+  /* ── 1. the header over the hero ──────────────────────────────────────── */
+  var header = document.getElementById('lp-header');
+  var hero = document.querySelector('.lp-hero');
+  if (header && hero) {
+    var sync = function () {
+      var past = window.scrollY > (hero.offsetHeight - header.offsetHeight - 8);
+      header.setAttribute('data-over', past ? '0' : '1');
+    };
+    sync();
+    window.addEventListener('scroll', sync, { passive: true });
+    window.addEventListener('resize', sync);
+  }
+
+  /* ── 2. reduced motion ──────────────────────────────────────────────────
+     The initial decision is made inline at the video element, before buffering
+     begins. Only a LATER change of preference is handled here. */
+  var video = document.getElementById('lp-hero-video');
+  if (video && window.matchMedia) {
+    var mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    var onChange = function () {
+      if (mq.matches) {
+        video.removeAttribute('autoplay');
+        video.preload = 'none';
+        video.pause();
+      } else if (video.paused) {
+        video.play().catch(function () {});
+      }
+    };
+    if (mq.addEventListener) mq.addEventListener('change', onChange);
+  }
+
+  /* ── 3. the mobile drawer ─────────────────────────────────────────────── */
+  var burger = document.getElementById('lp-burger');
+  var drawer = document.getElementById('lp-drawer');
+  if (burger && drawer) {
+    var setOpen = function (open) {
+      drawer.hidden = !open;
+      burger.setAttribute('aria-expanded', open ? 'true' : 'false');
+      burger.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
+    };
+    burger.addEventListener('click', function () {
+      setOpen(drawer.hidden);
+    });
+    drawer.addEventListener('click', function (e) {
+      if (e.target.tagName === 'A') setOpen(false);
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && !drawer.hidden) { setOpen(false); burger.focus(); }
+    });
+  }
+
+  /* ── 4. the partner tabs ──────────────────────────────────────────────── */
+  var tabs = [].slice.call(document.querySelectorAll('.lp-tab'));
+  if (tabs.length) {
+    var select = function (tab) {
+      tabs.forEach(function (t) {
+        var on = t === tab;
+        t.setAttribute('aria-selected', on ? 'true' : 'false');
+        t.tabIndex = on ? 0 : -1;
+        var panel = document.getElementById(t.getAttribute('aria-controls'));
+        if (panel) panel.hidden = !on;
+      });
+    };
+    tabs.forEach(function (tab, i) {
+      tab.addEventListener('click', function () { select(tab); });
+      tab.addEventListener('keydown', function (e) {
+        var next = null;
+        if (e.key === 'ArrowRight') next = tabs[(i + 1) % tabs.length];
+        if (e.key === 'ArrowLeft') next = tabs[(i - 1 + tabs.length) % tabs.length];
+        if (e.key === 'Home') next = tabs[0];
+        if (e.key === 'End') next = tabs[tabs.length - 1];
+        if (!next) return;
+        e.preventDefault();
+        select(next);
+        next.focus();
+      });
+    });
+  }
 })();
 </script>
 

@@ -1,0 +1,751 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   LANDING — the marketing canvas                          (Verra-grammar build)
+   ───────────────────────────────────────────────────────────────────────────
+   WHAT THIS FILE IS
+
+   The layout language of a standards-body homepage, applied to this platform's
+   own content. The reference studied for structure was verra.org (captured
+   2026-09-04): its section grammar — a hairline rule, a small uppercase eyebrow
+   left, an accented action link right, then a grid — its card composition, its
+   full-bleed video hero and its image CTA bands.
+
+   STRUCTURE is copied. MEDIA IS NOT. Verra's hero footage and photography are
+   their copyrighted works and one of them shows an identifiable person;
+   docs/VERRA_BENCHMARK.md already sets this repo's rule that Verra's
+   copyrighted works are not reproduced, only referenced. Every asset under
+   /media is separately licensed for commercial use — see public/media/CREDITS.md.
+
+   ── WHY THE CANVAS IS LIGHT ───────────────────────────────────────────────
+   The reference is a white page, and this landing is deliberately light in
+   both themes. `<html>` still carries data-theme="dark": Ruling A (Run 54)
+   requires every theme emitter in this repo to default to dark and
+   dashboard-test.js walks the tree to enforce it. That attribute governs the
+   shared token layer, which this page reads for ONE thing — the accent. It
+   does not paint the marketing canvas, so the two do not contradict: the app
+   behind the front door is dark, the front door is not.
+
+   Because the canvas no longer follows the saved theme, index.html no longer
+   ships the theme-restorer script. A script that reads localStorage and
+   changes nothing visible is a dead control (§4.3c), and leaving it there to
+   look conscientious is the defect, not the fix.
+
+   ── TOKENS ────────────────────────────────────────────────────────────────
+   WHAT FOLLOWS THE MASTER, AND WHAT CANNOT — stated precisely, because an
+   earlier version of this comment claimed the whole page followed it.
+
+   FOLLOWS: every green. --lp-green reads var(--accent), --lp-green-2 reads
+   var(--accent-2), the tint reads var(--accent-bg), and the stat ramp is
+   mixed from var(--accent) rather than hardcoded. Change ESG's green in the
+   master and all of it moves together.
+
+   DOES NOT FOLLOW: the neutrals (--lp-ink / --lp-body / --lp-muted /
+   --lp-line / --lp-soft) and the two near-black media grounds. This is not
+   laziness and it is not a fork — the master's neutrals FLIP WITH THE THEME,
+   and this page is a light canvas carrying data-theme="dark" for Ruling A's
+   guard. Reading --text here would paint light-grey type on white. So they
+   are local, deliberately, for a reason that is a property of this page and
+   not of the master. Non-negotiable #10 is about a token that merely LOOKS
+   like a token and fails silently; nothing below pretends to be a master
+   token, and nothing here is redeclared into the master's namespace.
+
+   Contrast against #ffffff, RECOMPUTED (WCAG 2.x relative luminance), not
+   estimated — an earlier version of this comment quoted 18.9 and 11.4 from
+   memory and claimed a blanket floor the stat tiles did not meet:
+     --lp-ink   #141414  18.42:1     --lp-body  #33383d  11.84:1
+     --lp-muted #5d5d5d   6.58:1     --accent   #4D7C0F   4.99:1
+                                     --accent-2 #3F6212   7.08:1
+   White on --accent is the same 4.99:1. Every TEXT pair on this page clears
+   4.5:1, asserted by a harness that walks the rendered DOM. The decorative
+   marks on the stat tiles are covered separately at §11.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --lp-ink: #141414;
+  --lp-body: #33383d;
+  --lp-muted: #5d5d5d;
+  --lp-line: #d6d6d6;
+  --lp-rule: #141414;
+  --lp-soft: #f7f7f7;
+  --lp-white: #ffffff;
+
+  /* read from the design system, with the platform's own value as the fallback
+     so this file still renders correctly if loaded without the master. */
+  --lp-green: var(--accent, #4D7C0F);
+  --lp-green-2: var(--accent-2, #3F6212);
+  /* the master already owns this exact role at --accent-bg. */
+  --lp-green-tint: var(--accent-bg, rgba(77, 124, 15, 0.08));
+  /* the two near-black grounds behind footage, so they are named once. */
+  --lp-ground: #10160f;
+
+  --lp-max: 1086px;   /* content column, matching the reference's 1440 grid */
+  --lp-wide: 1336px;  /* full-bleed bands sit inside this */
+  --lp-gut: 24px;
+
+  --lp-util-h: 34px;
+  --lp-nav-h: 74px;
+}
+
+/* ── §1  base ───────────────────────────────────────────────────────────── */
+
+.lp *, .lp *::before, .lp *::after { box-sizing: border-box; }
+
+body.lp {
+  margin: 0;
+  background: var(--lp-white);
+  color: var(--lp-body);
+  font-family: var(--font, 'Inter', system-ui, sans-serif);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* THE LINK RESET, AND WHY IT IS WRAPPED IN :where().
+   As `.lp a` this rule had specificity (0,1,1), which quietly beat EVERY
+   single-class component that sets its own link colour — (0,1,0). Three
+   shipped that way and none of them threw: the solid buttons rendered
+   #33383d on green at 2.37:1, the scroll chevron rendered dark grey on dark
+   footage at 1.55:1, and every section's green action link ("Start now →",
+   "And what it doesn't →") rendered as plain body text.
+   :where() contributes zero specificity, so this is (0,0,1) — a genuine
+   floor that any component class outranks — and the whole class of bug is
+   closed rather than patched one selector at a time. */
+:where(.lp) a { color: inherit; text-decoration: none; }
+
+.lp img, .lp video { max-width: 100%; display: block; }
+
+/* THE HEADING RESET — :where() for the same reason as the link reset above,
+   and found the same way: by measuring, not by reading.
+   As `.lp h1, .lp h2, ...` this was (0,1,1) and outranked every single-class
+   heading component at (0,1,0). Two shipped broken and neither threw:
+   `.lp-aud-label`'s 34px bottom margin was discarded, so "Supporting partners"
+   was overlapped by its own intro paragraph by 18px; and `.lp-card-title` lost
+   its 12px, closing every capability card's title onto its body copy.
+   At (0,0,0) a component class always wins, which is what a reset should do. */
+:where(.lp) :where(h1, h2, h3, h4) {
+  font-family: var(--font-display, 'Outfit', system-ui, sans-serif);
+  color: var(--lp-ink);
+  margin: 0;
+}
+
+/* Everything focusable gets the same visible ring. The reference has no
+   focus style at all on its cards; that is a defect, not a thing to copy. */
+.lp a:focus-visible,
+.lp button:focus-visible {
+  outline: 3px solid var(--lp-green);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+.lp-skip {
+  position: absolute; left: -9999px; top: 0; z-index: 300;
+  background: var(--lp-white); color: var(--lp-ink);
+  padding: 12px 20px; font-weight: 700;
+  border: 2px solid var(--lp-green);
+}
+.lp-skip:focus { left: 12px; top: 12px; }
+
+/* ── §2  containers ─────────────────────────────────────────────────────── */
+
+.lp-wrap { max-width: var(--lp-max); margin: 0 auto; padding: 0 var(--lp-gut); }
+.lp-wrap-wide { max-width: var(--lp-wide); margin: 0 auto; padding: 0 var(--lp-gut); }
+
+/* ── §3  header — utility strip + main nav ──────────────────────────────
+   The reference bands the utility strip in deep navy. Here it is white, per
+   the brief, so the strip and the nav below it need a different separator:
+   a hairline each, and a small type size the nav does not use. */
+
+.lp-header { position: fixed; inset: 0 0 auto 0; z-index: 200; }
+
+.lp-util {
+  background: var(--lp-white);
+  border-bottom: 1px solid var(--lp-line);
+  height: var(--lp-util-h);
+}
+.lp-util .lp-wrap-wide {
+  height: 100%; display: flex; align-items: center;
+  justify-content: space-between; gap: 20px;
+}
+.lp-util-links { display: flex; align-items: center; gap: 18px; min-width: 0; }
+.lp-util a, .lp-util span {
+  font-size: 13px; line-height: 1; color: var(--lp-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.lp-util a:hover { color: var(--lp-green); }
+.lp-util-sep { color: var(--lp-line); }
+
+.lp-nav {
+  background: var(--lp-white);
+  border-bottom: 1px solid var(--lp-line);
+  height: var(--lp-nav-h);
+}
+.lp-nav .lp-wrap-wide {
+  height: 100%; display: flex; align-items: center;
+  justify-content: space-between; gap: 20px;
+}
+
+.lp-logo { display: flex; align-items: center; gap: 10px; flex: none; }
+.lp-logo-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 2px solid var(--lp-green); color: var(--lp-green);
+  font-family: var(--font-display, 'Outfit', sans-serif);
+  font-weight: 800; font-size: 15px; letter-spacing: 0.02em;
+  padding: 7px 11px; line-height: 1; text-transform: uppercase;
+}
+.lp-logo-text {
+  font-size: 12px; line-height: 1.25; color: var(--lp-muted);
+  max-width: 180px;
+}
+
+.lp-nav-links { display: flex; align-items: center; gap: 26px; min-width: 0; }
+.lp-nav-links > a {
+  font-size: 16px; color: var(--lp-ink); white-space: nowrap;
+  padding: 6px 0; border-bottom: 2px solid transparent;
+}
+.lp-nav-links > a:hover { color: var(--lp-green); border-bottom-color: var(--lp-green); }
+
+/* MEASURED BUG, round 2: at 390px the Register anchor and the burger are two
+   inline boxes in a container that never declared a direction, so they wrapped
+   onto two lines inside a bar fixed at 74px and spilled out of it — the burger
+   rendered below the bar and over the hero. Stated as a row, they cannot. */
+.lp-nav-cta { flex: none; display: flex; align-items: center; gap: 10px; }
+
+/* the reference's DONATE block: a solid rectangle, no radius */
+.lp-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  font-family: var(--font-display, 'Outfit', sans-serif);
+  font-weight: 700; font-size: 15px; text-transform: uppercase;
+  letter-spacing: 0.02em; line-height: 1;
+  padding: 16px 24px; border: 2px solid transparent; border-radius: 0;
+  cursor: pointer; transition: background-color .18s ease, color .18s ease, border-color .18s ease;
+}
+/* MEASURED BUG, round 1: these were written as single-class rules and lost
+   every one of their colours to `.lp a { color: inherit }` — (0,1,1) beats
+   (0,1,0) — so the solid button rendered #33383d on #4D7C0F at 2.37:1 and the
+   outline-light button at 1.55:1. Two classes puts them back in front. The
+   lesson is not "add a class": it is that a button's colour must be asserted
+   as a COMPUTED value, because a link reset three rules away can take it and
+   nothing errors. */
+.lp .lp-btn-solid { background: var(--lp-green); color: #fff; border-color: var(--lp-green); }
+.lp .lp-btn-solid:hover { background: var(--lp-green-2); border-color: var(--lp-green-2); }
+.lp .lp-btn-ghost { background: transparent; color: var(--lp-ink); border-color: var(--lp-ink); }
+.lp .lp-btn-ghost:hover { background: var(--lp-ink); color: #fff; }
+.lp .lp-btn-light { background: var(--lp-white); color: var(--lp-ink); border-color: var(--lp-white); }
+.lp .lp-btn-light:hover { background: var(--lp-green); color: #fff; border-color: var(--lp-green); }
+/* the secondary over dark footage: a white outline. --lp-ink bordered ghost is
+   invisible against the hero, which is why it does not double as this. */
+.lp .lp-btn-outline-light { background: transparent; color: #fff; border-color: rgba(255, 255, 255, 0.8); }
+.lp .lp-btn-outline-light:hover { background: #fff; color: var(--lp-ink); border-color: #fff; }
+.lp-btn-sm { padding: 12px 18px; font-size: 14px; }
+
+/* THE BUTTON RULE, made consistent after the blind critic found the same
+   action wearing two skins: a FILLED button is the action and an OUTLINE
+   button is the secondary; the fill is white on a dark surface and green on a
+   light one. The nav CTA was the exception because it sits on the dark hero at
+   the top of the page and was still painted for a light one — so over the hero
+   it now takes the same white fill the hero's own CTA has, and turns green at
+   the moment the bar itself turns white. */
+.lp-header[data-over="1"] .lp-btn-solid {
+  background: var(--lp-white); color: var(--lp-ink); border-color: var(--lp-white);
+}
+.lp-header[data-over="1"] .lp-btn-solid:hover {
+  background: var(--lp-green); color: #fff; border-color: var(--lp-green);
+}
+
+/* THE HEADER'S OWN SCRIM — measured defect, round 4.
+   The hero scrim is weighted LEFT to protect the h1 (the headline column
+   measures 8.52:1 at its worst). The header is outside that protected band:
+   composited through the shipped poster, the nav and utility text on the
+   RIGHT fell to 2.27:1, with 18% of the header strip below 4.5:1 — and a
+   video's brighter frames are worse than its poster. The bar therefore
+   carries its own gradient rather than borrowing the hero's. */
+.lp-header[data-over="1"]::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(180deg, rgba(0,0,0,.66) 0%, rgba(0,0,0,.46) 72%, rgba(0,0,0,.20) 100%);
+}
+.lp-header .lp-util, .lp-header .lp-nav { position: relative; z-index: 1; }
+
+/* over the hero the header is transparent with white type, exactly as the
+   reference does it, until the page scrolls past the hero. */
+.lp-header[data-over="1"] .lp-util,
+.lp-header[data-over="1"] .lp-nav {
+  background: transparent; border-bottom-color: rgba(255, 255, 255, 0.22);
+}
+.lp-header[data-over="1"] .lp-util a,
+.lp-header[data-over="1"] .lp-util span,
+.lp-header[data-over="1"] .lp-nav-links > a,
+.lp-header[data-over="1"] .lp-logo-text { color: rgba(255, 255, 255, 0.88); }
+.lp-header[data-over="1"] .lp-util a:hover,
+.lp-header[data-over="1"] .lp-nav-links > a:hover { color: #fff; border-bottom-color: #fff; }
+.lp-header[data-over="1"] .lp-logo-mark { border-color: #fff; color: #fff; }
+.lp-header[data-over="1"] .lp-util-sep { color: rgba(255, 255, 255, 0.4); }
+
+.lp-burger {
+  display: none; background: none; border: 0; padding: 10px; cursor: pointer;
+  color: var(--lp-ink);
+}
+.lp-header[data-over="1"] .lp-burger { color: #fff; }
+.lp-burger svg { display: block; }
+
+/* ── §4  hero — full-bleed video behind a scrim ─────────────────────────── */
+
+.lp-hero {
+  position: relative;
+  min-height: 100vh;
+  display: flex; align-items: center;
+  background: var(--lp-ground);          /* holds the frame if the poster is slow */
+  overflow: hidden;
+}
+.lp-hero-media { position: absolute; inset: 0; }
+.lp-hero-media video,
+.lp-hero-media img {
+  width: 100%; height: 100%; object-fit: cover;
+}
+/* The scrim is what makes white display type legible over moving footage.
+   Two layers: a flat wash for the whole frame, and a left-weighted gradient
+   under the text column, which is where the reference puts its contrast. */
+.lp-hero-scrim {
+  position: absolute; inset: 0;
+  /* Round 1 was .72/.52/.20 over a flat .24 and crushed the footage to a grey
+     smear — the reference keeps its hero clearly legible as an image. Lighter,
+     and weighted to the left where the type sits. White on the darkest band
+     still measures well past 4.5:1. */
+  background:
+    linear-gradient(90deg, rgba(0,0,0,.66) 0%, rgba(0,0,0,.40) 45%, rgba(0,0,0,.12) 100%),
+    rgba(0, 0, 0, 0.10);
+}
+.lp-hero-inner {
+  position: relative;
+  padding-top: calc(var(--lp-util-h) + var(--lp-nav-h) + 40px);
+  padding-bottom: 120px;
+  width: 100%;
+}
+.lp-hero h1 {
+  color: #fff;
+  font-size: clamp(32px, 3.9vw, 54px);
+  font-weight: 900;
+  line-height: 1.14;
+  text-transform: uppercase;
+  letter-spacing: -0.005em;
+  max-width: 15ch;
+  margin: 0 0 14px;
+}
+.lp-hero p {
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 18px; line-height: 1.6;
+  max-width: 46ch; margin: 0 0 34px;
+}
+.lp-hero-cta { display: flex; flex-wrap: wrap; gap: 14px; }
+
+.lp-chev {
+  position: absolute; left: 50%; bottom: 34px; z-index: 2;
+  transform: translateX(-50%);
+  width: 44px; height: 44px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  animation: lp-bob 2.4s ease-in-out infinite;
+}
+.lp-chev:hover { background: rgba(0, 0, 0, 0.6); }
+/* The bob animates the RING, never a transform on the hit target itself —
+   an always-on transform on an interactive element makes it unhittable for
+   pointer automation and assistive tech alike. */
+@keyframes lp-bob {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.34); }
+  50%      { box-shadow: 0 0 0 9px rgba(255, 255, 255, 0); }
+}
+
+/* ── §5  section head — the reference's signature ───────────────────────── */
+
+/* MEASURED BUG, round 1: every in-page anchor scrolled its heading under the
+   108px fixed header. scroll-margin-top is the fix that does not require the
+   header height to be duplicated anywhere — it is composed from the same two
+   variables the header itself is built from. */
+#main, .lp-section, .lp-aud, .lp-band { scroll-margin-top: calc(var(--lp-util-h) + var(--lp-nav-h) + 18px); }
+
+.lp-section { padding: 74px 0 0; }
+.lp-section-tight { padding-top: 54px; }
+
+.lp-head {
+  border-top: 1px solid var(--lp-rule);
+  padding-top: 22px;
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 20px; flex-wrap: wrap;
+  margin-bottom: 34px;
+}
+.lp-eyebrow {
+  font-family: var(--font-display, 'Outfit', sans-serif);
+  font-size: 16px; font-weight: 800; line-height: 1.2;
+  text-transform: uppercase; letter-spacing: 0.045em;
+  color: var(--lp-ink); margin: 0;
+}
+.lp-more {
+  font-family: var(--font-display, 'Outfit', sans-serif);
+  display: inline-flex; align-items: center; gap: 10px;
+  font-size: 15px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--lp-green);
+}
+.lp-more:hover { color: var(--lp-green-2); }
+.lp-more svg { transition: transform .18s ease; }
+.lp-more:hover svg { transform: translateX(4px); }
+
+.lp-intro {
+  max-width: 62ch; margin: -14px 0 34px;
+  font-size: 17px; color: var(--lp-body);
+}
+
+/* ── §6  the 3-in-1 feature grid ────────────────────────────────────────── */
+
+/* The lead card and the three stacked minis ended at different heights. The
+   lead card now stretches and its MEDIA takes up the slack — growing a
+   photograph is invisible, growing a text block is a hole. */
+.lp-31 { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; align-items: stretch; }
+.lp-31-lead { height: 100%; }
+
+.lp-card {
+  border: 1px solid var(--lp-line);
+  background: var(--lp-white);
+  display: flex; flex-direction: column;
+  transition: border-color .18s ease, box-shadow .18s ease;
+}
+a.lp-card:hover, .lp-card:hover { border-color: var(--lp-ink); }
+
+.lp-card-media { position: relative; background: var(--lp-soft); overflow: hidden; }
+.lp-card-media img { width: 100%; height: 100%; object-fit: cover; }
+
+.lp-31-lead .lp-card-media { flex: 1 1 auto; min-height: 260px; }
+.lp-31-lead .lp-card-body { padding: 28px 30px 30px; }
+.lp-31-lead h3 {
+  font-family: var(--font, 'Inter', sans-serif);
+  font-weight: 500; font-size: clamp(22px, 2.1vw, 30px); line-height: 1.24;
+  color: var(--lp-ink); margin: 0 0 18px;
+}
+.lp-31-lead p { margin: 0 0 20px; color: var(--lp-body); }
+
+.lp-31-side { display: flex; flex-direction: column; gap: 22px; }
+/* MEASURED BUG, round 1: `aspect-ratio: 1/1` + `height: 100%` sized the image
+   from the ROW height, not the column, so it resolved ~180px wide inside a
+   150px track and printed 30px of itself over the first character of every
+   line of text beside it. The column width is the constraint here, so the
+   width is what gets stated; min-width:0 stops the text track being sized by
+   its own longest word. */
+.lp-mini { display: grid; grid-template-columns: 150px minmax(0, 1fr); align-items: stretch; }
+.lp-mini .lp-card-media { width: 150px; height: 100%; min-height: 150px; }
+.lp-mini .lp-card-media img { width: 100%; height: 100%; object-fit: cover; }
+.lp-mini-body { padding: 20px 24px; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.lp-mini-body h3 {
+  font-family: var(--font, 'Inter', sans-serif);
+  font-weight: 500; font-size: 19px; line-height: 1.3; margin: 0 0 10px;
+  color: var(--lp-ink);
+}
+.lp-mini-body p { margin: 0; font-size: 15px; color: var(--lp-body); }
+
+.lp-meta {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  font-family: var(--font-display, 'Outfit', sans-serif);
+  font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em;
+}
+.lp-meta-step { font-weight: 800; color: var(--lp-ink); }
+.lp-meta-kind { font-weight: 600; color: var(--lp-muted); }
+
+/* ── §7  card grid ──────────────────────────────────────────────────────── */
+
+/* Four across put the body copy in a 236px measure — six words a line. The
+   reference runs three across because it has six cards; this platform has
+   four real capabilities and padding the grid to six with invented ones is
+   the one thing this page must not do, so it runs two across instead. */
+.lp-grid { display: grid; gap: 30px; grid-template-columns: repeat(2, 1fr); }
+.lp-grid-3 { grid-template-columns: repeat(3, 1fr); }
+
+.lp-grid .lp-card-media { aspect-ratio: 3 / 2; }
+.lp-card-body { padding: 26px 26px 24px; flex: 1; display: flex; flex-direction: column; }
+.lp-card-icon {
+  width: 34px; height: 34px; color: var(--lp-green);
+  margin-bottom: 14px; flex: none;
+}
+.lp-card-title {
+  font-family: var(--font-display, 'Outfit', sans-serif);
+  font-size: 16px; font-weight: 800; line-height: 1.3;
+  text-transform: uppercase; letter-spacing: 0.03em;
+  color: var(--lp-ink); margin: 0 0 12px;
+}
+.lp-card-body p { margin: 0; font-size: 15px; color: var(--lp-body); }
+.lp-card-foot {
+  border-top: 1px solid var(--lp-line);
+  padding: 18px 26px;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  font-family: var(--font-display, 'Outfit', sans-serif);
+  font-size: 14px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--lp-green-2);
+}
+.lp-card-foot svg { transition: transform .18s ease; flex: none; }
+a.lp-card:hover .lp-card-foot svg { transform: translateX(4px); }
+
+/* a card with no image — used where the content is an argument, not a picture */
+.lp-card-plain .lp-card-body { padding: 30px; }
+.lp-card-plain .lp-card-title { font-size: 17px; margin-bottom: 14px; }
+.lp-card-plain p { font-size: 16px; }
+
+/* ── §8  the image CTA band ─────────────────────────────────────────────── */
+
+.lp-band {
+  position: relative; margin-top: 74px;
+  min-height: 560px; display: flex; align-items: center; justify-content: center;
+  background: var(--lp-ground); overflow: hidden; text-align: center;
+}
+.lp-band img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.lp-band::after {
+  content: ''; position: absolute; inset: 0;
+  background: rgba(0, 0, 0, 0.46);
+}
+.lp-band-inner { position: relative; z-index: 1; padding: 90px 24px; max-width: 900px; }
+.lp-band h2 {
+  color: #fff; font-size: clamp(30px, 3.6vw, 52px); font-weight: 900;
+  line-height: 1.16; text-transform: uppercase; margin: 0 0 26px;
+  text-decoration: underline; text-decoration-thickness: 4px;
+  text-underline-offset: 9px;
+}
+.lp-band p {
+  color: rgba(255, 255, 255, 0.92); font-size: 18px;
+  max-width: 56ch; margin: 0 auto 32px;
+}
+
+/* ── §9  spotlight — image one side, argument the other ─────────────────── */
+
+/* Same void as the who-panel, one section up: the text column is taller than
+   the image, so centring the image left dead space beside the button at the
+   bottom of the row. The image now matches the column instead — its own
+   aspect ratio is a floor, not a cap. */
+.lp-split { display: grid; grid-template-columns: 1fr 1fr; gap: 44px; align-items: stretch; }
+.lp-split-media { min-height: 100%; background: var(--lp-soft); overflow: hidden; }
+.lp-split > div:not(.lp-split-media):not(.lp-cta-tile) {
+  display: flex; flex-direction: column; justify-content: center;
+}
+.lp-split-media img { width: 100%; height: 100%; object-fit: cover; }
+.lp-split h3 {
+  font-size: clamp(22px, 2.3vw, 30px); font-weight: 900; line-height: 1.2;
+  text-transform: uppercase; margin: 0 0 18px;
+}
+.lp-split p { margin: 0 0 16px; color: var(--lp-body); }
+.lp-split p:last-of-type { margin-bottom: 26px; }
+
+/* the paired CTA tile: text over a photo, beside a column of prose */
+.lp-cta-tile {
+  position: relative; min-height: 420px; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  text-align: center; background: var(--lp-ground); padding: 44px 34px;
+}
+.lp-cta-tile img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.lp-cta-tile::after { content: ''; position: absolute; inset: 0; background: rgba(0, 0, 0, 0.52); }
+.lp-cta-tile-inner { position: relative; z-index: 1; }
+.lp-cta-tile h3 { color: #fff; font-size: 34px; font-weight: 900; text-transform: uppercase; margin: 0 0 16px; }
+.lp-cta-tile p { color: rgba(255, 255, 255, 0.92); margin: 0 0 26px; }
+
+/* ── §10  the audience band ─────────────────────────────────────────────
+   The reference bands this in navy. White here, so the band is held by rules
+   above and below and by the one big green heading. */
+
+.lp-aud { margin-top: 74px; padding: 60px 0 70px; border-top: 1px solid var(--lp-rule); border-bottom: 1px solid var(--lp-rule); }
+.lp-aud-label {
+  font-family: var(--font-display, 'Outfit', sans-serif);
+  font-size: 16px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 0.045em; color: var(--lp-ink); margin: 0 0 14px;
+}
+.lp-aud-intro {
+  max-width: 68ch; margin: 0 0 30px;
+  font-size: 16px; color: var(--lp-body);
+}
+
+.lp-tabs {
+  display: flex; gap: 30px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--lp-line); margin-bottom: 44px;
+}
+.lp-tab {
+  appearance: none; background: none; border: 0; cursor: pointer;
+  font-family: var(--font-display, 'Outfit', sans-serif);
+  font-size: 13px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--lp-muted);
+  padding: 0 0 14px; margin-bottom: -1px;
+  border-bottom: 3px solid transparent;
+}
+.lp-tab:hover { color: var(--lp-ink); }
+.lp-tab[aria-selected="true"] { color: var(--lp-green); border-bottom-color: var(--lp-green); }
+
+.lp-aud-panel { display: grid; grid-template-columns: 1fr 1.35fr; gap: 44px; align-items: start; }
+.lp-aud-panel[hidden] { display: none; }
+.lp-aud-panel h3 {
+  color: var(--lp-green); font-size: clamp(23px, 2.3vw, 33px); font-weight: 900;
+  line-height: 1.08; text-transform: uppercase; margin: 0;
+}
+.lp-aud-panel p { margin: 0; font-size: 17px; color: var(--lp-body); }
+/* "The role" is a label, not the start of the sentence — it has to read as one
+   so the panel cannot be mistaken for a statement about an existing partner. */
+.lp-role > span {
+  display: block; margin-bottom: 8px;
+  font-family: var(--font-display, 'Outfit', sans-serif);
+  font-size: 12px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 0.09em; color: var(--lp-green-2);
+}
+
+/* ── §11  who we are + the stat tiles ───────────────────────────────────── */
+
+/* BLIND CRITIC, round 3: this panel carried ~270px of empty white because
+   `height: 100%` stretched it to match the four-row stat stack beside it and
+   the footer rule was stranded at the bottom. Both columns now size to their
+   own content; the row ending unevenly is the honest result and reads far
+   better than a void. */
+.lp-who { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; align-items: start; }
+.lp-who-panel { border: 1px solid var(--lp-line); display: flex; flex-direction: column; }
+.lp-who-body { padding: 32px; flex: 1; }
+.lp-who-body p { margin: 0 0 20px; font-size: 17px; }
+.lp-who-body p:last-child { margin-bottom: 0; }
+.lp-who-foot {
+  border-top: 1px solid var(--lp-line);
+  display: flex; align-items: stretch; justify-content: space-between;
+}
+.lp-who-foot span {
+  padding: 24px 32px;
+  font-family: var(--font-display, 'Outfit', sans-serif);
+  font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
+  color: var(--lp-green); font-size: 15px;
+}
+.lp-who-foot i {
+  display: flex; align-items: center; padding: 0 26px;
+  border-left: 1px solid var(--lp-line); color: var(--lp-green);
+}
+a.lp-who-panel:hover .lp-who-foot i { background: var(--lp-green-tint); }
+
+.lp-stats { border: 1px solid var(--lp-line); }
+.lp-stats-head {
+  background: var(--lp-soft); padding: 24px 32px;
+  font-family: var(--font-display, 'Outfit', sans-serif);
+  font-size: 16px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 0.045em; color: var(--lp-ink);
+}
+.lp-stat { display: grid; grid-template-columns: 150px 1fr; border-top: 1px solid var(--lp-line); }
+.lp-stat-mark {
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; min-height: 116px;
+}
+.lp-stat-mark svg { width: 52px; height: 52px; }
+/* §11  THE STAT RAMP — MEASURED, twice wrong before this.
+   v1 ended at #2f4a0b and read as near-black. v2 opened at #7ba52c/#5f9113,
+   which put the white marks at 2.89:1 and 3.79:1 while the comment above
+   claimed 7:1 on every tile. Green is a luminous hue: white cannot clear
+   4.5:1 on any green lighter than roughly #52840F, so the ramp can only run
+   DOWNWARD from the accent. Mixed from var(--accent) so it still follows the
+   master, with the flat fallback first for engines without color-mix.
+   White-on-tile, recomputed: 4.99 / 6.03 / 8.15 / 9.39 — all clear AA, and
+   these marks are aria-hidden decoration that WCAG 1.4.11 does not even
+   require to. */
+.lp-stat-1 { background: #4D7C0F; background: color-mix(in srgb, var(--accent) 100%, #000); }
+.lp-stat-2 { background: #446E11; background: color-mix(in srgb, var(--accent) 88%, #000); }
+.lp-stat-3 { background: #395811; background: color-mix(in srgb, var(--accent) 74%, #000); }
+.lp-stat-4 { background: #334E0F; background: color-mix(in srgb, var(--accent) 62%, #000); }
+.lp-stat-body { padding: 22px 28px; }
+.lp-stat-num {
+  display: block;
+  font-family: var(--font-display, 'Outfit', sans-serif);
+  font-size: 42px; font-weight: 800; line-height: 1; color: var(--lp-green-2);
+  letter-spacing: -0.02em;
+}
+.lp-stat-label { display: block; margin-top: 8px; font-size: 15px; color: var(--lp-body); }
+
+/* ── §12  purpose list ──────────────────────────────────────────────────── */
+
+.lp-aims { display: grid; grid-template-columns: 1fr; margin: 0; padding: 0; list-style: none; width: 100%; }
+.lp-aims li {
+  display: grid; grid-template-columns: 40px 1fr; gap: 14px; align-items: start;
+  padding: 20px 0; border-top: 1px solid var(--lp-line);
+  font-size: 16px;
+}
+.lp-aims b {
+  font-family: var(--font-display, 'Outfit', sans-serif);
+  color: var(--lp-green); font-weight: 800; font-size: 15px; letter-spacing: 0.04em;
+}
+
+/* ── §13  footer ──────────────────────────────────────────────────────────
+   Navy in the reference; white here. A single strong rule gives the page a
+   floor that the colour change removed. */
+
+.lp-footer { margin-top: 78px; border-top: 2px solid var(--lp-ink); padding: 56px 0 0; }
+.lp-footer-top { display: grid; grid-template-columns: 1.2fr 1fr 1fr 0.8fr; gap: 40px; }
+.lp-footer .lp-foot-h {
+  font-family: var(--font-display, 'Outfit', sans-serif);
+  font-size: 13px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--lp-ink); margin: 0 0 18px;
+}
+.lp-footer-links { list-style: none; margin: 0; padding: 0; }
+.lp-footer-links li { margin-bottom: 12px; }
+.lp-footer-links a { font-size: 15px; color: var(--lp-body); }
+.lp-footer-links a:hover { color: var(--lp-green); text-decoration: underline; }
+.lp-footer-actions { display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+.lp-footer-actions .lp-btn { width: 100%; }
+.lp-footer-bottom {
+  margin-top: 46px; border-top: 1px solid var(--lp-line);
+  padding: 26px 0 46px;
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 30px; flex-wrap: wrap;
+}
+.lp-footer-bottom p { margin: 0; font-size: 14px; color: var(--lp-muted); max-width: 62ch; }
+.lp-footer-bottom .lp-copy {
+  font-family: var(--font-display, 'Outfit', sans-serif);
+  font-size: 13px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--lp-muted); white-space: nowrap;
+}
+
+/* ── §14  responsive ────────────────────────────────────────────────────── */
+
+@media (max-width: 1080px) {
+  .lp-grid { grid-template-columns: repeat(2, 1fr); }
+  .lp-footer-top { grid-template-columns: 1fr 1fr; gap: 34px; }
+}
+
+@media (max-width: 900px) {
+  .lp-nav-links, .lp-util-links .lp-util-hide { display: none; }
+  .lp-burger { display: block; }
+  .lp-31 { grid-template-columns: 1fr; }
+  .lp-split, .lp-who, .lp-aud-panel { grid-template-columns: 1fr; gap: 30px; }
+  .lp-aims { grid-template-columns: 1fr; }
+  .lp-logo-text { display: none; }
+
+  /* the mobile drawer */
+  .lp-drawer {
+    position: fixed; inset: calc(var(--lp-util-h) + var(--lp-nav-h)) 0 auto 0;
+    background: var(--lp-white); border-bottom: 1px solid var(--lp-line);
+    padding: 10px 0 22px; z-index: 199;
+    max-height: calc(100vh - var(--lp-util-h) - var(--lp-nav-h)); overflow-y: auto;
+  }
+  .lp-drawer a {
+    display: block; padding: 15px var(--lp-gut); font-size: 17px;
+    color: var(--lp-ink); border-bottom: 1px solid var(--lp-line);
+  }
+  .lp-drawer .lp-btn { margin: 18px var(--lp-gut) 0; width: calc(100% - (2 * var(--lp-gut))); }
+}
+@media (min-width: 901px) { .lp-drawer { display: none; } }
+
+@media (max-width: 640px) {
+  :root { --lp-gut: 18px; }
+  .lp-grid, .lp-grid-3 { grid-template-columns: 1fr; }
+  .lp-mini { grid-template-columns: 110px 1fr; }
+  .lp-stat { grid-template-columns: 96px 1fr; }
+  .lp-stat-mark { min-height: 108px; }
+  .lp-stat-mark svg { width: 38px; height: 38px; }
+  .lp-hero { min-height: 88vh; }
+  .lp-hero-scrim { background: linear-gradient(180deg, rgba(0,0,0,.55) 0%, rgba(0,0,0,.68) 100%); }
+  .lp-band { min-height: 440px; }
+  .lp-section { padding-top: 56px; }
+  .lp-footer-top { grid-template-columns: 1fr; }
+  .lp-footer-bottom { flex-direction: column; gap: 16px; }
+  .lp-tabs { gap: 18px; }
+}
+
+/* ── §15  motion ────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .lp *, .lp *::before, .lp *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
