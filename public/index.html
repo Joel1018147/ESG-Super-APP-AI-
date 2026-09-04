@@ -116,28 +116,28 @@
              poster="/media/hero-poster.jpg" aria-hidden="true" tabindex="-1">
         <source id="lp-hero-src" src="/media/hero.mp4" type="video/mp4">
       </video>
-      <script>
-      /* INLINE AND IMMEDIATE, on purpose. This check used to sit at the foot of
-         the body, by which time the browser had already begun buffering 10.4MB
-         for a visitor who asked for no motion. Here is the earliest point the
-         element exists. Detaching the <source> before load() is what actually
-         stops the fetch: removing `autoplay` alone left preload in place, so
-         load() re-ran resource selection and fetched the file a SECOND time. */
-      (function () {
-        try {
-          if (!window.matchMedia) return;
-          if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-          var v = document.getElementById('lp-hero-video');
-          var src = document.getElementById('lp-hero-src');
-          if (!v) return;
-          v.removeAttribute('autoplay');
-          v.preload = 'none';
-          if (src && src.parentNode) src.parentNode.removeChild(src);
-          v.pause();
-          v.load();   /* with no source attached, this restores the poster */
-        } catch (e) { /* the poster is already showing; nothing to recover */ }
-      })();
-      </script>
+      <!-- NO REDUCED-MOTION PAUSE HERE, DELIBERATELY. Joel's ruling,
+           2026-09-04: the hero loops for every visitor regardless of
+           prefers-reduced-motion.
+
+           This page previously honoured that preference — it detached the
+           <source> and restored the poster — and the effect was that anyone
+           with Windows "Animation effects" off, or macOS "Reduce motion" on,
+           saw a still image where the hero video should be. That was reported
+           as a bug, the trade-off was put to the platform owner, and the
+           decision was to always play.
+
+           Recorded plainly because it IS a trade-off and a later reader should
+           not "fix" it back: prefers-reduced-motion is set by people who get
+           motion sickness or migraines from moving backgrounds, and this page
+           now overrides that. It is a deliberate product decision, not an
+           oversight. test/landing-cta-test.js asserts the video still advances
+           under reducedMotion:'reduce', so restoring the pause turns the suite
+           red rather than silently changing the page.
+
+           The CSS @media (prefers-reduced-motion) block in landing.css STAYS —
+           it stops the scroll chevron pulsing, which is unrelated to the hero
+           and costs the visitor nothing. -->
     </div>
     <div class="lp-hero-scrim" aria-hidden="true"></div>
 
@@ -614,22 +614,27 @@
     window.addEventListener('resize', sync);
   }
 
-  /* ── 2. reduced motion ──────────────────────────────────────────────────
-     The initial decision is made inline at the video element, before buffering
-     begins. Only a LATER change of preference is handled here. */
+  /* ── 2. keep the hero playing ───────────────────────────────────────────
+     No reduced-motion branch — see the note at the video element for why.
+     What remains is a nudge for the one case the markup cannot cover on its
+     own: a browser that declined the autoplay attempt (a background tab at
+     load, a per-site "media autoplay" block). muted + playsinline is allowed
+     by every current engine, so this almost never fires; when it cannot play
+     either, the poster is already showing and nothing is broken. */
   var video = document.getElementById('lp-hero-video');
-  if (video && window.matchMedia) {
-    var mq = window.matchMedia('(prefers-reduced-motion: reduce)');
-    var onChange = function () {
-      if (mq.matches) {
-        video.removeAttribute('autoplay');
-        video.preload = 'none';
-        video.pause();
-      } else if (video.paused) {
-        video.play().catch(function () {});
+  if (video && video.paused) {
+    video.play().catch(function (err) {
+      /* NOT a swallow, and not a fallback (RULE 6). A refused autoplay is the
+         browser exercising a policy, not a failure this page can correct: the
+         poster is already showing and nothing downstream depends on the video
+         having started. But silence and a bug look identical from the outside,
+         so it says which one this is, where a developer will see it — the same
+         shape preview-cta.js uses when /preview-state is unreachable. */
+      if (window.console && window.console.warn) {
+        window.console.warn('hero: autoplay was refused by the browser — '
+          + 'the poster frame stands in.', err);
       }
-    };
-    if (mq.addEventListener) mq.addEventListener('change', onChange);
+    });
   }
 
   /* ── 3. the mobile drawer ─────────────────────────────────────────────── */

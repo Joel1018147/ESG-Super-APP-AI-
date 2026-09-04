@@ -81,6 +81,20 @@ ok('redundant sign-in controls carry hide hooks',
 ok('hiding sets an inline display, not just the hidden attribute',
   /\.style\.display\s*=\s*'none'/.test(INDEX));
 
+console.log('\n── §1c  the hero plays for everyone ────────────────────────');
+// Joel's ruling, 2026-09-04: the hero loops regardless of
+// prefers-reduced-motion. The page HAD honoured it, and the visible result was
+// a still image for anyone with Windows "Animation effects" off. The trade-off
+// was put to the platform owner and this is the answer. It is guarded because
+// it is exactly the kind of decision a later reader "fixes" back on principle.
+ok('nothing pauses the hero for reduced motion',
+  !/prefers-reduced-motion[\s\S]{0,400}?(pause\(\)|removeAttribute\('autoplay'\))/.test(INDEX));
+ok('the <source> is never detached from the hero',
+  !/removeChild\(src\)|src\.parentNode\.removeChild/.test(INDEX));
+ok('the video still declares autoplay, muted, loop and playsinline',
+  /<video[^>]*\bautoplay\b/.test(INDEX) && /<video[^>]*\bmuted\b/.test(INDEX)
+  && /<video[^>]*\bloop\b/.test(INDEX) && /<video[^>]*\bplaysinline\b/.test(INDEX));
+
 // ── §2  live: the same page, relabelled, in a real browser ──────────────────
 console.log('\n── §2  rendered behaviour ──────────────────────────────────');
 
@@ -191,6 +205,39 @@ const read = (page) => page.evaluate(() => {
   ok('signed in: no REACHABLE sign-in link remains',
     s.reachableAuth.length === 0, s.reachableAuth.join(' | '));
   await ctx.close();
+
+  // §3 — the hero must MOVE, and must move even for a visitor whose system
+  // asks for reduced motion. Asserting `paused === false` is not enough: a
+  // video that is "playing" at currentTime 0 forever looks identical. Measure
+  // that the clock actually advanced.
+  for (const [label, opts] of [['default', {}], ['reduced motion', { reducedMotion: 'reduce' }]]) {
+    ctx = await browser.newContext(Object.assign({ viewport: { width: 1440, height: 900 } }, opts));
+    page = await ctx.newPage();
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(2500);
+    const t0 = await page.evaluate(() => {
+      const v = document.getElementById('lp-hero-video');
+      return v ? v.currentTime : -1;
+    });
+    await page.waitForTimeout(2500);
+    const v = await page.evaluate((prev) => {
+      const el = document.getElementById('lp-hero-video');
+      if (!el) return null;
+      return {
+        advanced: el.currentTime - prev,
+        paused: el.paused,
+        w: el.videoWidth,
+        sourceAttached: !!document.getElementById('lp-hero-src'),
+        reduced: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+      };
+    }, t0);
+    ok(`hero advances under ${label}`,
+      v && v.advanced > 0.5 && !v.paused,
+      v ? `advanced=${v.advanced.toFixed(2)}s paused=${v.paused} reducedMotionMatches=${v.reduced}` : 'no video element');
+    ok(`hero decoded real frames under ${label}`, v && v.w > 0, v && `videoWidth=${v.w}`);
+    ok(`hero <source> stays attached under ${label}`, v && v.sourceAttached);
+    await ctx.close();
+  }
 
   await browser.close();
   server.close();
