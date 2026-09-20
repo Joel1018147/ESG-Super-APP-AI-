@@ -14,7 +14,15 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const DEFAULT_MODEL = 'qwen/qwen3.6-27b';
+const DEFAULT_MODEL = 'qwen/qwen3.8-27b';
+// ROLLED 2026-09-20, Run 163: qwen/qwen3.6-27b -> qwen/qwen3.8-27b.
+// Groq WITHDREW 3.6 on or before 2026-09-18 and answers it with
+//     404  The model `qwen/qwen3.6-27b` does not exist or you do not have access to it.
+// This constant was the dead name on ten platforms at once, and every one of
+// them was 404ing every AI call until GROQ_MODEL was set on its Railway
+// service. Setting that variable is what restored them; rolling this constant
+// is what stops a DELETED variable restoring the outage. Verified live against
+// this ecosystem's own Groq key before the roll: 3.8 answers 200.
 
 function groqModel() {
   return process.env.GROQ_MODEL || DEFAULT_MODEL;
@@ -24,7 +32,13 @@ function groqModel() {
 // Gated on the model ACTUALLY BEING SENT, not on DEFAULT_MODEL — otherwise an
 // operator who overrides GROQ_MODEL to a llama build gets a 400 on every call
 // and the only clue is a silent panel.
-const REASONING_CAPABLE = /^qwen\/qwen3\.6-/i;
+const REASONING_CAPABLE = /^qwen\/qwen3\.\d-/i;
+// WIDENED 2026-09-20, Run 163: `/^qwen\/qwen3\.6/` -> the qwen3 FAMILY.
+// A gate pinned to one MINOR version goes silently false the moment the model
+// rolls, and dropping the params is correct behaviour for a non-qwen model, so
+// nothing complains. 3.8 was measured accepting both params before this change.
+// `\d` keeps gpt-oss, qwen2.5 and the qwen-image models out — gpt-oss in
+// particular REJECTS reasoning_effort:'none' with a 400 and needs 'low'.
 
 function supportsReasoningControls(model) {
   return REASONING_CAPABLE.test(String(model || ''));
