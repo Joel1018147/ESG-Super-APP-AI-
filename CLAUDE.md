@@ -90,12 +90,12 @@ re-derived three defect classes the SOP already documented.
    check whether anything in the diff duplicates a mechanic already elsewhere in
    this platform. See `Modus-Agent-OS/skills/code-structure-cleanup.md`.
 
-4. "DONE" MEANS THE THREE-STAGE GATE, NOT JUST ACTIVE ON RAILWAY. Compile (ACTIVE)
-   is a floor, not a finish line. A prompt isn't complete until Verify (live smoke
-   test against real-shaped data) and Structure (audit against
-   Modus-Agent-OS/skills/recurring-bugs-checklist.md, which is canonical) both
-   pass. Gate 0, the pre-deploy env-var diff, runs before all three. See
-   Modus-Agent-OS/skills/three-stage-deploy-gate.md.
+4. "DONE" MEANS THE CHANGE'S TESTS PASS AND THE DEPLOY IS SEEN LIVE — THERE IS NO
+   GATE. Ruled by Joel 2026-09-27: no run is gated. Once the change's own tests
+   pass, merge to main and push; then confirm the deploy is live (/health and one
+   served artefact the change altered) and say in RUN_LOG.md that no gate ran. Set
+   any NEW environment variable on Railway before the push — the one thing Gate 0
+   used to catch. See Modus-Agent-OS/BUILD_PROTOCOL.md RULE 4a.
 
 ## Non-negotiables added by P9
 
