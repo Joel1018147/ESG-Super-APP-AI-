@@ -65,7 +65,14 @@ const ESG_CSS = fs.existsSync(ESG_CSS_PATH) ? fs.readFileSync(ESG_CSS_PATH, 'utf
 // If the stylesheet fails to load the page is unstyled but the COLOURS still
 // resolve, so nothing renders invisible. Best of both, and the floor is small
 // enough that per-response cost stops mattering.
-function extractBlocks(css, selectors) {
+function extractBlocks(rawCss, selectors) {
+  // COMMENTS ARE STRIPPED FIRST (Run 225). The master documents its hooks in
+  // prose inside :root, and from 5f5016de that prose made the floor 11 KB and
+  // quoted `.table-wrap` — the floor is TOKENS, and the comments are the
+  // master's business. It also closes a truncation trap: `[^}]*` below stops
+  // at the first `}`, and the master's comments do contain braces (the migs
+  // block quotes `{ color: #344889 }`), which would cut a block short silently.
+  const css = rawCss.replace(/\/\*[\s\S]*?\*\//g, '');
   const out = [];
   for (const sel of selectors) {
     // Selectors arrive RAW and are escaped here, once. Escaping them at the
